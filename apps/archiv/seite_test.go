@@ -343,3 +343,12 @@ func TestStatusFileIsWrittenOutsideAndWhole(t *testing.T) {
 		t.Fatalf("%v %s", err, b)
 	}
 }
+
+func TestStatusSaysOneBackupInTheSingular(t *testing.T) {
+	dir := t.TempDir()
+	legen(t, dir, "signal/signal-1.backup", 5, tag)
+	s := statusBauen("anna", Stand{Zustand: Verschlossen}, wartende(&Eingang{Dir: dir}), LadeProtokoll(filepath.Join(t.TempDir(), "s.json")), "", false, "", tag)
+	if s.Detail != "Abgeschlossen; 1 Signal-Sicherung wartet" {
+		t.Fatalf("%q", s.Detail)
+	}
+}

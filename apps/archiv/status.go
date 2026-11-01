@@ -85,11 +85,11 @@ func statusBauen(person string, st Stand, w map[string]quelleStatus, prot *Proto
 		}
 	}
 	if signal.Wartend > 0 {
-		teile = append(teile, fmt.Sprintf("%d Signal-Sicherungen warten", signal.Wartend))
+		teile = append(teile, anzahl(signal.Wartend, "Signal-Sicherung wartet", "Signal-Sicherungen warten"))
 	}
 	for _, q := range []string{"whatsapp", "discord"} {
 		if n := w[q].Wartend; n > 0 {
-			teile = append(teile, fmt.Sprintf("%d %s-Dateien warten (noch kein Import)", n, quellenName[q]))
+			teile = append(teile, anzahl(n, quellenName[q]+"-Datei wartet", quellenName[q]+"-Dateien warten")+" (noch kein Import)")
 		}
 	}
 	if e, ok := ein["signal"]; ok {
@@ -105,11 +105,11 @@ func statusBauen(person string, st Stand, w map[string]quelleStatus, prot *Proto
 		var detail string
 		switch {
 		case st.Zustand == Uneingerichtet:
-			detail = fmt.Sprintf("Dein Archiv ist noch nicht eingerichtet, %d Sicherungen warten.", signal.Wartend)
+			detail = fmt.Sprintf("Dein Archiv ist noch nicht eingerichtet, %s.", anzahl(signal.Wartend, "Sicherung wartet", "Sicherungen warten"))
 		case zuSeit != nil:
-			detail = fmt.Sprintf("Dein Archiv ist seit %s zu, %d Sicherungen warten.", datum(*zuSeit), signal.Wartend)
+			detail = fmt.Sprintf("Dein Archiv ist seit %s zu, %s.", datum(*zuSeit), anzahl(signal.Wartend, "Sicherung wartet", "Sicherungen warten"))
 		default:
-			detail = fmt.Sprintf("Dein Archiv ist zu, %d Sicherungen warten seit %s.", signal.Wartend, datum(*signal.AeltesteSeit))
+			detail = fmt.Sprintf("Dein Archiv ist zu, %s seit %s.", anzahl(signal.Wartend, "Sicherung wartet", "Sicherungen warten"), datum(*signal.AeltesteSeit))
 		}
 		s.Findings = append(s.Findings, befund{Severity: "gelb", Detail: detail, Fix: "Öffne dein Archiv " + wo + " mit deinem Archiv-Passwort; dann liest es die Sicherungen ein."})
 	}
