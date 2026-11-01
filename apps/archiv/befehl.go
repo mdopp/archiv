@@ -74,11 +74,13 @@ func msgvaultServe(bin, home string) Befehl {
 	return Befehl{Pfad: bin, Args: []string{"serve"}, Env: msgvaultUmgebung(home)}
 }
 
-// signalExport writes the backup as an SMS Backup & Restore XML. Its
+// signalExport writes the backup as an SMS Backup & Restore XML into a
+// named pipe (--overwrite: the pipe exists already; the tool only
+// writes forward, it never seeks). Its
 // passphrase is typed into a terminal: signalbackup-tools asks for it when
 // none is on the command line, and only reads a terminal (it fails on a pipe).
 func signalExport(bin, backup, xml, telefon string, passphrase []byte) Befehl {
-	return Befehl{Pfad: bin, Args: []string{backup, "--exportxml", xml, "--setselfid", telefon, "--no-showprogress"},
+	return Befehl{Pfad: bin, Args: []string{backup, "--exportxml", xml, "--overwrite", "--setselfid", telefon, "--no-showprogress"},
 		Env: grundumgebung("/tmp"), Terminal: zeile(passphrase)}
 }
 

@@ -10,8 +10,10 @@ import (
 	"time"
 )
 
-// The person's keys live as files inside the open vault (ADR 0029 §5),
-// accepted only while it is open, never shown again: the page says only
+// The person's keys live as owner-only files in /data/schluessel, OUTSIDE
+// the vault (owner, 2026-11-01: the Briefkasten reads the inbox while the
+// vault is closed). They are accepted only while the vault is open, so
+// only the person sets them, and never shown again: the page says only
 // „hinterlegt am …“. Names are fixed; nothing a request says becomes a path.
 
 const (
@@ -87,6 +89,9 @@ func (s Schluessel) pfad(name string) string {
 }
 
 func (s Schluessel) Speichern(name string, wert []byte) error {
+	if err := os.MkdirAll(s.Dir, 0o700); err != nil {
+		return err
+	}
 	return schreibenAtomar(s.pfad(name), wert, 0o600)
 }
 

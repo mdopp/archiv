@@ -25,7 +25,8 @@ RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITHOUT_DBUS=ON \
 
 FROM docker.io/library/golang:1.27 AS build
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download && go mod verify
 COPY *.go ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /archiv .
 
@@ -46,6 +47,6 @@ COPY --from=build /archiv /usr/local/bin/archiv
 # The supervisor runs as the container's root: it mounts FUSE (/dev/fuse
 # and CAP_SYS_ADMIN in the container's own user namespace, see README).
 # Under rootless podman that root is the box's unprivileged service user.
-ENV DATA=/data EINGANG=/eingang TRESOR_MOUNT=/run/tresor LISTEN=:8080 MSGVAULT_PORT=8090
+ENV DATA=/data EINGANG=/eingang TRESOR_MOUNT=/run/tresor KLARTEXT=/dev/shm/archiv LISTEN=:8080 MSGVAULT_PORT=8090
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/archiv"]

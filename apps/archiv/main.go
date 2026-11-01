@@ -35,6 +35,9 @@ func sekunden(name string, def time.Duration) time.Duration {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "paket-aus-xml" {
+		os.Exit(werkzeug(os.Args[2:]))
+	}
 	person := os.Getenv("ARCHIV_PERSON")
 	if person == "" {
 		log.Fatal("archiv: ARCHIV_PERSON fehlt: die Instanz gehört genau einer Person")
@@ -45,19 +48,29 @@ func main() {
 	run := execAusfuehrer{}
 
 	prot := LadeProtokoll(filepath.Join(data, "archiv-stand.json"))
-	eingang := &Eingang{Dir: env("EINGANG", "/eingang"), Ruhe: sekunden("EINGANG_RUHE", time.Minute)}
+	eingangDir := env("EINGANG", "/eingang")
+	eingang := &Eingang{Dir: eingangDir, Ruhe: sekunden("EINGANG_RUHE", time.Minute)}
+	empfaenger := filepath.Join(data, "briefkasten.pub")
+	schluessel := Schluessel{Dir: filepath.Join(data, "schluessel")}
 	tresor := &Tresor{
-		Cipher:   filepath.Join(data, "tresor"),
-		Mnt:      env("TRESOR_MOUNT", "/run/tresor"),
-		Port:     port,
-		Mounter:  &Gocryptfs{Bin: env("GOCRYPTFS", "gocryptfs"), Fusermount: env("FUSERMOUNT", "fusermount3"), Run: run},
-		Dienst:   &Msgvault{Bin: env("MSGVAULT", "msgvault"), Port: port},
-		Leerlauf: sekunden("LEERLAUF", 2*time.Hour),
+		Cipher:     filepath.Join(data, "tresor"),
+		Mnt:        env("TRESOR_MOUNT", "/run/tresor"),
+		Port:       port,
+		Empfaenger: empfaenger,
+		Mounter:    &Gocryptfs{Bin: env("GOCRYPTFS", "gocryptfs"), Fusermount: env("FUSERMOUNT", "fusermount3"), Run: run},
+		Dienst:     &Msgvault{Bin: env("MSGVAULT", "msgvault"), Port: port},
+		Leerlauf:   sekunden("LEERLAUF", 2*time.Hour),
 	}
-	im := &Importeur{Eingang: eingang, Protokoll: prot, Run: run, SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"),
-		Msgvault: env("MSGVAULT", "msgvault"), Takt: sekunden("IMPORT_TAKT", 20*time.Second), Arbeit: tresor.Arbeit}
-	web := &Web{Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"),
-		Tresor: tresor, Importeur: im, Eingang: eingang, Protokoll: prot, Archiv: archivProxy(port)}
+	takt := sekunden("IMPORT_TAKT", 20*time.Second)
+	bk := &Briefkasten{Eingang: eingang, Letzte: filepath.Join(eingangDir, "letzte"), Post: filepath.Join(data, "briefkasten"),
+		Empfaenger: empfaenger, Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Schluessel: schluessel,
+		Klartext: env("KLARTEXT", "/dev/shm/archiv"), Run: run, SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"),
+		Protokoll: prot, Takt: takt}
+	pb := &Postbote{Post: bk.Post, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
+		Takt: takt, Arbeit: tresor.Arbeit}
+	web := &Web{Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),
+		Tresor: tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
+		Letzte: bk.Letzte, Archiv: archivProxy(port)}
 
 	status := func() {
 		st := tresor.Stand()
@@ -66,10 +79,10 @@ func main() {
 				prot.Zu(st.ZuSeit)
 			}
 		}
-		statusSchreiben(statusDatei, statusBauen(person, st, wartende(eingang), prot, im.Laeuft(), im.FehlenSchluessel(), web.PublicURL, time.Now()))
+		statusSchreiben(statusDatei, statusBauen(web.lage(st)))
 	}
-	tresor.Geaendert, im.Geaendert, web.Geaendert = status, status, status
-	tresor.Lauf = im.Lauf
+	tresor.Geaendert, bk.Geaendert, pb.Geaendert, web.Geaendert = status, status, status, status
+	tresor.Lauf = pb.Lauf
 	tresor.Erkennen()
 	if _, _, zu := prot.Kopie(); zu == nil && tresor.Stand().Zustand == Verschlossen {
 		prot.Zu(time.Now()) // closed since at least now: a restart closes it
@@ -81,6 +94,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	go bk.Lauf(ctx) // the Briefkasten: open or closed
 	go func() {
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()

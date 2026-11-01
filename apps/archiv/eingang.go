@@ -19,7 +19,9 @@ import (
 // process (Haus sets the phone's mtime, so the mtime alone says nothing
 // about when the file arrived).
 
-// Quellen are the inbox folders, in the order the page shows them.
+// Quellen are the inbox folders, in the order the page shows them. The
+// archive's own letzte/ (the newest backups, for a new phone) lies beside
+// them and is never read as an inbox.
 var Quellen = []string{"signal", "whatsapp", "discord"}
 
 var quellenName = map[string]string{"signal": "Signal", "whatsapp": "WhatsApp", "discord": "Discord"}
@@ -65,7 +67,7 @@ type Eingang struct {
 	Now  func() time.Time
 
 	mu      sync.Mutex
-	gesehen map[string]beobachtung
+	gesehen map[string]map[string]beobachtung // per list: a source, or whatsapp/Media
 }
 
 func (e *Eingang) now() time.Time {
@@ -78,7 +80,16 @@ func (e *Eingang) now() time.Time {
 // Liste is every backup of a source, oldest first (by the phone's mtime,
 // then the name).
 func (e *Eingang) Liste(quelle string) ([]Datei, error) {
-	wurzel := filepath.Join(e.Dir, quelle)
+	return e.liste(quelle, quelle, func(rel string) bool { return istSicherung(quelle, rel) })
+}
+
+// Medien is every file under whatsapp/Media/, oldest first.
+func (e *Eingang) Medien() ([]Datei, error) {
+	return e.liste("whatsapp", "whatsapp/Media", func(string) bool { return true })
+}
+
+func (e *Eingang) liste(quelle, unter string, passt func(rel string) bool) ([]Datei, error) {
+	wurzel := filepath.Join(e.Dir, filepath.FromSlash(unter))
 	var out []Datei
 	err := filepath.WalkDir(wurzel, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -98,7 +109,7 @@ func (e *Eingang) Liste(quelle string) ([]Datei, error) {
 		}
 		rel, _ := filepath.Rel(wurzel, p)
 		rel = filepath.ToSlash(rel)
-		if !istSicherung(quelle, rel) {
+		if !passt(rel) {
 			return nil
 		}
 		fi, err := d.Info()
@@ -131,29 +142,46 @@ func (e *Eingang) Stabil(quelle string) ([]Datei, error) {
 	if err != nil {
 		return nil, err
 	}
+	return e.stabil(quelle, alle), nil
+}
+
+// StabilMedien is Stabil for whatsapp/Media/.
+func (e *Eingang) StabilMedien() ([]Datei, error) {
+	alle, err := e.Medien()
+	if err != nil {
+		return nil, err
+	}
+	return e.stabil("whatsapp/Media", alle), nil
+}
+
+func (e *Eingang) stabil(gruppe string, alle []Datei) []Datei {
 	jetzt := e.now()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.gesehen == nil {
-		e.gesehen = map[string]beobachtung{}
+		e.gesehen = map[string]map[string]beobachtung{}
 	}
+	if e.gesehen[gruppe] == nil {
+		e.gesehen[gruppe] = map[string]beobachtung{}
+	}
+	gesehen := e.gesehen[gruppe]
 	da := map[string]bool{}
 	var out []Datei
 	for _, d := range alle {
 		da[d.schluessel()] = true
-		b, ok := e.gesehen[d.schluessel()]
+		b, ok := gesehen[d.schluessel()]
 		if !ok || b.groesse != d.Groesse || !b.mtime.Equal(d.Mtime) {
-			e.gesehen[d.schluessel()] = beobachtung{groesse: d.Groesse, mtime: d.Mtime, erst: jetzt}
+			gesehen[d.schluessel()] = beobachtung{groesse: d.Groesse, mtime: d.Mtime, erst: jetzt}
 			continue
 		}
 		if jetzt.Sub(b.erst) >= e.Ruhe {
 			out = append(out, d)
 		}
 	}
-	for k := range e.gesehen {
+	for k := range gesehen {
 		if !da[k] {
-			delete(e.gesehen, k)
+			delete(gesehen, k)
 		}
 	}
-	return out, nil
+	return out
 }
