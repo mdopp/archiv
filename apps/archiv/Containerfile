@@ -1,11 +1,51 @@
 # Built and published by the repo's CI (.github/workflows/apps.yml), never on the box.
+# Four stages: msgvault's own release image (only its binary is taken),
+# signalbackup-tools built from a pinned tag, the supervisor, and a Debian
+# runtime with gocryptfs and wa-crypt-tools from their packages.
+
+# msgvault 0.22.0 (wesm/msgvault, MIT): pinned by version and digest. Its
+# binary is built on Debian bookworm with CGO (SQLite, DuckDB) and needs
+# glibc, libstdc++ and libpcre2 at run time.
+FROM ghcr.io/kenn-io/msgvault:0.22.0@sha256:a437d86a700154118caf37e56687bc84f8afda7b6db502ce4fc5fb8f292678e8 AS msgvault
+
+# signalbackup-tools (bepaald, GPLv3) has no Linux release binary: built
+# from the tag, checked against its commit.
+FROM docker.io/library/debian:trixie-slim AS signal
+ARG SIGNALBACKUP_TOOLS_TAG=20261014
+ARG SIGNALBACKUP_TOOLS_COMMIT=c7a788985c1033b4fd4ea10676aba120bbd98b66
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      g++ cmake make git ca-certificates libssl-dev libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch "$SIGNALBACKUP_TOOLS_TAG" https://github.com/bepaald/signalbackup-tools /src \
+    && test "$(git -C /src rev-parse HEAD)" = "$SIGNALBACKUP_TOOLS_COMMIT"
+WORKDIR /src
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITHOUT_DBUS=ON \
+    && cmake --build build -j"$(nproc)" \
+    && install -m 0755 build/signalbackup-tools /signalbackup-tools
+
 FROM docker.io/library/golang:1.27 AS build
 WORKDIR /src
 COPY go.mod ./
 COPY *.go ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /archiv .
 
-FROM gcr.io/distroless/static-debian12:nonroot
-COPY --from=build /archiv /archiv
+FROM docker.io/library/debian:trixie-slim
+# gocryptfs + fuse3 (fusermount3): the vault. python3: wa-crypt-tools, for WhatsApp later.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      gocryptfs fuse3 ca-certificates tzdata \
+      libstdc++6 libpcre2-8-0 \
+      libssl3t64 libsqlite3-0 \
+      python3 python3-venv \
+    && rm -rf /var/lib/apt/lists/*
+RUN python3 -m venv /opt/wa-crypt-tools \
+    && /opt/wa-crypt-tools/bin/pip install --no-cache-dir wa-crypt-tools==0.1.0 \
+    && ln -s /opt/wa-crypt-tools/bin/wadecrypt /usr/local/bin/wadecrypt
+COPY --from=msgvault /usr/local/bin/msgvault /usr/local/bin/msgvault
+COPY --from=signal /signalbackup-tools /usr/local/bin/signalbackup-tools
+COPY --from=build /archiv /usr/local/bin/archiv
+# The supervisor runs as the container's root: it mounts FUSE (/dev/fuse
+# and CAP_SYS_ADMIN in the container's own user namespace, see README).
+# Under rootless podman that root is the box's unprivileged service user.
+ENV DATA=/data EINGANG=/eingang TRESOR_MOUNT=/run/tresor LISTEN=:8080 MSGVAULT_PORT=8090
 EXPOSE 8080
-ENTRYPOINT ["/archiv"]
+ENTRYPOINT ["/usr/local/bin/archiv"]
