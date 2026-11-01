@@ -107,7 +107,7 @@ curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 2' || fail "fi
 curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 2 and .active_messages == 2' || fail "the import is not additive or makes duplicates"
 
 echo "a Signal backup that does not decrypt: the sentence, the backup kept, no plaintext anywhere"
-code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passphrase=$PASSPHRASE" --data-urlencode "telefon=+49 170 0000000" "$U/tresor/signal") # the owner number the direct imports above used
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passphrase=$PASSPHRASE" --data-urlencode "telefon=+49 1700 0000000" "$U/tresor/signal") # the owner number the direct imports above used
 [ "$code" = 303 ] || fail "keys: $code"
 warte 120 '.letzter_fehler.quelle == "signal"'
 curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_fehler, .findings'
