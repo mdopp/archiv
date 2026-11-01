@@ -45,11 +45,12 @@ const (
 	saysAnlegenFehler   = "Der Tresor ließ sich nicht anlegen. Sag dem Admin Bescheid."
 	saysOeffnenFehler   = "Das Archiv ließ sich nicht öffnen. Sag dem Admin Bescheid."
 	saysSchliessenFehl  = "Das Archiv ließ sich nicht abschließen. Versuch es noch einmal; hilft das nicht, sag dem Admin Bescheid."
-	saysSpeichernFehler = "Das ließ sich nicht im Tresor speichern. Sag dem Admin Bescheid."
+	saysSpeichernFehler = "Das ließ sich auf der Box nicht speichern. Sag dem Admin Bescheid."
 	saysFremdeSeite     = "Diese Anfrage kam von einer fremden Seite und wurde nicht ausgeführt."
 	saysArchivWeg       = "Das Archiv-Programm antwortet gerade nicht. Lade die Seite gleich neu."
 	saysVerloren        = "Wenn du das Archiv-Passwort verlierst, ist dein Archiv verloren. Niemand kann es wiederherstellen, auch der Admin nicht. Leg es deshalb gleich in Vaultwarden ab."
 	saysAdminLiest      = "Solange dein Archiv offen ist, kann der Admin der Box es lesen. Abgeschlossen sieht niemand etwas, auch nicht in den Sicherungen der Box."
+	saysBriefkasten     = "Neue Sicherungen liest die Box auch, wenn dein Archiv zu ist: Sie legt die neuen Nachrichten verschlossen in deinen Briefkasten, und beim Öffnen kommen sie ins Archiv. Dafür liegt deine Signal-Passphrase auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit künftige Sicherungen entschlüsseln, sobald sie ankommen. Was schon in deinem Archiv ist, bleibt nur mit deinem Archiv-Passwort lesbar."
 )
 
 var meldungen = map[string]string{
@@ -62,15 +63,19 @@ var meldungen = map[string]string{
 
 // Web is the whole HTTP side.
 type Web struct {
-	Person    string
-	Secret    string
-	PublicURL string
-	Tresor    *Tresor
-	Importeur *Importeur
-	Eingang   *Eingang
-	Protokoll *Protokoll
-	Archiv    http.Handler // msgvault, see archivProxy
-	Geaendert func()
+	Person      string
+	Secret      string
+	PublicURL   string
+	Tresor      *Tresor
+	Briefkasten *Briefkasten
+	Postbote    *Postbote
+	Eingang     *Eingang
+	Protokoll   *Protokoll
+	Schluessel  Schluessel   // outside the vault: the import runs while it is closed
+	HausSecret  string       // ARCHIV_HAUS_SECRET: Haus' way to the restore files
+	Letzte      string       // /eingang/letzte
+	Archiv      http.Handler // msgvault, see archivProxy
+	Geaendert   func()
 }
 
 type sitzungArt int
@@ -115,6 +120,10 @@ func zaehltAlsNutzung(r *http.Request) bool {
 func (w *Web) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
 		fmt.Fprintln(rw, "ok")
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/intern/") {
+		w.intern(rw, r)
 		return
 	}
 	switch w.sitzung(r) {
@@ -226,10 +235,16 @@ func (w *Web) seiten() *http.ServeMux {
 // stand is the state as JSON, for Haus' „Archiv öffnen / abschließen“.
 func (w *Web) stand(rw http.ResponseWriter, r *http.Request) {
 	st := w.Tresor.Stand()
-	s := statusBauen(w.Person, st, wartende(w.Eingang), w.Protokoll, w.Importeur.Laeuft(), w.Importeur.FehlenSchluessel(), w.PublicURL, time.Now())
+	s := statusBauen(w.lage(st))
 	rw.Header().Set("Content-Type", "application/json; charset=utf-8")
 	rw.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(rw).Encode(s)
+}
+
+// lage is what the status and the page are made of.
+func (w *Web) lage(st Stand) Lage {
+	return Lage{Person: w.Person, Stand: st, Wartend: wartende(w.Eingang), Briefkasten: briefkastenStand(w.Briefkasten.Post), Protokoll: w.Protokoll,
+		Packt: w.Briefkasten.Laeuft(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.Briefkasten.FehlenSchluessel(), URL: w.PublicURL, Jetzt: time.Now()}
 }
 
 // antwort ends a form: back to the page with the sentence.
@@ -292,14 +307,14 @@ func (w *Web) abschliessen(rw http.ResponseWriter, r *http.Request) {
 	http.Redirect(rw, r, "/tresor?m=zu", http.StatusSeeOther)
 }
 
-// offenesFach is the key folder, or a page that says the vault is closed.
+// offenesFach is the key folder (outside the vault), but only while the
+// vault is open: that is how only the person can set a key.
 func (w *Web) offenesFach(rw http.ResponseWriter, r *http.Request) (Schluessel, bool) {
-	innen, ok := w.Tresor.Innen()
-	if !ok {
+	if _, ok := w.Tresor.Innen(); !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return Schluessel{}, false
 	}
-	return Schluessel{innen.Schluessel()}, true
+	return w.Schluessel, true
 }
 
 func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
@@ -339,7 +354,7 @@ func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 		w.antwort(rw, r, http.StatusInternalServerError, "", saysSpeichernFehler)
 		return
 	}
-	w.Importeur.NeuerSchluessel()
+	w.Briefkasten.NeuerSchluessel()
 	if w.Geaendert != nil {
 		w.Geaendert()
 	}
@@ -400,6 +415,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		b.WriteString(w.eingangText(false))
 	case Verschlossen:
 		b.WriteString(`<h2>Dein Archiv ist abgeschlossen</h2>`)
+		b.WriteString(w.briefkastenText())
 		b.WriteString(w.eingangText(false))
 		fmt.Fprintf(&b, `<form method=post action="/tresor/oeffnen" class=feld>
 <input name=konto autocomplete=username value="%s" hidden>
@@ -424,7 +440,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 				dauerText(w.Tresor.Leerlauf), st.ZuUm.Local().Format("15:04"), saysAdminLiest)
 		}
 		w.importStand(&b)
-		if extra == "" && w.Importeur.Laeuft() != "" {
+		if extra == "" && (w.Briefkasten.Laeuft() != "" || w.Postbote.Laeuft() != "") {
 			extra = `<div hidden data-auffrischen=10></div>`
 		}
 		w.schluesselFormulare(&b)
@@ -457,11 +473,24 @@ func (w *Web) eingangText(offen bool) string {
 	if len(teile) == 0 {
 		return `<p class=k>Im Eingang wartet nichts.</p>`
 	}
-	nach := "Öffne das Archiv, dann liest es sie ein."
-	if offen {
-		nach = ""
+	return fmt.Sprintf(`<p>Im Eingang warten %s.</p>`, esc(strings.Join(teile, ", ")))
+}
+
+// briefkastenText says how many packets wait for the opening.
+func (w *Web) briefkastenText() string {
+	bk := briefkastenStand(w.Briefkasten.Post)
+	if bk.Wartend == 0 {
+		return `<p class=k>Dein Briefkasten ist leer.</p>`
 	}
-	return fmt.Sprintf(`<p>Im Eingang warten %s. %s</p>`, esc(strings.Join(teile, ", ")), nach)
+	seit := ""
+	if bk.Aeltestes != nil {
+		seit = " (das älteste vom " + datum(*bk.Aeltestes) + ")"
+	}
+	was := "liegt 1 Paket mit neuen Nachrichten"
+	if bk.Wartend > 1 {
+		was = fmt.Sprintf("liegen %d Pakete mit neuen Nachrichten", bk.Wartend)
+	}
+	return fmt.Sprintf(`<p>In deinem Briefkasten %s%s. Wenn du das Archiv öffnest, kommen sie hinein.</p>`, was, seit)
 }
 
 func anzahl(n int, eins, mehr string) string {
@@ -473,8 +502,11 @@ func anzahl(n int, eins, mehr string) string {
 
 func (w *Web) letzteImporte(b *strings.Builder) {
 	ein, fehler, _ := w.Protokoll.Kopie()
+	if g, ok := w.Protokoll.Pakete()["signal"]; ok {
+		fmt.Fprintf(b, `<p class=k>Letzte Signal-Sicherung gelesen am %s: %s.</p>`, datum(g.Am), anzahl(g.Nachrichten, "neue Nachricht", "neue Nachrichten"))
+	}
 	if e, ok := ein["signal"]; ok {
-		fmt.Fprintf(b, `<p class=k>Signal zuletzt eingelesen am %s: %s aus %s.</p>`, datum(e.Am), anzahl(e.Zahlen.Nachrichten(), "Nachricht", "Nachrichten"), esc(e.Datei))
+		fmt.Fprintf(b, `<p class=k>Zuletzt ins Archiv übernommen am %s: %s.</p>`, datum(e.Am), anzahl(e.Zahlen.Nachrichten(), "Nachricht", "Nachrichten"))
 	}
 	if fehler != nil {
 		fmt.Fprintf(b, `<p class="meldung fehler">%s <span class=k>(%s)</span></p>`, esc(fehler.Satz), datum(fehler.Am))
@@ -483,11 +515,15 @@ func (w *Web) letzteImporte(b *strings.Builder) {
 
 func (w *Web) importStand(b *strings.Builder) {
 	b.WriteString(`<section><h3>Einlesen</h3>`)
-	if l := w.Importeur.Laeuft(); l != "" {
-		fmt.Fprintf(b, `<p class=laeuft aria-live=polite>Liest gerade %s ein …</p>`, esc(l))
+	if l := w.Briefkasten.Laeuft(); l != "" {
+		fmt.Fprintf(b, `<p class=laeuft aria-live=polite>Liest gerade %s …</p>`, esc(l))
 	}
+	if l := w.Postbote.Laeuft(); l != "" {
+		fmt.Fprintf(b, `<p class=laeuft aria-live=polite>Übernimmt gerade %s ins Archiv …</p>`, esc(l))
+	}
+	b.WriteString(w.briefkastenText())
 	b.WriteString(w.eingangText(true))
-	if w.Importeur.FehlenSchluessel() {
+	if w.Briefkasten.FehlenSchluessel() {
 		b.WriteString(`<p class="meldung fehler">Signal-Sicherungen warten, aber die Signal-Passphrase oder deine Nummer fehlt. Gib sie unten ein.</p>`)
 	}
 	w.letzteImporte(b)
@@ -495,26 +531,26 @@ func (w *Web) importStand(b *strings.Builder) {
 }
 
 func (w *Web) schluesselFormulare(b *strings.Builder) {
-	innen, ok := w.Tresor.Innen()
-	if !ok {
+	if _, ok := w.Tresor.Innen(); !ok {
 		return
 	}
-	sch := Schluessel{innen.Schluessel()}
+	sch := w.Schluessel
 	hinterlegt := func(name string) string {
 		if t, ok := sch.Hinterlegt(name); ok {
 			return `<span class=ok>hinterlegt am ` + datum(t) + `</span>`
 		}
 		return `<span class=k>fehlt</span>`
 	}
-	fmt.Fprintf(b, `<section><h3>Schlüssel</h3><p class=k>Sie liegen im Tresor und werden nie wieder angezeigt. Neu eingeben ersetzt sie.</p>
+	fmt.Fprintf(b, `<section><h3>Schlüssel</h3><p class=k>Du kannst sie nur bei offenem Archiv eingeben; sie werden nie wieder angezeigt. Neu eingeben ersetzt sie.</p>
+<p class=hinweis>%s</p>
 <form method=post action="/tresor/signal" class=feld>
 <p><b>Signal</b>: Passphrase %s · Nummer %s</p>
 <label>Signal-Passphrase (30 Ziffern, aus Signal → Einstellungen → Chats → Chat-Sicherungen)<input name=passphrase inputmode=numeric autocomplete=off spellcheck=false></label>
 <label>Deine Handynummer<input name=telefon type=tel autocomplete=tel placeholder="+49 151 2345678"></label>
-%s</form>`, hinterlegt(SchluesselSignal), hinterlegt(SchluesselTelefon), knopf("Speichern", "Speichere …", ""))
+%s</form>`, saysBriefkasten, hinterlegt(SchluesselSignal), hinterlegt(SchluesselTelefon), knopf("Speichern", "Speichere …", ""))
 	fmt.Fprintf(b, `<form method=post action="/tresor/imap" class=feld>
 <p><b>E-Mail (IMAP)</b>: %s</p>
-<p class=k>Mit einem App-Passwort deines Mail-Anbieters, nicht deinem normalen Passwort. Das Abholen der Mails kommt in einem nächsten Schritt; der Zugang liegt dann schon bereit.</p>
+<p class=k>Mit einem App-Passwort deines Mail-Anbieters, nicht deinem normalen Passwort. Es liegt wie die Signal-Passphrase auf der Box. Das Abholen der Mails kommt in einem nächsten Schritt; der Zugang liegt dann schon bereit.</p>
 <label>Server<input name=host autocomplete=off placeholder="imap.gmail.com"></label>
 <label>Benutzername<input name=benutzer autocomplete=off></label>
 <label>App-Passwort<input name=passwort type=password autocomplete=new-password></label>

@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"filippo.io/age"
 )
 
 // The Tresor (laib ADR 0029 §3): the person's whole archive lives in a
@@ -51,18 +53,19 @@ type Dienst interface {
 type Innen struct{ Wurzel string }
 
 func (i Innen) Home() string       { return filepath.Join(i.Wurzel, "msgvault") }
-func (i Innen) Schluessel() string { return filepath.Join(i.Wurzel, "schluessel") }
-func (i Innen) Arbeit() string     { return filepath.Join(i.Wurzel, "arbeit") } // plaintext exports while an import runs, emptied after each
+func (i Innen) Identitaet() string { return filepath.Join(i.Wurzel, "age-identitaet") } // the private key of the Briefkasten
+func (i Innen) Arbeit() string     { return filepath.Join(i.Wurzel, "arbeit") }         // plaintext exports while an import runs, emptied after each
 func (i Innen) APIKey() string     { return filepath.Join(i.Home(), "api-key") }
 
 // Tresor is the state machine. All transitions hold mu.
 type Tresor struct {
-	Cipher   string
-	Mnt      string
-	Port     int // msgvault's loopback port, written into its config.toml
-	Mounter  Mounter
-	Dienst   Dienst
-	Leerlauf time.Duration
+	Cipher     string
+	Mnt        string
+	Port       int    // msgvault's loopback port, written into its config.toml
+	Empfaenger string // the public key of the Briefkasten, outside the vault
+	Mounter    Mounter
+	Dienst     Dienst
+	Leerlauf   time.Duration
 	// Lauf runs in the background while the vault is open and msgvault
 	// answers (the import); it must return soon after ctx ends.
 	Lauf func(ctx context.Context, innen Innen)
@@ -211,7 +214,7 @@ func (t *Tresor) oeffnen(ctx context.Context, pw []byte) error {
 		return err
 	}
 	innen := Innen{t.Mnt}
-	key, err := einrichten(innen, t.Port)
+	key, err := einrichten(innen, t.Port, t.Empfaenger)
 	if err != nil {
 		t.Mounter.Unmount(context.Background(), t.Mnt)
 		return fmt.Errorf("Tresor einrichten: %w", err)
@@ -298,10 +301,12 @@ func (t *Tresor) Pruefen(ctx context.Context) {
 }
 
 // einrichten makes the inside of a vault (idempotent): msgvault's home
-// with its key and config, the key folder, an empty work folder. It
+// with its key and config, an empty work folder, and the Briefkasten's
+// key pair — the private key inside, the public key written outside
+// (empfaenger) so the inbox can be packed while the vault is closed. It
 // returns the API key.
-func einrichten(innen Innen, port int) (string, error) {
-	for _, d := range []string{innen.Home(), innen.Schluessel(), innen.Arbeit()} {
+func einrichten(innen Innen, port int, empfaenger string) (string, error) {
+	for _, d := range []string{innen.Home(), innen.Arbeit()} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return "", err
 		}
@@ -326,6 +331,9 @@ func einrichten(innen Innen, port int) (string, error) {
 	} else if err != nil {
 		return "", err
 	}
+	if err := schluesselpaar(innen.Identitaet(), empfaenger); err != nil {
+		return "", fmt.Errorf("Schlüsselpaar: %w", err)
+	}
 	cfg := filepath.Join(innen.Home(), "config.toml")
 	if _, err := os.Stat(cfg); errors.Is(err, os.ErrNotExist) {
 		if err := schreibenAtomar(cfg, []byte(msgvaultConfig(port)), 0o600); err != nil {
@@ -333,6 +341,34 @@ func einrichten(innen Innen, port int) (string, error) {
 		}
 	}
 	return string(trimNL(key)), nil
+}
+
+// schluesselpaar makes the age X25519 pair once and keeps the public
+// key outside in step with the private one (the private one decides).
+func schluesselpaar(identitaet, empfaenger string) error {
+	id, err := identitaetLesen(identitaet)
+	if errors.Is(err, os.ErrNotExist) {
+		id, err = age.GenerateX25519Identity()
+		if err != nil {
+			return err
+		}
+		if err := schreibenAtomar(identitaet, []byte(id.String()+"\n"), 0o600); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	if empfaenger == "" {
+		return nil
+	}
+	pub := id.Recipient().String()
+	if alt, err := os.ReadFile(empfaenger); err == nil && string(trimNL(alt)) == pub {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(empfaenger), 0o755); err != nil {
+		return err
+	}
+	return schreibenAtomar(empfaenger, []byte(pub+"\n"), 0o644)
 }
 
 // msgvaultConfig: loopback only, the vault's key from a file beside it,

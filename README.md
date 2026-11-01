@@ -4,8 +4,11 @@ Das Nachrichten-Archiv je Person — for the household on a Laib box
 ([laib ADR 0029](https://github.com/mdopp/laib/blob/main/docs/adr/0029-one-message-archive-per-person.md),
 laib#985, laib#986). One container per person: a small Go supervisor keeps
 the person's [msgvault](https://github.com/wesm/msgvault) archive in a
-gocryptfs vault that only their password opens, imports the Signal backups
-Haus brings from the phone, and closes the vault after two idle hours.
+gocryptfs vault that only their password opens, and closes it after two
+idle hours. The Signal backups Haus brings from the phone are read even
+while the vault is closed: the new messages go as an age-encrypted packet
+into the person's Briefkasten, which only the open vault can read, and the
+newest backup stays on the box for a new phone (`/eingang/letzte/`).
 Made in the Werkstatt (`laib-app new archiv`).
 
 - `apps/archiv/` — the program, its tests, its `Containerfile` and
@@ -22,8 +25,9 @@ Made in the Werkstatt (`laib-app new archiv`).
 
 | | |
 |---|---|
-| env | `ARCHIV_PERSON` (the person's login, required), `PROXY_SECRET` (the route's proxySecret; Caddy sends it as `X-Archiv-Proxy`), `TZ`; optional `PUBLIC_URL`, `LEERLAUF` (seconds, default 7200) |
-| mounts | `/data` ← `${DATA_DIR}/archiv/<person>` (the cipher folder `tresor/`, `laib-status.json`, `archiv-stand.json`); `/eingang` ← `${DATA_DIR}/archiv-eingang/<person>` (read and delete) |
+| env | `ARCHIV_PERSON` (the person's login, required), `PROXY_SECRET` (the route's proxySecret; Caddy sends it as `X-Archiv-Proxy`), `ARCHIV_HAUS_SECRET` (Haus' `/intern/…`), `TZ`; optional `PUBLIC_URL`, `LEERLAUF` (seconds, default 7200) |
+| mounts | `/data` ← `${DATA_DIR}/archiv/<person>` (`tresor/`, `briefkasten/`, `schluessel/`, `gesehen/`, `briefkasten.pub`, `laib-status.json`, `archiv-stand.json`); `/eingang` ← `${DATA_DIR}/archiv-eingang/<person>` (read, write, delete) |
+| backup | `${DATA_DIR}/archiv-eingang/<person>/letzte` is `backup: false` (a phone backup itself, GBs that change nightly) |
 | FUSE | `AddDevice=/dev/fuse`, `AddCapability=SYS_ADMIN`; the supervisor runs as the container's root |
 | port | `8080` in the container (publish on `127.0.0.1` only, `lan: false`) |
 | health | `GET /healthz` → `ok`, in every state |

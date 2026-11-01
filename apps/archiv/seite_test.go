@@ -23,6 +23,7 @@ type webTest struct {
 	tt     *testTresor
 	w      *Web
 	inbox  string
+	data   string
 	msgv   *httptest.Server
 	mu     sync.Mutex
 	gesehn []*http.Request // what reached "msgvault"
@@ -42,9 +43,16 @@ func neuesWeb(t *testing.T) *webTest {
 	u, _ := url.Parse(wt.msgv.URL)
 	port, _ := strconv.Atoi(u.Port())
 	eingang := &Eingang{Dir: wt.inbox}
-	prot := LadeProtokoll(filepath.Join(t.TempDir(), "archiv-stand.json"))
-	im := &Importeur{Eingang: eingang, Protokoll: prot, Run: &fakeLauf{}}
-	wt.w = &Web{Person: "anna", Secret: "s3cret", Tresor: tt.Tresor, Importeur: im, Eingang: eingang, Protokoll: prot, Archiv: archivProxy(port)}
+	data := t.TempDir()
+	prot := LadeProtokoll(filepath.Join(data, "archiv-stand.json"))
+	sch := Schluessel{Dir: filepath.Join(data, "schluessel")}
+	tt.Empfaenger = filepath.Join(data, "briefkasten.pub")
+	bk := &Briefkasten{Eingang: eingang, Letzte: filepath.Join(wt.inbox, "letzte"), Post: filepath.Join(data, "briefkasten"), Empfaenger: tt.Empfaenger,
+		Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Schluessel: sch, Klartext: t.TempDir(), Run: &fakeSignal{}, Protokoll: prot}
+	pb := &Postbote{Post: bk.Post, Schluessel: sch, Protokoll: prot, Run: &fakeMsgvault{}}
+	wt.data = data
+	wt.w = &Web{Person: "anna", Secret: "s3cret", HausSecret: "haus-geheim", Tresor: tt.Tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang,
+		Protokoll: prot, Schluessel: sch, Letzte: bk.Letzte, Archiv: archivProxy(port)}
 	return wt
 }
 
@@ -145,9 +153,15 @@ func TestPagesPerState(t *testing.T) {
 	if strings.Count(body, "hinterlegt am") != 2 {
 		t.Fatalf("passphrase and number not marked as stored:\n%s", body)
 	}
-	innen, _ := wt.tt.Innen()
-	if tel, _ := (Schluessel{innen.Schluessel()}).Lesen(SchluesselTelefon); string(tel) != "+491511234567" {
-		t.Fatalf("number stored as %q", tel)
+	// outside the vault (the Briefkasten reads them while it is closed), owner-only
+	if tel, _ := wt.w.Schluessel.Lesen(SchluesselTelefon); string(tel) != "+491511234567" || !strings.HasPrefix(wt.w.Schluessel.Dir, wt.data) {
+		t.Fatalf("number stored as %q in %s", tel, wt.w.Schluessel.Dir)
+	}
+	if fi, _ := os.Stat(filepath.Join(wt.w.Schluessel.Dir, SchluesselSignal)); fi == nil || fi.Mode().Perm() != 0o600 {
+		t.Fatal("the passphrase file is not 0600")
+	}
+	if !strings.Contains(body, "Wer Root auf der Box hat, kann damit künftige Sicherungen entschlüsseln") {
+		t.Fatal("the page does not say what the passphrase on the box means")
 	}
 	if rec := wt.rufe("POST", "/tresor/abschliessen", anna, url.Values{}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("abschliessen: %d", rec.Code)
@@ -296,38 +310,51 @@ func TestPasswordNeverInTheLog(t *testing.T) {
 
 // --- the status file
 
-func TestStatusSaysWaitingBackupsAndErrors(t *testing.T) {
+func TestStatusSaysWaitingPacketsAndErrors(t *testing.T) {
 	dir := t.TempDir()
 	legen(t, dir, "signal/signal-1.backup", 5, tag)
-	legen(t, dir, "signal/signal-2.backup", 5, tag)
-	e := &Eingang{Dir: dir}
-	w := wartende(e)
+	w := wartende(&Eingang{Dir: dir})
+	post := t.TempDir()
+	os.WriteFile(filepath.Join(post, "20261001T030000Z-signal.age"), []byte("x"), 0o600)
+	os.WriteFile(filepath.Join(post, "20261002T030000Z-signal.age"), []byte("x"), 0o600)
+	os.WriteFile(filepath.Join(post, ".20261003T030000Z-signal.age.tmp"), []byte("x"), 0o600) // unfinished: not counted
+	bk := briefkastenStand(post)
+	if bk.Wartend != 2 || bk.Aeltestes == nil || !bk.Aeltestes.Equal(tag) {
+		t.Fatalf("briefkasten %+v", bk)
+	}
 	prot := LadeProtokoll(filepath.Join(t.TempDir(), "s.json"))
-	zu := time.Date(2026, 10, 20, 18, 0, 0, 0, time.UTC)
-	prot.Zu(zu)
-	ankunft := *w["signal"].AeltesteSeit
+	prot.Zu(time.Date(2026, 9, 30, 18, 0, 0, 0, time.UTC))
+	lage := Lage{Person: "anna", Stand: Stand{Zustand: Verschlossen}, Wartend: w, Briefkasten: bk, Protokoll: prot, URL: "https://archiv.dopp.cloud"}
 
-	// two days: no finding yet
-	s := statusBauen("anna", Stand{Zustand: Verschlossen}, w, prot, "", false, "https://archiv.dopp.cloud", ankunft.Add(48*time.Hour))
-	if len(s.Findings) != 0 || s.Wartend["signal"].Wartend != 2 || s.Zustand != Verschlossen {
+	lage.Jetzt = tag.Add(48 * time.Hour) // two days: no finding yet
+	if s := statusBauen(lage); len(s.Findings) != 0 || s.Briefkasten.Wartend != 2 || s.Zustand != Verschlossen {
 		t.Fatalf("two days: %+v", s)
 	}
-	s = statusBauen("anna", Stand{Zustand: Verschlossen}, w, prot, "", false, "https://archiv.dopp.cloud", ankunft.Add(73*time.Hour))
-	if len(s.Findings) != 1 || s.Findings[0].Severity != "gelb" || !strings.Contains(s.Findings[0].Detail, "Dein Archiv ist seit") || !strings.Contains(s.Findings[0].Detail, "2 Sicherungen warten") {
+	lage.Jetzt = tag.Add(73 * time.Hour)
+	s := statusBauen(lage)
+	if len(s.Findings) != 1 || s.Findings[0].Severity != "gelb" || s.Findings[0].Detail != "Dein Archiv ist seit 30.09.2026 18:00 zu, 2 Pakete mit neuen Nachrichten warten." {
 		t.Fatalf("three days: %+v", s.Findings)
 	}
-	// open: the waiting is the import's business, not a finding
-	if s := statusBauen("anna", Stand{Zustand: Offen, Bereit: true}, w, prot, "", false, "", ankunft.Add(100*time.Hour)); len(s.Findings) != 0 {
+	lage.Stand = Stand{Zustand: Offen, Bereit: true} // open: delivering is the Postbote's business
+	if s := statusBauen(lage); len(s.Findings) != 0 {
 		t.Fatalf("open: %+v", s.Findings)
 	}
+	lage.Stand, lage.FehlenSchluessel = Stand{Zustand: Verschlossen}, true
+	lage.Jetzt = tag
+	if s := statusBauen(lage); len(s.Findings) != 1 || !strings.Contains(s.Findings[0].Fix, "Schlüssel") {
+		t.Fatalf("keys missing: %+v", s.Findings)
+	}
+	lage.FehlenSchluessel = false
 	prot.Fehlschlag(Fehler{Am: tag, Quelle: "signal", Datei: "signal-1.backup", Satz: saysSignalFalsch})
-	s = statusBauen("anna", Stand{Zustand: Offen, Bereit: true}, w, prot, "", false, "https://archiv.dopp.cloud", tag)
+	s = statusBauen(lage)
 	if len(s.Findings) != 1 || s.Findings[0].Detail != saysSignalFalsch || !strings.Contains(s.Findings[0].Fix, "neu ein") || s.LetzterFehler == nil {
 		t.Fatalf("error: %+v", s)
 	}
-	prot.Eingelesen("signal", "signal-0.backup", Zahlen{SMS: 7, MMS: 3}, tag)
-	b, _ := json.Marshal(statusBauen("anna", Stand{Zustand: Offen, Bereit: true}, w, prot, "", false, "", tag))
-	for _, want := range []string{`"zustand":"offen"`, `"wartend":{`, `"letzter_import":{"signal":{`, `"sms":7`, `"at":`, `"detail":"Offen; 2 Signal-Sicherungen warten; Signal zuletzt am`} {
+	prot.Gepackt("signal", Gepackt{Am: tag, Sicherung: "signal-1.backup", Paket: "p", Nachrichten: 4})
+	prot.Eingelesen("signal", "20261001T030000Z-signal.age", Zahlen{SMS: 7, MMS: 3}, tag)
+	b, _ := json.Marshal(statusBauen(lage))
+	for _, want := range []string{`"zustand":"verschlossen"`, `"briefkasten":{"wartend":2,"aeltestes":"2026-10-01T03:00:00Z"}`, `"letztes_paket":{"signal":{`, `"letzter_import":{"signal":{`, `"sms":7`,
+		`"detail":"Abgeschlossen; 2 Pakete warten im Briefkasten; 1 Signal-Sicherung wartet im Eingang; Signal zuletzt am`} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("status lacks %s:\n%s", want, b)
 		}
@@ -347,8 +374,45 @@ func TestStatusFileIsWrittenOutsideAndWhole(t *testing.T) {
 func TestStatusSaysOneBackupInTheSingular(t *testing.T) {
 	dir := t.TempDir()
 	legen(t, dir, "signal/signal-1.backup", 5, tag)
-	s := statusBauen("anna", Stand{Zustand: Verschlossen}, wartende(&Eingang{Dir: dir}), LadeProtokoll(filepath.Join(t.TempDir(), "s.json")), "", false, "", tag)
-	if s.Detail != "Abgeschlossen; 1 Signal-Sicherung wartet" {
+	s := statusBauen(Lage{Person: "anna", Stand: Stand{Zustand: Verschlossen}, Wartend: wartende(&Eingang{Dir: dir}), Protokoll: LadeProtokoll(filepath.Join(t.TempDir(), "s.json")), Jetzt: tag})
+	if s.Detail != "Abgeschlossen; 1 Signal-Sicherung wartet im Eingang" {
 		t.Fatalf("%q", s.Detail)
+	}
+}
+
+// Haus' way to the restore files: only with its secret; media only while
+// open (they are age-encrypted in letzte/, the private key is in the vault).
+func TestHausGetsMediaOnlyWhileOpen(t *testing.T) {
+	wt := neuesWeb(t)
+	haus := map[string]string{hausHeader: "haus-geheim"}
+	if rec := wt.rufe("GET", "/intern/empfaenger", nil, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("no secret: %d", rec.Code)
+	}
+	if rec := wt.rufe("GET", "/intern/empfaenger", map[string]string{hausHeader: "falsch"}, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong secret: %d", rec.Code)
+	}
+	wt.oeffnen(t)
+	rec := wt.rufe("GET", "/intern/empfaenger", haus, nil)
+	if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), "age1") {
+		t.Fatalf("empfaenger: %d %s", rec.Code, rec.Body)
+	}
+	empf, _ := empfaengerLesen(wt.tt.Empfaenger)
+	src := filepath.Join(t.TempDir(), "IMG-1.jpg")
+	os.WriteFile(src, []byte("BILD-INHALT"), 0o644)
+	if err := verschluesseln(src, filepath.Join(wt.w.Letzte, "whatsapp", "Media", "WhatsApp Images", "IMG-1.jpg.age"), empf); err != nil {
+		t.Fatal(err)
+	}
+	rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", haus, nil)
+	if rec.Code != 200 || rec.Body.String() != "BILD-INHALT" || rec.Header().Get("Content-Type") != "image/jpeg" {
+		t.Fatalf("medium: %d %q %s", rec.Code, rec.Body, rec.Header().Get("Content-Type"))
+	}
+	for _, p := range []string{"/intern/whatsapp/medien/../../../tresor/gocryptfs.conf", "/intern/whatsapp/medien/%2e%2e/%2e%2e/x"} {
+		if rec := wt.rufe("GET", p, haus, nil); rec.Code == 200 {
+			t.Fatalf("%s: %d", p, rec.Code)
+		}
+	}
+	wt.tt.Abschliessen(context.Background(), "t")
+	if rec := wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", haus, nil); rec.Code != http.StatusLocked {
+		t.Fatalf("closed: %d", rec.Code)
 	}
 }
