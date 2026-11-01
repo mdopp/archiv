@@ -1,0 +1,75 @@
+# Written by `laib-app new` (Werkstatt guide: apps.md). Every app under apps/
+# is tested; on main its image is published to ghcr — only after its tests
+# are green. Every template under templates/ passes `laib template lint`,
+# the same check the box runs before it proposes the service.
+name: apps
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+  packages: write
+jobs:
+  list:
+    runs-on: ubuntu-24.04
+    outputs:
+      apps: ${{ steps.ls.outputs.apps }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ls
+        run: echo "apps=$(ls -d apps/*/ 2>/dev/null | xargs -rn1 basename | jq -Rnc '[inputs]')" >> "$GITHUB_OUTPUT"
+  test:
+    needs: list
+    if: needs.list.outputs.apps != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        app: ${{ fromJSON(needs.list.outputs.apps) }}
+    defaults:
+      run:
+        working-directory: apps/${{ matrix.app }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: hashFiles(format('apps/{0}/go.mod', matrix.app)) != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: apps/${{ matrix.app }}/go.mod
+      - name: tests
+        run: |
+          if [ -f go.mod ]; then go vet ./... && go test ./...
+          elif [ -f package.json ]; then npm ci && npm test
+          elif [ -f pyproject.toml ] || [ -f requirements.txt ]; then python3 -m venv .venv && . .venv/bin/activate && pip install -q pytest $( [ -f requirements.txt ] && echo -r requirements.txt ) && pytest -q
+          else echo "no tests found for ${{ matrix.app }}: a Werkstatt app ships tests"; exit 1; fi
+  image:
+    needs: [list, test]
+    if: github.event_name == 'push' && needs.list.outputs.apps != '[]'
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        app: ${{ fromJSON(needs.list.outputs.apps) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/${{ matrix.app }}
+          file: apps/${{ matrix.app }}/Containerfile
+          push: true
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}:latest,ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}:${{ github.sha }}
+  templates:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: laib template lint
+        run: |
+          curl -fsSL -o laib https://github.com/mdopp/laib/releases/latest/download/laib-linux-amd64
+          curl -fsSL -o SHA256SUMS https://github.com/mdopp/laib/releases/latest/download/SHA256SUMS
+          grep ' laib-linux-amd64$' SHA256SUMS | sed 's/laib-linux-amd64$/laib/' | sha256sum -c -
+          chmod +x laib
+          for t in templates/*/; do [ -d "$t" ] || continue; ./laib template lint "$t" || exit 1; done

@@ -1,0 +1,11 @@
+# Built and published by the repo's CI (.github/workflows/apps.yml), never on the box.
+FROM docker.io/library/golang:1.27 AS build
+WORKDIR /src
+COPY go.mod ./
+COPY *.go ./
+RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /archiv .
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /archiv /archiv
+EXPOSE 8080
+ENTRYPOINT ["/archiv"]
