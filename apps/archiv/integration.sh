@@ -107,7 +107,7 @@ curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 2' || fail "fi
 curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 2 and .active_messages == 2' || fail "the import is not additive or makes duplicates"
 
 echo "a Signal backup that does not decrypt: the sentence, the backup kept, no plaintext anywhere"
-code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passphrase=$PASSPHRASE" --data-urlencode "telefon=+49 151 2345678" "$U/tresor/signal")
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passphrase=$PASSPHRASE" --data-urlencode "telefon=+49 170 0000000" "$U/tresor/signal") # the owner number the direct imports above used
 [ "$code" = 303 ] || fail "keys: $code"
 warte 120 '.letzter_fehler.quelle == "signal"'
 curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_fehler, .findings'
@@ -176,7 +176,7 @@ warte 120 '.briefkasten.wartend == 0 and .letzter_import.signal.anzahl == 2'
 curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_import, .letztes_paket'
 [ -z "$(docker exec archiv ls -A /run/tresor/arbeit)" ] || fail "plaintext left in the vault's work folder after delivery"
 # 2 from before, 2 new from the first packet; the packet of a.xml brings nothing twice
-curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 4 and .active_messages == 4 and .total_attachments >= 1' || { curl -fsS "${H[@]}" "$U/api/v1/stats"; fail "the packets did not arrive as they should (or duplicated)"; }
+curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 4 and .active_messages == 4 and .total_accounts == 1 and .total_attachments >= 1' || { curl -fsS "${H[@]}" "$U/api/v1/stats"; fail "the packets did not arrive as they should (or duplicated)"; }
 
 docker stop -t 90 archiv >/dev/null
 docker logs archiv >"$D/log" 2>&1

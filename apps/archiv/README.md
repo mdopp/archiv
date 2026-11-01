@@ -173,6 +173,10 @@ beginning with `.` and renames it into place when complete.
 
   Unknown fields are ignored by readers of version 1; a change that
   readers must understand is version 2.
+- **The person's number** is the owner msgvault files the messages under
+  (`--owner-phone`): msgvault keeps one account per owner number, so a
+  changed number in „Schlüssel“ starts a second account and the same
+  messages appear twice. Enter it once, in E.164.
 - **New only:** a producer leaves out what it packed before. The box keeps
   that as the HMAC set above; the phone keeps its own. A message that comes
   twice does no harm (msgvault keeps one) — only the size suffers.
