@@ -124,7 +124,10 @@ func statusBauen(l Lage) statusDatei {
 	if signal.Wartend > 0 {
 		teile = append(teile, anzahl(signal.Wartend, "Signal-Sicherung wartet", "Signal-Sicherungen warten")+" im Eingang")
 	}
-	for _, q := range []string{"whatsapp", "discord"} {
+	if e, ok := ein["whatsapp"]; ok {
+		teile = append(teile, fmt.Sprintf("WhatsApp zuletzt am %s ins Archiv übernommen (%d neue Nachrichten)", datum(e.Am), e.Zahlen.WhatsApp))
+	}
+	for _, q := range []string{"discord"} {
 		if n := l.Wartend[q].Wartend; n > 0 {
 			teile = append(teile, anzahl(n, quellenName[q]+"-Datei wartet", quellenName[q]+"-Dateien warten")+" (noch kein Import)")
 		}

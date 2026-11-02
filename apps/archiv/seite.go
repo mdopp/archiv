@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -50,6 +51,7 @@ const (
 	saysFremdeSeite     = "Diese Anfrage kam von einer fremden Seite und wurde nicht ausgeführt."
 	saysArchivWeg       = "Das Archiv-Programm antwortet gerade nicht. Lade die Seite gleich neu."
 	saysVerloren        = "Wenn du das Archiv-Passwort verlierst, ist dein Archiv verloren. Niemand kann es wiederherstellen, auch der Admin nicht. Leg es deshalb gleich in Vaultwarden ab."
+	saysWAFormat        = "Der WhatsApp-Schlüssel hat 64 Zeichen, Ziffern und die Buchstaben a bis f. Leerzeichen dürfen dazwischen stehen."
 	saysAdminLiest      = "Solange dein Archiv offen ist, kann der Admin der Box es lesen. Abgeschlossen sieht niemand etwas, auch nicht in den Sicherungen der Box."
 	saysMailPreis       = "Dafür liegt das App-Passwort auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit deine Mails lesen. Du kannst das App-Passwort bei deinem Anbieter jederzeit widerrufen; dann holt das Archiv nichts mehr ab."
 	saysBriefkasten     = "Neue Sicherungen liest die Box auch, wenn dein Archiv zu ist: Sie legt die neuen Nachrichten verschlossen in deinen Briefkasten, und beim Öffnen kommen sie ins Archiv. Dafür liegt deine Signal-Passphrase auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit künftige Sicherungen entschlüsseln, sobald sie ankommen. Was schon in deinem Archiv ist, bleibt nur mit deinem Archiv-Passwort lesbar."
@@ -61,6 +63,7 @@ var meldungen = map[string]string{
 	"zu":       "Das Archiv ist abgeschlossen.",
 	"signal":   "Gespeichert. Wartende Signal-Sicherungen liest das Archiv gleich ein.",
 	"imap":     "Gespeichert. Das Archiv holt deine Mails jetzt ab, danach jede Stunde.",
+	"whatsapp": "Gespeichert. Das Archiv liest deine WhatsApp-Sicherung gleich ein.",
 }
 
 // Web is the whole HTTP side.
@@ -232,6 +235,7 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/abschliessen", w.abschliessen)
 	mux.HandleFunc("POST /tresor/signal", w.signal)
 	mux.HandleFunc("POST /tresor/imap", w.imap)
+	mux.HandleFunc("POST /tresor/whatsapp", w.whatsapp)
 	return mux
 }
 
@@ -407,6 +411,33 @@ func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
 		w.Geaendert()
 	}
 	http.Redirect(rw, r, "/tresor?m=imap", http.StatusSeeOther)
+}
+
+// whatsapp stores the key inside the vault (unlike Signal's passphrase):
+// WhatsApp's database holds the whole history every day, so it can wait
+// for the opening, and the key then is never readable on a closed box.
+func (w *Web) whatsapp(rw http.ResponseWriter, r *http.Request) {
+	innen, ok := w.Tresor.Innen()
+	if !ok {
+		w.antwort(rw, r, http.StatusLocked, "", saysZu)
+		return
+	}
+	k, err := whatsappSchluessel(r.PostFormValue("schluessel"))
+	if err != nil {
+		w.antwort(rw, r, http.StatusBadRequest, "", saysWAFormat)
+		return
+	}
+	defer nullen(k)
+	if err := os.WriteFile(innen.WhatsAppSchluessel(), k, 0o600); err != nil {
+		log.Printf("archiv: WhatsApp-Schlüssel speichern: %v", err)
+		w.antwort(rw, r, http.StatusInternalServerError, "", saysSpeichernFehler)
+		return
+	}
+	w.Postbote.NeuerWASchluessel()
+	if w.Geaendert != nil {
+		w.Geaendert()
+	}
+	http.Redirect(rw, r, "/tresor?m=whatsapp", http.StatusSeeOther)
 }
 
 // --- the page
@@ -730,15 +761,40 @@ func (w *Web) kontakteKarte(b *strings.Builder) {
 
 func (w *Web) whatsappKarte(b *strings.Builder) {
 	b.WriteString(`<section class=quelle><h3>WhatsApp</h3>`)
+	w.imAchiv(b, "whatsapp", "neue Nachricht", "neue Nachrichten")
 	if n := wartende(w.Eingang)["whatsapp"].Wartend; n > 0 {
-		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung wartet", "Sicherungen warten")))
+		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung liegt", "Sicherungen liegen")))
 	}
-	b.WriteString(`<p class=k>WhatsApp liest das Archiv noch nicht ein; das kommt. Dafür braucht es den 64-stelligen Schlüssel deines WhatsApp-Backups. Ein Passkey reicht nicht: Aus ihm lässt sich der Schlüssel nicht auslesen.</p>
-<details><summary>So stellst du auf den 64-stelligen Schlüssel um</summary><ol>
+	w.fehlerVon(b, "whatsapp")
+	innen, auf := w.Tresor.Innen()
+	if !auf {
+		b.WriteString(`<p class=k>Den Schlüssel trägst du bei offenem Archiv ein. Er liegt im Tresor; deshalb liest das Archiv WhatsApp nur, wenn es offen ist.</p></section>`)
+		return
+	}
+	fi, err := os.Stat(innen.WhatsAppSchluessel())
+	hat := err == nil
+	if hat {
+		fmt.Fprintf(b, `<p class=zugang>Schlüssel hinterlegt am %s</p>`, datum(fi.ModTime()))
+	} else {
+		b.WriteString(`<p class=zugang><span class=fehlt>Schlüssel fehlt</span></p>`)
+	}
+	if _, ok := w.Schluessel.Hinterlegt(SchluesselTelefon); !ok {
+		b.WriteString(`<p class=zugang><span class=fehlt>Deine Nummer fehlt</span> (bei Signal eintragen).</p>`)
+	}
+	summary, knopfText := "Schlüssel eintragen", "Speichern"
+	if hat {
+		summary, knopfText = "Schlüssel ersetzen", "Ersetzen"
+	}
+	fmt.Fprintf(b, `<details%s><summary>%s</summary>
+<p class=k>Der 64-stellige Schlüssel deines WhatsApp-Backups, so wie WhatsApp ihn gezeigt hat (Leerzeichen sind egal). Er liegt im Tresor; nur bei offenem Archiv liest es deine WhatsApp-Sicherung, jeden Tag die neueste. Fotos und Videos aus WhatsApp kommen noch nicht ins Archiv.</p>
+<form method=post action="/tresor/whatsapp" class=feld>
+<label>WhatsApp-Schlüssel (64 Zeichen)<input name=schluessel autocomplete=off spellcheck=false autocapitalize=off></label>
+%s</form></details>
+<details><summary>Kein 64-stelliger Schlüssel, sondern Passkey oder Passwort?</summary><p class=k>Aus einem Passkey lässt sich der Schlüssel nicht auslesen. So stellst du um:</p><ol>
 <li>WhatsApp → Einstellungen → Chats → Chat-Backup → Ende-zu-Ende-verschlüsseltes Backup → <b>Deaktivieren</b> (mit deinem Passkey bestätigen).</li>
 <li>Gleich danach wieder <b>Aktivieren</b> und „Stattdessen 64-stelligen Schlüssel verwenden“ wählen. Dazwischen liegt dein Backup unverschlüsselt bei Google, also direkt nacheinander.</li>
-<li>Den Schlüssel in Vaultwarden ablegen. Mit ihm stellst du auch auf einem neuen Handy deine Chats wieder her.</li>
-<li>„Jetzt sichern“ tippen.</li></ol></details></section>`)
+<li>Den Schlüssel in Vaultwarden ablegen und hier eintragen.</li>
+<li>„Jetzt sichern“ tippen, in WhatsApp und danach in der Haus-App.</li></ol></details></section>`, offenWenn(!hat), summary, knopf(knopfText, "Speichere …", ""))
 }
 
 func offenWenn(b bool) string {

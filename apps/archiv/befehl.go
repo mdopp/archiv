@@ -92,6 +92,21 @@ func msgvaultImportSMS(bin, home, xml, telefon string) Befehl {
 	return Befehl{Pfad: bin, Args: []string{"import-synctech-sms", xml, "--owner-phone", telefon}, Env: msgvaultUmgebung(home)}
 }
 
+// wadecrypt decrypts a WhatsApp crypt15 database with the 64-digit key
+// (hex). In memory: wa-crypt-tools 0.1.0's streaming mode (-nm) writes an
+// empty file (tried 2026-11-02; integration.sh holds the round trip). A
+// msgstore is tens of MB, not GBs.
+func wadecrypt(hexKey, von, nach string) Befehl {
+	return Befehl{Pfad: "wadecrypt", Args: []string{hexKey, von, nach}, Env: []string{"PATH=/usr/local/bin:/usr/bin:/bin"}}
+}
+
+// msgvaultImportWhatsApp imports a decrypted msgstore.db. msgvault keys
+// every message by its chat and id, so the daily database (the whole
+// history again) adds only what is new.
+func msgvaultImportWhatsApp(bin, home, db, telefon string) Befehl {
+	return Befehl{Pfad: bin, Args: []string{"import-whatsapp", db, "--phone", telefon}, Env: msgvaultUmgebung(home)}
+}
+
 // msgvaultImportMaildir imports a mail packet's Maildir through the
 // running msgvault under the person's mail account. Additive as above:
 // import-maildir only adds (and adds folder labels to a message it has).

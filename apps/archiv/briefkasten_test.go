@@ -700,3 +700,83 @@ func TestThePhonesSMSAndCallsComeInEncryptedAndAreImportedWhenOpen(t *testing.T)
 		t.Fatal("the import is not recorded")
 	}
 }
+
+// fakeWA plays wadecrypt and msgvault import-whatsapp.
+type fakeWA struct {
+	befehle []Befehl
+	falsch  bool
+}
+
+func (f *fakeWA) Run(ctx context.Context, b Befehl) (Ausgabe, error) {
+	f.befehle = append(f.befehle, b)
+	if b.Pfad == "wadecrypt" {
+		if f.falsch {
+			return Ausgabe{Code: 1, Text: "Error: wrong key " + b.Args[0]}, nil
+		}
+		os.WriteFile(b.Args[2], []byte("SQLite format 3"), 0o600)
+		return Ausgabe{}, nil
+	}
+	return Ausgabe{Text: "Import complete!\n  Messages:       5000 processed, 4711 added, 289 skipped\n"}, nil
+}
+
+func TestWhatsAppIsReadOnlyWhileOpenWithTheKeyInsideTheVault(t *testing.T) {
+	inbox := t.TempDir()
+	os.MkdirAll(filepath.Join(inbox, "whatsapp", "Databases"), 0o700)
+	db := filepath.Join(inbox, "whatsapp", "Databases", "msgstore.db.crypt15")
+	os.WriteFile(db, []byte("verschluesselt"), 0o600)
+	e := &Eingang{Dir: inbox}
+	e.Stabil("whatsapp")
+	innen := Innen{Wurzel: t.TempDir()}
+	os.MkdirAll(innen.Arbeit(), 0o700)
+	data := t.TempDir()
+	sch := Schluessel{Dir: filepath.Join(data, "schluessel")}
+	sch.Speichern(SchluesselTelefon, []byte(annaTel))
+	run := &fakeWA{}
+	pb := &Postbote{Post: filepath.Join(data, "briefkasten"), Eingang: e, Schluessel: sch, Protokoll: LadeProtokoll(filepath.Join(data, "stand.json")), Run: run, Msgvault: "msgvault"}
+
+	pb.Runde(context.Background(), innen)
+	if len(run.befehle) != 0 {
+		t.Fatal("read without a key")
+	}
+	key := strings.Repeat("0123456789abcdef", 4)
+	os.WriteFile(innen.WhatsAppSchluessel(), []byte(key), 0o600)
+	run.falsch = true
+	pb.Runde(context.Background(), innen)
+	if _, f, _ := pb.Protokoll.Kopie(); f == nil || f.Quelle != "whatsapp" || strings.Contains(f.Satz, key) || !strings.Contains(f.Satz, "64-stelligen") {
+		t.Fatalf("a wrong key is not said, or the key is shown: %+v", f)
+	}
+	n := len(run.befehle)
+	pb.Runde(context.Background(), innen)
+	if len(run.befehle) != n {
+		t.Fatal("a failed database is tried again in a loop")
+	}
+	run.falsch = false
+	pb.NeuerWASchluessel()
+	pb.Runde(context.Background(), innen)
+	letzte := run.befehle[len(run.befehle)-1]
+	if letzte.Args[0] != "import-whatsapp" || letzte.Args[3] != annaTel || !strings.HasPrefix(letzte.Args[1], innen.Arbeit()) {
+		t.Fatalf("%q", letzte.Args)
+	}
+	ein, f, _ := pb.Protokoll.Kopie()
+	if ein["whatsapp"].Zahlen.WhatsApp != 4711 || f != nil {
+		t.Fatalf("%+v %+v", ein["whatsapp"], f)
+	}
+	leer(t, innen.Arbeit(), "the vault's work folder")
+	if _, err := os.Stat(db); err != nil {
+		t.Fatal("the database left the inbox; it is also the newest backup for a new phone")
+	}
+	n = len(run.befehle)
+	pb.Runde(context.Background(), innen)
+	if len(run.befehle) != n {
+		t.Fatal("the same database is imported twice")
+	}
+	later := time.Now().Add(time.Hour)
+	os.WriteFile(db, []byte("der naechste Tag"), 0o600)
+	os.Chtimes(db, later, later)
+	e.Ruhe = 0
+	e.Stabil("whatsapp")
+	pb.Runde(context.Background(), innen)
+	if len(run.befehle) == n {
+		t.Fatal("the next day's database is not read")
+	}
+}

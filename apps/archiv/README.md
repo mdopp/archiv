@@ -195,6 +195,22 @@ page says so. Attachments over 25 MiB fail msgvault's SMS import here
 Contacts take another way: Haus mirrors the phone's contacts into the
 person's Radicale address book `handy-kontakte`, outside the vault.
 
+### WhatsApp: only while open, the key inside the vault
+
+The person enters the 64-digit key of their WhatsApp backup on the page
+while the vault is open; it is stored inside the vault
+(`whatsapp-schluessel`), unlike the Signal passphrase. WhatsApp's
+`msgstore.db.crypt15` holds the whole history every day and stays in the
+inbox anyway (it is also the newest backup for a new phone), so nothing is
+lost by waiting for the opening, and the key is never readable on a closed
+box. On opening, and whenever a newer database arrives while open, the
+Postbote decrypts the newest one with `wadecrypt` into the vault's work
+folder, runs `msgvault import-whatsapp --phone <number>` and removes the
+plaintext; `whatsapp-stand` notes which database went in. msgvault keeps
+one of each message, so the daily database adds only what is new. A wrong
+key is said on the page and tried again once a new key is entered. Media
+(photos, videos) are not imported yet.
+
 ### Paket format, version 1 (for the box and, later, the phone)
 
 A packet is a file `<YYYYMMDDTHHMMSSZ>-<quelle>.age` in the Briefkasten:
@@ -306,7 +322,9 @@ beside it in `/data/archiv-stand.json`.
   The Gmail mailbox comes in over IMAP, oldest first, a few thousand mails
   per packet.
 - **Unproven**: SMS and calls from the Haus app (built, not yet on a
-  phone); how much RAM signalbackup-tools needs for a larger backup (it
+  phone); WhatsApp on a real backup (the decryption is proven on a
+  generated one in `integration.sh`, msgvault's import of a real msgstore
+  is not); how much RAM signalbackup-tools needs for a larger backup (it
   holds the backup's database in memory); WhatsApp (needs the 64-digit key;
   a passkey cannot be read out).
 - **What the Signal XML cannot carry**: messages of contacts without a

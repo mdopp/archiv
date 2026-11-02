@@ -29,17 +29,20 @@ import (
 // folder is emptied after every packet.
 
 const (
-	saysPaketKaputt   = "Das Paket %s ließ sich nicht öffnen. Es bleibt im Briefkasten; sag dem Admin Bescheid."
-	saysSMSKaputt     = "Die SMS-Datei %s ließ sich nicht entschlüsseln. Sie bleibt im Eingang; schick sie aus der Haus-App noch einmal."
-	saysGrosserAnhang = "[Anhang %s, %d MB: zu groß für die Suche im Archiv. Er liegt im Tresor unter grosse-anhaenge/%s.]"
-	saysUebernahme    = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Das Paket bleibt im Briefkasten; beim nächsten Öffnen versucht es das Archiv noch einmal."
-	saysKeineNummer   = "Pakete warten, aber deine Handynummer fehlt. Gib sie unter „Schlüssel“ ein."
-	saysAnderesPaket  = "Das Paket %s hat ein Format, das dieses Archiv noch nicht kennt. Es bleibt im Briefkasten."
+	saysPaketKaputt        = "Das Paket %s ließ sich nicht öffnen. Es bleibt im Briefkasten; sag dem Admin Bescheid."
+	saysWAOhneSchluessel   = "Der WhatsApp-Schlüssel fehlt. Trag ihn auf der Archiv-Seite ein."
+	saysWASchluesselFalsch = "Die WhatsApp-Sicherung ließ sich mit deinem Schlüssel nicht öffnen. Prüf den 64-stelligen Schlüssel und trag ihn noch einmal ein."
+	saysSMSKaputt          = "Die SMS-Datei %s ließ sich nicht entschlüsseln. Sie bleibt im Eingang; schick sie aus der Haus-App noch einmal."
+	saysGrosserAnhang      = "[Anhang %s, %d MB: zu groß für die Suche im Archiv. Er liegt im Tresor unter grosse-anhaenge/%s.]"
+	saysUebernahme         = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Das Paket bleibt im Briefkasten; beim nächsten Öffnen versucht es das Archiv noch einmal."
+	saysKeineNummer        = "Pakete warten, aber deine Handynummer fehlt. Gib sie unter „Schlüssel“ ein."
+	saysAnderesPaket       = "Das Paket %s hat ein Format, das dieses Archiv noch nicht kennt. Es bleibt im Briefkasten."
 )
 
 var (
 	importiert      = regexp.MustCompile(`Imported (\d+) SMS, (\d+) MMS, (\d+) calls, (\d+) attachments`)
 	mailsImportiert = regexp.MustCompile(`Messages: (\d+) added, (\d+) updated, (\d+) skipped`)
+	waImportiert    = regexp.MustCompile(`Messages:\s+(\d+) processed, (\d+) added`)
 	errOhneNummer   = errors.New("ohne Nummer")
 )
 
@@ -131,10 +134,14 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 	if p.Eingang != nil {
 		sms, _ = p.Eingang.Stabil("sms")
 	}
-	if len(pakete) == 0 && len(sms) == 0 {
+	if len(pakete) == 0 && len(sms) == 0 && !p.whatsappWartet(innen) {
 		return
 	}
 	tel, _ := p.Schluessel.Lesen(SchluesselTelefon) // a mail packet needs none; a Signal packet waits for it
+	p.whatsapp(ctx, innen, string(tel))             // needs the WhatsApp key, not the Briefkasten's
+	if len(pakete) == 0 && len(sms) == 0 {
+		return
+	}
 	id, err := identitaetLesen(innen.Identitaet())
 	if err != nil {
 		log.Printf("archiv: der private Schlüssel fehlt im Tresor: %v", err)
@@ -168,6 +175,141 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 			p.zuruecklegen(d.Pfad)
 		}
 	}
+}
+
+// whatsappNeueste is the newest WhatsApp database in the inbox (Haus
+// keeps the day's msgstore.db.crypt15 and dated copies beside it).
+func (p *Postbote) whatsappNeueste() (Datei, bool) {
+	if p.Eingang == nil {
+		return Datei{}, false
+	}
+	db, _ := p.Eingang.Stabil("whatsapp")
+	if len(db) == 0 {
+		return Datei{}, false
+	}
+	n := db[0]
+	for _, d := range db[1:] {
+		if d.Mtime.After(n.Mtime) {
+			n = d
+		}
+	}
+	return n, true
+}
+
+func waMarke(d Datei) string { return fmt.Sprintf("whatsapp:%s %d %d", d.Rel, d.Groesse, d.Mtime.Unix()) }
+
+// whatsappWartet: a key is there and a database not yet imported.
+func (p *Postbote) whatsappWartet(innen Innen) bool {
+	if _, err := os.Stat(innen.WhatsAppSchluessel()); err != nil {
+		return false
+	}
+	d, ok := p.whatsappNeueste()
+	if !ok {
+		return false
+	}
+	alt, _ := os.ReadFile(innen.WhatsAppStand())
+	return strings.TrimSpace(string(alt)) != waMarke(d)
+}
+
+// whatsapp imports the newest WhatsApp database once (ADR 0029): it is
+// decrypted with the key inside the vault into the vault's work folder,
+// handed to msgvault and removed. The database stays in the inbox: it is
+// also the newest backup for a new phone (letzte/), and Haus replaces it
+// with the next day's. Media are not imported yet.
+func (p *Postbote) whatsapp(ctx context.Context, innen Innen, telefon string) {
+	if !p.whatsappWartet(innen) {
+		return
+	}
+	d, _ := p.whatsappNeueste()
+	marke := waMarke(d)
+	p.mu.Lock()
+	weg := p.zurueck[marke]
+	p.mu.Unlock()
+	if weg {
+		return
+	}
+	if telefon == "" {
+		return // the page says it: the number is missing
+	}
+	if err := p.whatsappZustellen(ctx, innen, d, telefon); err != nil && ctx.Err() == nil {
+		p.zuruecklegen(marke)
+	}
+}
+
+func (p *Postbote) whatsappZustellen(ctx context.Context, innen Innen, d Datei, telefon string) error {
+	if p.Arbeit != nil {
+		defer p.Arbeit()()
+	}
+	p.mu.Lock()
+	p.laeuft = d.Rel
+	p.gang = Gang{Was: d.Rel, Quelle: "whatsapp", Seit: p.now()}
+	p.mu.Unlock()
+	p.geaendert()
+	defer func() {
+		p.mu.Lock()
+		p.laeuft = ""
+		p.gang = Gang{}
+		p.mu.Unlock()
+		p.geaendert()
+	}()
+	fehler := func(satz string, grund error) error {
+		log.Printf("archiv: WhatsApp %s: %v", d.Rel, grund)
+		if ctx.Err() == nil {
+			p.Protokoll.Fehlschlag(Fehler{Am: p.now(), Quelle: "whatsapp", Datei: d.Rel, Satz: satz})
+		}
+		return grund
+	}
+	roh, err := os.ReadFile(innen.WhatsAppSchluessel())
+	if err != nil {
+		return fehler(saysWAOhneSchluessel, err)
+	}
+	key := strings.TrimSpace(string(roh))
+	nullen(roh)
+	db := filepath.Join(innen.Arbeit(), "whatsapp-"+zufall()+".db")
+	defer os.Remove(db)
+	a, err := p.Run.Run(ctx, wadecrypt(key, d.Pfad, db))
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil && a.Code != 0 {
+		err = fmt.Errorf("wadecrypt Code %d: %s", a.Code, schwaerzen(fehlerzeilen(a.Text), []byte(key)))
+	}
+	if err != nil {
+		return fehler(saysWASchluesselFalsch, err)
+	}
+	a, err = p.Run.Run(ctx, msgvaultImportWhatsApp(p.Msgvault, innen.Home(), db, telefon))
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil && a.Code != 0 {
+		err = fmt.Errorf("msgvault import-whatsapp Code %d: %s", a.Code, fehlerzeilen(a.Text))
+	}
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	var z Zahlen
+	if m := waImportiert.FindStringSubmatch(a.Text); m != nil {
+		z.WhatsApp, _ = strconv.Atoi(m[2])
+	}
+	if err := os.WriteFile(innen.WhatsAppStand(), []byte(waMarke(d)+"\n"), 0o600); err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	log.Printf("archiv: WhatsApp %s eingelesen: %d neue Nachrichten", d.Rel, z.WhatsApp)
+	p.Protokoll.Eingelesen("whatsapp", d.Rel, z, p.now())
+	p.Protokoll.FehlerWeg("whatsapp")
+	return nil
+}
+
+// NeuerWASchluessel: a new key; the database a wrong key failed on is
+// tried again at once, not only at the next opening.
+func (p *Postbote) NeuerWASchluessel() {
+	p.mu.Lock()
+	for k := range p.zurueck {
+		if strings.HasPrefix(k, "whatsapp:") {
+			delete(p.zurueck, k)
+		}
+	}
+	p.mu.Unlock()
 }
 
 // zuruecklegen: a failed packet or file waits for the next opening.
