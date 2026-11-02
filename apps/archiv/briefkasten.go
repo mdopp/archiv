@@ -52,10 +52,13 @@ var ErrSignalPassphrase = errors.New(saysSignalFalsch)
 type Gesehen struct {
 	Dir string
 
+	mu  sync.Mutex // the Briefkasten and the Mailholer share it: one key, made once
 	key []byte
 }
 
 func (g *Gesehen) schluessel() ([]byte, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	if g.key != nil {
 		return g.key, nil
 	}

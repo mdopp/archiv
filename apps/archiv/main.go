@@ -1,7 +1,8 @@
 // archiv: one person's message archive (laib ADR 0029). A small
 // supervisor around msgvault: it keeps the archive in a gocryptfs vault
 // that only the person's password opens, starts msgvault while it is
-// open, imports the phone backups Haus leaves in the inbox, closes the
+// open, imports the phone backups Haus leaves in the inbox and the mail
+// it fetches over IMAP, closes the
 // vault again after two idle hours, and writes laib's status file.
 package main
 
@@ -38,6 +39,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "paket-aus-xml" {
 		os.Exit(werkzeug(os.Args[2:]))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "paket-aus-mails" {
+		os.Exit(mailWerkzeug(os.Args[2:]))
+	}
 	person := os.Getenv("ARCHIV_PERSON")
 	if person == "" {
 		log.Fatal("archiv: ARCHIV_PERSON fehlt: die Instanz gehört genau einer Person")
@@ -66,10 +70,12 @@ func main() {
 		Empfaenger: empfaenger, Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Schluessel: schluessel,
 		Klartext: env("KLARTEXT", "/dev/shm/archiv"), Run: run, SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"),
 		Protokoll: prot, Takt: takt}
+	mh := &Mailholer{Post: bk.Post, Empfaenger: empfaenger, Gesehen: bk.Gesehen, Schluessel: schluessel, Protokoll: prot,
+		Takt: sekunden("MAIL_TAKT", time.Hour)}
 	pb := &Postbote{Post: bk.Post, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
 		Takt: takt, Arbeit: tresor.Arbeit}
 	web := &Web{Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),
-		Tresor: tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
+		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
 		Letzte: bk.Letzte, Archiv: archivProxy(port)}
 
 	status := func() {
@@ -81,7 +87,7 @@ func main() {
 		}
 		statusSchreiben(statusDatei, statusBauen(web.lage(st)))
 	}
-	tresor.Geaendert, bk.Geaendert, pb.Geaendert, web.Geaendert = status, status, status, status
+	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert = status, status, status, status, status
 	tresor.Lauf = pb.Lauf
 	tresor.Erkennen()
 	if _, _, zu := prot.Kopie(); zu == nil && tresor.Stand().Zustand == Verschlossen {
@@ -95,6 +101,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 	go bk.Lauf(ctx) // the Briefkasten: open or closed
+	go mh.Lauf(ctx) // mail, hourly: open or closed
 	go func() {
 		t := time.NewTicker(30 * time.Second)
 		defer t.Stop()

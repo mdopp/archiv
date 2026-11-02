@@ -19,9 +19,10 @@ type Zahlen struct {
 	MMS      int `json:"mms"`
 	Anrufe   int `json:"anrufe"`
 	Anhaenge int `json:"anhaenge"`
+	Mails    int `json:"mails,omitempty"`
 }
 
-func (z Zahlen) Nachrichten() int { return z.SMS + z.MMS }
+func (z Zahlen) Nachrichten() int { return z.SMS + z.MMS + z.Mails }
 
 // Eingelesen is the last packet of a source that went into msgvault.
 type Eingelesen struct {

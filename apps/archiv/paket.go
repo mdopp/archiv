@@ -42,6 +42,7 @@ type Manifest struct {
 	Erstellt  string `json:"erstellt"`            // RFC 3339, UTC
 	Herkunft  string `json:"herkunft"`            // "box" or "telefon"
 	Sicherung string `json:"sicherung,omitempty"` // the backup it was made from, if any
+	Konto     string `json:"konto,omitempty"`     // mail: the account (the IMAP user) the messages belong to
 }
 
 // Anhang is one attachment of a message; Datei names its tar entry.
@@ -118,6 +119,34 @@ func (p *PaketSchreiber) Anhang(typ, name string, daten []byte) (Anhang, error) 
 	return a, p.eintrag(a.Datei, daten)
 }
 
+// Datei stores a raw file under its entry name: a mail packet's
+// maildir/<folder>/cur/<name>, one message each (README "Paket format").
+func (p *PaketSchreiber) Datei(name string, daten []byte) error {
+	if !maildirEintrag(name) {
+		return fmt.Errorf("Eintrag %q", name)
+	}
+	p.n++
+	return p.eintrag(name, daten)
+}
+
+// maildirEintrag: maildir/…/cur/<name>, clean, no level empty or
+// beginning with a dot (so never "..", and never a Maildir++ separator).
+func maildirEintrag(name string) bool {
+	if !strings.HasPrefix(name, "maildir/") || path.Clean(name) != name || strings.ContainsAny(name, "\\\x00") {
+		return false
+	}
+	teile := strings.Split(name, "/")
+	if len(teile) < 4 || teile[len(teile)-2] != "cur" {
+		return false
+	}
+	for _, t := range teile {
+		if t == "" || strings.HasPrefix(t, ".") {
+			return false
+		}
+	}
+	return true
+}
+
 func (p *PaketSchreiber) Nachricht(n Nachricht) error {
 	b, err := json.Marshal(n)
 	if err != nil {
@@ -147,7 +176,9 @@ func (p *PaketSchreiber) Schliessen() error {
 var ErrPaketFormat = errors.New("kein Paket in einem bekannten Format")
 
 // PaketLesen decrypts a packet and hands each entry to the callbacks:
-// the manifest first (checked), then attachments to anhang, then every
+// the manifest first (checked), then attachments to anhang (by their
+// base name) and a mail packet's Maildir files (by their whole entry
+// name, maildir/…, checked), then every
 // message to nachricht. Attachments may come before or after the
 // messages, so a reader that needs both keeps the attachments
 // (Postbote: in the open vault).
@@ -197,6 +228,13 @@ func PaketLesen(r io.Reader, id age.Identity, anhang func(name string, r io.Read
 				}
 			}
 			if err := s.Err(); err != nil {
+				return m, err
+			}
+		case strings.HasPrefix(h.Name, "maildir/") && h.Typeflag == tar.TypeReg:
+			if !maildirEintrag(h.Name) {
+				return m, fmt.Errorf("Mail %q", h.Name)
+			}
+			if err := anhang(h.Name, tr); err != nil { // the whole entry name: it has a slash, an attachment never does
 				return m, err
 			}
 		case strings.HasPrefix(h.Name, "anhaenge/") && h.Typeflag == tar.TypeReg:
