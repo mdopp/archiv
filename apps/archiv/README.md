@@ -7,7 +7,7 @@ einem Tresor, den nur dein Archiv-Passwort öffnet.
 One container per person ([laib ADR 0029](https://github.com/mdopp/laib/blob/main/docs/adr/0029-one-message-archive-per-person.md),
 laib#985, laib#986). Inside: a small Go supervisor (`archiv`, this folder),
 [msgvault](https://github.com/kenn-io/msgvault) 0.22.0 with `import-signal`
-(our fork's image `ghcr.io/mdopp/msgvault:0.22.0-signal`, pinned by digest,
+(our fork's image `ghcr.io/mdopp/msgvault:0.22.0-signal.2`, pinned by digest,
 until upstream PR kenn-io/msgvault#1722 is released), gocryptfs (Debian
 package), [signalbackup-tools](https://github.com/bepaald/signalbackup-tools)
 20261014 and wa-crypt-tools 0.1.0 (WhatsApp); IMAP through
