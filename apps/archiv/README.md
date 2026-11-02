@@ -413,8 +413,12 @@ supervisor runs a **relay** (`relais.go`) for msgvault, only while open:
   card. sync-collection is not offered (501): msgvault then reads a whole
   snapshot each sync, and a snapshot of the store never loses a card. A
   card deleted on the phone is served with one more line,
-  `CATEGORIES:Auf dem Handy gelöscht am <TT.MM.JJJJ>`, which msgvault keeps
-  as a category of the person (its ETag changes with the mark).
+  `CATEGORIES:Auf dem Handy gelöscht am <TT.MM.JJJJ>` (its ETag changes
+  with the mark). msgvault 0.22.0 keeps that line in the card it stores
+  but projects only FN, EMAIL and TEL of a card into the person
+  (`internal/store/carddav_resources.go`), so msgvault's own pages do not
+  show the mark (checked in CI): the person and its numbers stay, and the
+  archive's page says who is deleted on the phone.
 - The relay talks to nobody. msgvault never sees the Radicale password;
   it logs into the relay as `msgvault` with the relay's own password, made
   once and kept in the vault (`kontakte-relais`), given to `add-carddav` on
@@ -440,8 +444,9 @@ person whose card is deleted on the phone (by the card's UID: msgvault's
 
 What a sync does in msgvault: a new or changed card updates its person; a
 card deleted on the phone stays in the store, so its person **stays**,
-with the category „Auf dem Handy gelöscht am …“; back on the phone, the
-category goes. **Messages are never touched.**
+with its name and numbers; the archive's page marks it „auf dem Handy
+gelöscht am …“, back on the phone the mark goes. **Messages are never
+touched.**
 
 **Calendars → the vault.** msgvault 0.22.0 cannot import CalDAV (its
 calendar support is Google's API only), so the archive keeps them itself:
@@ -601,8 +606,9 @@ passphrase, a refused mail login) stay yellow and say what to enter.
   `sync-carddav`), the two cards become two persons, the book is subscribed
   and a lookup source but not the write target; the relay refuses PUT,
   DELETE and PROPPATCH; a card deleted in Radicale leaves its person in
-  msgvault with the category „Auf dem Handy gelöscht am …“, and back in
-  Radicale the category goes, still one person; the calendars are counted on the page, an event
+  msgvault with its number and is marked on the page and in the store,
+  and back in Radicale the mark goes, still one person (msgvault's profile
+  does not show the CATEGORIES mark: 0.22.0 projects only FN, EMAIL, TEL); the calendars are counted on the page, an event
   deleted at the source stays, marked; two persons merged through the
   page's preview; Radicale's files unchanged by the archive. **Unproven:**
   the relay on the box (rootless podman: the container's private address,

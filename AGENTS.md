@@ -27,7 +27,8 @@ Outside the Werkstatt, the same guide is `werkstatt/guide/` in github.com/mdopp/
   refuses every write. Never give the book `--write-target`, never publish.
   A contact deleted on the phone is never removed (owner): it stays in the
   store, marked, and keeps being served, so its person stays in msgvault
-  with „Auf dem Handy gelöscht am …“. Both stores in the vault (contacts,
+  (the mark is on the archive's page; 0.22.0 does not show a card's
+  CATEGORIES on the person). Both stores in the vault (contacts,
   calendars) only grow.
 - The packet format (`paket.go`, README "Paket format") is a contract with
   the phone: a change readers must understand is a new version.
