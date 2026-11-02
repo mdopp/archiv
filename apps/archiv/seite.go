@@ -82,6 +82,7 @@ type Web struct {
 	Letzte      string       // /eingang/letzte
 	Archiv      http.Handler // msgvault, see archivProxy
 	Geaendert   func()
+	Puls        *Puls // open pages listen here (/tresor/live)
 }
 
 type sitzungArt int
@@ -115,7 +116,7 @@ func zaehltAlsNutzung(r *http.Request) bool {
 		return true
 	}
 	p := strings.ToLower(r.URL.Path)
-	for _, s := range []string{"/health", "/api/session", "/status", "/stats", "/changes", "/operations", "/telemetry", "/events", "/tresor/stand"} {
+	for _, s := range []string{"/health", "/api/session", "/status", "/stats", "/changes", "/operations", "/telemetry", "/events", "/tresor/stand", "/tresor/live"} {
 		if strings.Contains(p, s) {
 			return false
 		}
@@ -189,7 +190,7 @@ func (w *Web) archivOderTuer(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st.Zustand == Offen {
-		seite(rw, http.StatusServiceUnavailable, "Archiv startet", "<p>"+saysStartet+`</p><p><a href="/tresor">Zum Tresor</a></p>`, `<div hidden data-auffrischen=5></div>`)
+		seite(rw, http.StatusServiceUnavailable, "Archiv startet", "<p>"+saysStartet+`</p><p><a href="/tresor">Zum Tresor</a></p>`, `<div hidden data-bis-bereit></div>`)
 		return
 	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
@@ -230,6 +231,7 @@ func (w *Web) seiten() *http.ServeMux {
 		w.tresorSeite(rw, r, http.StatusOK, meldungen[r.URL.Query().Get("m")], "")
 	})
 	mux.HandleFunc("GET /tresor/stand", w.stand)
+	mux.HandleFunc("GET /tresor/live", w.live)
 	mux.HandleFunc("POST /tresor/anlegen", w.anlegen)
 	mux.HandleFunc("POST /tresor/oeffnen", w.oeffnen)
 	mux.HandleFunc("POST /tresor/abschliessen", w.abschliessen)
@@ -474,28 +476,25 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 %s</form>`, esc("Archiv "+w.Person), knopf("Tresor anlegen", "Lege den Tresor an …", ""))
 		b.WriteString(w.eingangText(false))
 	case Verschlossen:
-		b.WriteString(`<h2>Dein Archiv ist abgeschlossen</h2>`)
-		b.WriteString(w.briefkastenText())
+		b.WriteString(`<h2>Dein Archiv ist abgeschlossen</h2><div id=briefkasten data-live>` + w.briefkastenText() + `</div>`)
 		fmt.Fprintf(&b, `<form method=post action="/tresor/oeffnen" class=feld>
 <input name=konto autocomplete=username value="%s" hidden>
 <label>Archiv-Passwort<input type=password name=passwort autocomplete=current-password required autofocus></label>
 %s</form>`, esc("Archiv "+w.Person), knopf("Archiv öffnen", "Öffne das Archiv …", ""))
 		fmt.Fprintf(&b, `<p class=k>%s Schlüssel ändern kannst du, wenn es offen ist.</p>`, saysAdminLiest)
-		if w.laeuftJetzt(&b) {
-			extra = `<div hidden data-auffrischen=10></div>`
-		}
+		w.laeuftJetzt(&b)
 		w.signalKarte(&b, false)
 		w.mailKarte(&b, false)
 		w.smsKarte(&b)
 		w.whatsappKarte(&b)
 		w.kontakteKarte(&b)
 	case Offen:
+		b.WriteString(`<div id=kopf data-live>`)
 		if !st.Bereit {
 			if st.Fehler != "" {
 				fmt.Fprintf(&b, `<p class="meldung fehler" role=alert>%s</p>`, esc(st.Fehler))
 			} else {
-				b.WriteString(`<h2>Dein Archiv startet …</h2><p class=k>Das dauert meist unter einer Minute. Die Seite lädt von selbst neu.</p>`)
-				extra = `<div hidden data-auffrischen=4></div>`
+				b.WriteString(`<h2>Dein Archiv startet …</h2><p class=k>Das dauert meist unter einer Minute. Sobald es bereit ist, erscheint hier „Archiv durchsuchen“.</p>`)
 			}
 		} else {
 			b.WriteString(`<h2>Dein Archiv ist offen</h2><p><a class=gross href="/">Archiv durchsuchen</a></p>`)
@@ -505,12 +504,13 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 			fmt.Fprintf(&b, `<p class=k>Es schließt sich von selbst nach %s ohne Nutzung, also um %s, wenn bis dahin nichts geschieht. %s</p>`,
 				dauerText(w.Tresor.Leerlauf), st.ZuUm.Local().Format("15:04"), saysAdminLiest)
 		}
-		if w.laeuftJetzt(&b) && extra == "" {
-			extra = `<div hidden data-auffrischen=10></div>`
-		}
+		b.WriteString(`</div>`)
+		w.laeuftJetzt(&b)
+		b.WriteString(`<div id=briefkasten data-live>`)
 		if briefkastenStand(w.Briefkasten.Post).Wartend > 0 && w.Postbote.Laeuft() == "" {
 			b.WriteString(w.briefkastenText())
 		}
+		b.WriteString(`</div>`)
 		w.signalKarte(&b, true)
 		w.mailKarte(&b, true)
 		w.smsKarte(&b)
@@ -633,9 +633,10 @@ func (w *Web) laeuftJetzt(b *strings.Builder) bool {
 		zeilen = append(zeilen, fmt.Sprintf(`<p><b>%s%s ins Archiv übernehmen</b> <span class=k>seit %s</span><progress></progress><span class=k>Wie weit es ist, meldet das Archiv erst am Ende. Bitte nicht abschließen, solange das läuft.</span></p>`, menge, was, uhrzeit(g.Seit)))
 	}
 	if len(zeilen) == 0 {
+		b.WriteString(`<section class=jetzt id=jetzt data-live hidden></section>`) // the place, for the live page
 		return false
 	}
-	b.WriteString(`<section class=jetzt aria-live=polite><h3>Gerade in Arbeit</h3>` + strings.Join(zeilen, "") + `</section>`)
+	b.WriteString(`<section class=jetzt id=jetzt data-live aria-live=polite><h3>Gerade in Arbeit</h3>` + strings.Join(zeilen, "") + `</section>`)
 	return true
 }
 
@@ -666,7 +667,7 @@ func (w *Web) imAchiv(b *strings.Builder, quelle, eins, mehr string) {
 }
 
 func (w *Web) signalKarte(b *strings.Builder, offen bool) {
-	b.WriteString(`<section class=quelle><h3>Signal</h3>`)
+	b.WriteString(`<section class=quelle id=karte-signal data-live><h3>Signal</h3>`)
 	w.imAchiv(b, "signal", "Nachricht", "Nachrichten")
 	if n := wartende(w.Eingang)["signal"].Wartend; n > 0 {
 		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung wartet", "Sicherungen warten")))
@@ -697,7 +698,7 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 	if komplett {
 		summary = "Passphrase oder Nummer ändern"
 	}
-	fmt.Fprintf(b, `<details%s><summary>%s</summary>
+	fmt.Fprintf(b, `<details id=d-signal%s><summary>%s</summary>
 <p class=k>Was du hier einträgst, ersetzt das Bisherige. Ein leeres Feld bleibt, wie es ist. Hinterlegtes zeigt die Seite nie wieder an.</p>
 <form method=post action="/tresor/signal" class=feld>
 <label>Signal-Passphrase (30 Ziffern, aus Signal → Einstellungen → Chats → Chat-Sicherungen)<input name=passphrase inputmode=numeric autocomplete=off spellcheck=false></label>
@@ -706,7 +707,7 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 }
 
 func (w *Web) mailKarte(b *strings.Builder, offen bool) {
-	b.WriteString(`<section class=quelle><h3>E-Mail</h3>`)
+	b.WriteString(`<section class=quelle id=karte-mail data-live><h3>E-Mail</h3>`)
 	w.imAchiv(b, "mail", "Mail", "Mails")
 	w.fehlerVon(b, "mail")
 	sch := w.Schluessel
@@ -731,7 +732,7 @@ func (w *Web) mailKarte(b *strings.Builder, offen bool) {
 		host, summary, knopfText = z.Host, "Neues App-Passwort oder anderes Postfach", "Ersetzen"
 		erklaerung = fmt.Sprintf(`<p class=k>Das Archiv holt ein Postfach. Was du hier speicherst, ersetzt %s. Mails, die schon im Archiv sind, bleiben drin.</p>`, esc(z.Benutzer))
 	}
-	fmt.Fprintf(b, `<details%s><summary>%s</summary>%s
+	fmt.Fprintf(b, `<details id=d-mail%s><summary>%s</summary>%s
 <p class=k>Mit einem App-Passwort deines Mail-Anbieters, nicht deinem normalen Passwort (Gmail: Google-Konto → Sicherheit → App-Passwörter; dafür muss die Bestätigung in zwei Schritten an sein). Das Archiv holt jede Stunde die neuen Mails ab, auch wenn es zu ist, und ändert auf dem Server nichts, nicht einmal „gelesen“. Bei Gmail liest es „Alle Nachrichten“ (ohne Spam und Papierkorb); deine Gmail-Labels kommen nicht mit.</p>
 <form method=post action="/tresor/imap" class=feld>
 <label>Server (für Gmail so lassen)<input name=host autocomplete=off value="%s"></label>
@@ -741,7 +742,7 @@ func (w *Web) mailKarte(b *strings.Builder, offen bool) {
 }
 
 func (w *Web) smsKarte(b *strings.Builder) {
-	b.WriteString(`<section class=quelle><h3>SMS und Anrufe</h3>`)
+	b.WriteString(`<section class=quelle id=karte-sms data-live><h3>SMS und Anrufe</h3>`)
 	ein, _, _ := w.Protokoll.Kopie()
 	if e, ok := ein["sms"]; ok {
 		fmt.Fprintf(b, `<p>Zuletzt ins Archiv übernommen: %s und %s, am %s.</p>`, esc(anzahl(e.Zahlen.SMS+e.Zahlen.MMS, "Nachricht", "Nachrichten")), esc(anzahl(e.Zahlen.Anrufe, "Anruf", "Anrufe")), datum(e.Am))
@@ -759,11 +760,11 @@ func (w *Web) smsKarte(b *strings.Builder) {
 }
 
 func (w *Web) kontakteKarte(b *strings.Builder) {
-	b.WriteString(`<section class=quelle><h3>Kontakte</h3><p class=k>Kommen aus der Haus-App: Mehr → Nachrichten sichern → „Kontakte übertragen“. Die App spiegelt alle Kontakte deines Handys, auch die von Google, jeden Tag in dein eigenes Adressbuch „Handy-Kontakte“ auf der Box. Das ist kein Teil des Tresors: Wie dein Kalender ist es für den Admin der Box lesbar. Damit das Archiv Namen statt Nummern zeigt, liest es dieses Adressbuch in einem nächsten Schritt.</p></section>`)
+	b.WriteString(`<section class=quelle id=karte-kontakte data-live><h3>Kontakte</h3><p class=k>Kommen aus der Haus-App: Mehr → Nachrichten sichern → „Kontakte übertragen“. Die App spiegelt alle Kontakte deines Handys, auch die von Google, jeden Tag in dein eigenes Adressbuch „Handy-Kontakte“ auf der Box. Das ist kein Teil des Tresors: Wie dein Kalender ist es für den Admin der Box lesbar. Damit das Archiv Namen statt Nummern zeigt, liest es dieses Adressbuch in einem nächsten Schritt.</p></section>`)
 }
 
 func (w *Web) whatsappKarte(b *strings.Builder) {
-	b.WriteString(`<section class=quelle><h3>WhatsApp</h3>`)
+	b.WriteString(`<section class=quelle id=karte-whatsapp data-live><h3>WhatsApp</h3>`)
 	w.imAchiv(b, "whatsapp", "neue Nachricht", "neue Nachrichten")
 	if n := wartende(w.Eingang)["whatsapp"].Wartend; n > 0 {
 		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung liegt", "Sicherungen liegen")))
@@ -788,12 +789,12 @@ func (w *Web) whatsappKarte(b *strings.Builder) {
 	if hat {
 		summary, knopfText = "Schlüssel ersetzen", "Ersetzen"
 	}
-	fmt.Fprintf(b, `<details%s><summary>%s</summary>
+	fmt.Fprintf(b, `<details id=d-whatsapp%s><summary>%s</summary>
 <p class=k>Der 64-stellige Schlüssel deines WhatsApp-Backups, so wie WhatsApp ihn gezeigt hat (Leerzeichen sind egal). Er liegt im Tresor; nur bei offenem Archiv liest es deine WhatsApp-Sicherung, jeden Tag die neueste. Fotos und Videos aus WhatsApp kommen noch nicht ins Archiv.</p>
 <form method=post action="/tresor/whatsapp" class=feld>
 <label>WhatsApp-Schlüssel (64 Zeichen)<input name=schluessel autocomplete=off spellcheck=false autocapitalize=off></label>
 %s</form></details>
-<details><summary>Kein 64-stelliger Schlüssel, sondern Passkey oder Passwort?</summary><p class=k>Aus einem Passkey lässt sich der Schlüssel nicht auslesen. So stellst du um:</p><ol>
+<details id=d-whatsapp-passkey><summary>Kein 64-stelliger Schlüssel, sondern Passkey oder Passwort?</summary><p class=k>Aus einem Passkey lässt sich der Schlüssel nicht auslesen. So stellst du um:</p><ol>
 <li>WhatsApp → Einstellungen → Chats → Chat-Backup → Ende-zu-Ende-verschlüsseltes Backup → <b>Deaktivieren</b> (mit deinem Passkey bestätigen).</li>
 <li>Gleich danach wieder <b>Aktivieren</b> und „Stattdessen 64-stelligen Schlüssel verwenden“ wählen. Dazwischen liegt dein Backup unverschlüsselt bei Google, also direkt nacheinander.</li>
 <li>Den Schlüssel in Vaultwarden ablegen und hier eintragen.</li>
@@ -824,11 +825,33 @@ func seite(rw http.ResponseWriter, code int, titel, body, extra string) {
 		esc(titel), css, skript, body, extra)
 }
 
-// skript: a pressed button says at once what runs (data-laeuft); a page
-// marked data-auffrischen reloads itself while nobody types.
+// skript: a pressed button says at once what runs (data-laeuft). The page
+// is live: it listens on /tresor/live and, on a change, fetches itself and
+// swaps only the blocks marked data-live, by id — scroll position, an open
+// <details> and a half-typed field stay as they are. A block the person is
+// typing in waits for the next change. The page in front of msgvault
+// while it starts (data-bis-bereit) asks /tresor/stand and goes on once
+// msgvault answers.
 const skript = `<script>
 document.addEventListener('submit',function(e){var b=e.submitter||e.target.querySelector('button');if(!b||!b.dataset.laeuft)return;setTimeout(function(){b.textContent=b.dataset.laeuft;b.disabled=true;b.setAttribute('aria-busy','true')},0)});
-document.addEventListener('DOMContentLoaded',function(){var m=document.querySelector('[data-auffrischen]');if(!m)return;setInterval(function(){var a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='BUTTON'))return;var voll=[].some.call(document.querySelectorAll('input:not([hidden])'),function(i){return i.value&&i.value!==i.defaultValue});if(!voll)location.reload()},(+m.dataset.auffrischen||5)*1000)});
+document.addEventListener('DOMContentLoaded',function(){
+if(!window.EventSource||!window.fetch||!window.DOMParser)return;
+var warte=document.querySelector('[data-bis-bereit]'),live=document.querySelector('[data-live]');if(!warte&&!live)return;
+function beschaeftigt(el){var a=document.activeElement;if(a&&el.contains(a)&&(a.tagName==='INPUT'||a.tagName==='BUTTON'))return true;return [].some.call(el.querySelectorAll('input:not([hidden])'),function(i){return i.value&&i.value!==i.defaultValue})}
+function tauschen(alt,neu){[].forEach.call(alt.querySelectorAll('details[id]'),function(d){var n=neu.querySelector('#'+d.id);if(n)n.open=d.open});alt.replaceWith(neu)}
+var zeit=null,laeuft=false,nochmal=false;
+function holen(){if(laeuft){nochmal=true;return}laeuft=true;
+var ziel=warte?'/tresor/stand':location.pathname+location.search;
+fetch(ziel,{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.ok?r.text():null}).then(function(t){if(!t)return;
+if(warte){try{if(JSON.parse(t).bereit)location.reload()}catch(e){}return}
+var doc=new DOMParser().parseFromString(t,'text/html'),neu=[].map.call(doc.querySelectorAll('[data-live]'),function(n){return n.id}),alt=[].map.call(document.querySelectorAll('[data-live]'),function(n){return n.id});
+if(neu.join()!==alt.join()){var m=document.querySelector('main');if(!beschaeftigt(m))location.reload();return}
+[].forEach.call(doc.querySelectorAll('[data-live]'),function(n){var a=document.getElementById(n.id);if(a&&a.innerHTML!==n.innerHTML&&!beschaeftigt(a))tauschen(a,document.importNode(n,true))})
+}).catch(function(){}).then(function(){laeuft=false;if(nochmal){nochmal=false;bald()}})}
+function bald(){clearTimeout(zeit);zeit=setTimeout(holen,300)}
+var es=new EventSource('/tresor/live');es.addEventListener('neu',bald);
+document.addEventListener('visibilitychange',function(){if(!document.hidden)bald()});
+});
 </script>`
 
 const css = `
