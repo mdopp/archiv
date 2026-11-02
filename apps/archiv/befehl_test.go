@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -189,5 +190,34 @@ func TestSchwaerzen(t *testing.T) {
 func TestMountinfoEscapes(t *testing.T) {
 	if got := entschluesseln(`/run/mein\040tresor`); got != "/run/mein tresor" {
 		t.Fatalf("%q", got)
+	}
+}
+
+// A running import says how far it is: msgvault's import-whatsapp rewrites
+// one line with \r; the runner hands its last line on while it runs
+// (owner, 2026-11-02: „Wie weit es ist, meldet das Archiv erst am Ende …
+// und seitdem keine Updates“).
+func TestARunningProgramsLastLineIsHandedOn(t *testing.T) {
+	alt := UnterwegsTakt
+	UnterwegsTakt = 50 * time.Millisecond
+	defer func() { UnterwegsTakt = alt }()
+	var mu sync.Mutex
+	var gesehen []string
+	b := Befehl{Pfad: "/bin/sh", Args: []string{"-c", `printf '\r  Processed: 1000 | Added: 10 | Rate: 3/s    '; sleep 0.4; printf '\r  Processed: 2000 | Added: 20 | Rate: 3/s    '; sleep 0.4; printf '\nMessages: 2000 processed, 20 added\n'`},
+		Unterwegs: func(z string) { mu.Lock(); gesehen = append(gesehen, z); mu.Unlock() }}
+	a, err := execAusfuehrer{}.Run(context.Background(), b)
+	if err != nil || a.Code != 0 {
+		t.Fatalf("%v %+v", err, a)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	alle := strings.Join(gesehen, "\n")
+	if !strings.Contains(alle, "Processed: 1000 | Added: 10") || !strings.Contains(alle, "Processed: 2000 | Added: 20") {
+		t.Fatalf("the progress lines did not come while it ran: %q", gesehen)
+	}
+	for i := 1; i < len(gesehen); i++ {
+		if gesehen[i] == gesehen[i-1] {
+			t.Fatalf("the same line twice: %q", gesehen)
+		}
 	}
 }

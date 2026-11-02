@@ -443,6 +443,12 @@ func TestThePageShowsWhatRunsAndHowFar(t *testing.T) {
 	if p := os.Getenv("SEITE_NACH"); p != "" {
 		os.WriteFile(p, []byte(body), 0o644)
 	}
+	// WhatsApp counts as it goes, without a total (owner, 2026-11-02: „seitdem keine Updates“)
+	wt.w.Postbote.gang = Gang{Was: "Databases/msgstore.db.crypt15", Quelle: "whatsapp", Seit: time.Now(), Fertig: 123456, Neu: 120001}
+	body = wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	if !strings.Contains(body, "WhatsApp-Nachrichten ins Archiv übernehmen") || !strings.Contains(body, "Bisher 123.456 durchgesehen, davon 120.001 neu im Archiv.") || strings.Contains(body, "erst am Ende") {
+		t.Fatalf("WhatsApp's progress:\n%s", body)
+	}
 }
 
 // The page listens instead of reloading: a change reaches an open stream

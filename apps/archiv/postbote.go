@@ -43,6 +43,7 @@ var (
 	importiert      = regexp.MustCompile(`Imported (\d+) SMS, (\d+) MMS, (\d+) calls, (\d+) attachments`)
 	mailsImportiert = regexp.MustCompile(`Messages: (\d+) added, (\d+) updated, (\d+) skipped`)
 	waImportiert    = regexp.MustCompile(`Messages:\s+(\d+) processed, (\d+) added`)
+	waUnterwegs     = regexp.MustCompile(`Processed: (\d+) \| Added: (\d+)`)
 	errOhneNummer   = errors.New("ohne Nummer")
 )
 
@@ -73,6 +74,7 @@ type Gang struct {
 	Seit   time.Time // started
 	Fertig int
 	Gesamt int
+	Neu    int       // of Fertig, new to the archive (WhatsApp says it while it runs)
 	Bis    time.Time // the newest message so far (mail)
 }
 
@@ -270,7 +272,15 @@ func (p *Postbote) whatsappZustellen(ctx context.Context, innen Innen, d Datei, 
 	if err != nil {
 		return fehler(saysWASchluesselFalsch, err)
 	}
-	a, err = p.Run.Run(ctx, msgvaultImportWhatsApp(p.Msgvault, innen.Home(), db, telefon))
+	imp := msgvaultImportWhatsApp(p.Msgvault, innen.Home(), db, telefon)
+	imp.Unterwegs = func(zeile string) {
+		if m := waUnterwegs.FindStringSubmatch(zeile); m != nil {
+			fertig, _ := strconv.Atoi(m[1])
+			neu, _ := strconv.Atoi(m[2])
+			p.gangSetzen(func(g *Gang) { g.Fertig, g.Neu = fertig, neu })
+		}
+	}
+	a, err = p.Run.Run(ctx, imp)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
