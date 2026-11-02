@@ -376,18 +376,29 @@ func (w *Web) vorschauSeite(rw http.ResponseWriter, r *http.Request, a, b int64,
 			rolle = "Geht in ihr auf"
 		}
 		fmt.Fprintf(&s, `<section class=quelle><h3>%s: %s</h3>`, rolle, esc(personName(p)))
+		// what the messages used, then what the address book adds
 		ids, err := api.Identitaeten(r.Context(), p.ID)
-		switch {
-		case err != nil:
-			s.WriteString(`<p class=k>Nummern und Adressen lassen sich gerade nicht abrufen.</p>`)
-		case len(ids) == 0:
-			s.WriteString(`<p class=k>Keine Nummer und keine Adresse aus deinen Nachrichten.</p>`)
-		default:
-			s.WriteString(`<ul>`)
-			for _, i := range ids {
-				fmt.Fprintf(&s, `<li>%s <span class=k>(%s)</span></li>`, esc(i.Value), esc(identitaetArt(i.Kind)))
+		punkte, err2 := api.Kontaktpunkte(r.Context(), p.ID)
+		gesehen := map[string]bool{}
+		var zeilen []string
+		for _, i := range ids {
+			gesehen[strings.ToLower(i.Value)] = true
+			zeilen = append(zeilen, fmt.Sprintf(`<li>%s <span class=k>(%s, in deinen Nachrichten)</span></li>`, esc(i.Value), esc(identitaetArt(i.Kind))))
+		}
+		for _, i := range punkte {
+			if i.Value == "" || gesehen[strings.ToLower(i.Value)] {
+				continue
 			}
-			s.WriteString(`</ul>`)
+			gesehen[strings.ToLower(i.Value)] = true
+			zeilen = append(zeilen, fmt.Sprintf(`<li>%s <span class=k>(%s, im Adressbuch)</span></li>`, esc(i.Value), esc(identitaetArt(i.Kind))))
+		}
+		switch {
+		case len(zeilen) > 0:
+			s.WriteString(`<ul>` + strings.Join(zeilen, "") + `</ul>`)
+		case err != nil || err2 != nil:
+			s.WriteString(`<p class=k>Nummern und Adressen lassen sich gerade nicht abrufen.</p>`)
+		default:
+			s.WriteString(`<p class=k>Keine Nummer und keine Adresse bekannt.</p>`)
 		}
 		s.WriteString(`</section>`)
 	}

@@ -22,7 +22,7 @@ import (
 //	POST /api/v1/identity/match-candidates/{id}/review/accept  {"review_token": …}
 //	POST /api/v1/identity/match-candidates/{id}/review/reject  {"review_token": …}
 //	GET  /api/v1/participants/{id}                             who an observed address is (display_label, identifiers)
-//	GET  /api/v1/people, /api/v1/people/{id}, …/identities     the saved persons
+//	GET  /api/v1/people, /api/v1/people/{id}, …/identities, …/profile  the saved persons
 //	POST /api/v1/people/{id}/merge                             If-Match: both revisions, Idempotency-Key
 type MsgvaultAPI struct {
 	Port   int
@@ -235,6 +235,24 @@ func (m *MsgvaultAPI) Identitaeten(ctx context.Context, id int64) ([]Identitaet,
 	}
 	err := m.rufe(ctx, http.MethodGet, "/api/v1/people/"+strconv.FormatInt(id, 10)+"/identities", nil, nil, &r)
 	return r.Identities, err
+}
+
+// Kontaktpunkte are the numbers and addresses a person's profile holds
+// (from the address book: a card's TEL and EMAIL), which Identitaeten
+// leaves out until they appear in a message.
+func (m *MsgvaultAPI) Kontaktpunkte(ctx context.Context, id int64) ([]Identitaet, error) {
+	var r struct {
+		ContactPoints []struct {
+			Kind     string `json:"address_kind"`
+			Original string `json:"original_value"`
+		} `json:"contact_points"`
+	}
+	err := m.rufe(ctx, http.MethodGet, "/api/v1/people/"+strconv.FormatInt(id, 10)+"/profile", nil, nil, &r)
+	var out []Identitaet
+	for _, c := range r.ContactPoints {
+		out = append(out, Identitaet{Kind: c.Kind, Value: c.Original})
+	}
+	return out, err
 }
 
 // Teilnehmer is an observed address (participant) as msgvault names it.

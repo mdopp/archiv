@@ -94,7 +94,7 @@ func TestMergeTwoPersonsWithAPreview(t *testing.T) {
 	wt, api := personenWeb(t)
 	rec := wt.rufe("GET", "/tresor/personen/vorschau?a=1&b=2", anna, nil)
 	body := rec.Body.String()
-	for _, want := range []string{"Bleibt (mit diesem Namen): Carla", "Geht in ihr auf: Carla Müller", "carla@example.org", "+4917012345678", "(Telefon)",
+	for _, want := range []string{"Bleibt (mit diesem Namen): Carla", "Geht in ihr auf: Carla Müller", "carla@example.org", "+4917012345678", "(Telefon, in deinen Nachrichten)", "+49 151 7777777 <span class=k>(Telefon, im Adressbuch)",
 		`name=ar value="3"`, `name=br value="5"`, "Andersherum", "Ja, zusammenführen"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("preview lacks %q:\n%s", want, body)

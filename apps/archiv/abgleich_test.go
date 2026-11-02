@@ -78,6 +78,8 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		jsonAus(w, 200, p)
+	case len(teile) == 5 && teile[2] == "people" && teile[4] == "profile":
+		jsonAus(w, 200, map[string]any{"contact_points": []any{map[string]any{"address_kind": "phone", "original_value": "+49 151 7777777"}, map[string]any{"address_kind": "email", "original_value": "carla@example.org"}}})
 	case len(teile) == 5 && teile[2] == "people" && teile[4] == "identities":
 		id, _ := strconv.ParseInt(teile[3], 10, 64)
 		jsonAus(w, 200, map[string]any{"person_id": id, "identities": f.identitaet[id]})
