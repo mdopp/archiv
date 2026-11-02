@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -431,12 +432,54 @@ func TestThePageShowsWhatRunsAndHowFar(t *testing.T) {
 	wt.w.Mailholer.gang = Gang{Was: "anna@example.org", Quelle: "mail", Seit: time.Now(), Fertig: 2300, Gesamt: 48000, Bis: time.Date(2023, 3, 9, 0, 0, 0, 0, time.Local)}
 	wt.w.Postbote.gang = Gang{Was: "20261102T080204Z-signal.age", Quelle: "signal", Seit: time.Now(), Gesamt: 41437}
 	body := wt.rufe("GET", "/tresor", anna, nil).Body.String()
-	for _, want := range []string{"Gerade in Arbeit", `<progress value=2300 max=48000>`, "2.300 von 48.000 Mails abgeholt, bisher bis März 2023", "41.437 Signal-Nachrichten ins Archiv übernehmen", "data-auffrischen=10"} {
+	for _, want := range []string{"Gerade in Arbeit", `<progress value=2300 max=48000>`, "2.300 von 48.000 Mails abgeholt, bisher bis März 2023", "41.437 Signal-Nachrichten ins Archiv übernehmen", "id=jetzt data-live", "id=karte-mail data-live", "new EventSource('/tresor/live')"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lacks %q:\n%s", want, body)
 		}
 	}
+	if strings.Contains(body, "auffrischen") || strings.Contains(body, "setInterval") {
+		t.Fatal("the page still reloads itself on a timer")
+	}
 	if p := os.Getenv("SEITE_NACH"); p != "" {
 		os.WriteFile(p, []byte(body), 0o644)
+	}
+}
+
+// The page listens instead of reloading: a change reaches an open stream
+// at once; nobody else gets one.
+func TestTheLiveStreamSaysEveryChange(t *testing.T) {
+	wt := neuesWeb(t)
+	wt.w.Puls = &Puls{}
+	srv := httptest.NewServer(wt.w)
+	defer srv.Close()
+	req, _ := http.NewRequest("GET", srv.URL+"/tresor/live", nil)
+	for k, v := range anna {
+		req.Header.Set(k, v)
+	}
+	ctx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+	defer stop()
+	res, err := http.DefaultClient.Do(req.WithContext(ctx))
+	if err != nil || res.StatusCode != 200 || res.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("%v %+v", err, res)
+	}
+	r := bufio.NewReader(res.Body)
+	r.ReadString('\n') // retry:
+	r.ReadString('\n')
+	wt.w.Puls.Senden()
+	zeile, err := r.ReadString('\n')
+	if err != nil || zeile != "event: neu\n" {
+		t.Fatalf("no event after a change: %q %v", zeile, err)
+	}
+	wt.w.Puls.Schluss()
+	if _, err := io.ReadAll(r); err != nil {
+		t.Fatalf("the stream did not end on shutdown: %v", err)
+	}
+	res.Body.Close()
+	fremd := wt.rufe("GET", "/tresor/live", map[string]string{proxyHeader: "s3cret", "Remote-User": "ben"}, nil)
+	if fremd.Code == 200 {
+		t.Fatal("another person gets the stream")
+	}
+	if zaehltAlsNutzung(httptest.NewRequest("GET", "/tresor/live", nil)) {
+		t.Fatal("an open tab would keep the vault open forever")
 	}
 }

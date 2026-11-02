@@ -74,7 +74,7 @@ func main() {
 		Takt: sekunden("MAIL_TAKT", time.Hour)}
 	pb := &Postbote{Post: bk.Post, Eingang: eingang, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
 		Takt: takt, Arbeit: tresor.Arbeit}
-	web := &Web{Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),
+	web := &Web{Puls: &Puls{}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
 		Letzte: bk.Letzte, Archiv: archivProxy(port)}
 
@@ -86,6 +86,7 @@ func main() {
 			}
 		}
 		statusSchreiben(statusDatei, statusBauen(web.lage(st)))
+		web.Puls.Senden()
 	}
 	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert = status, status, status, status, status
 	tresor.Lauf = pb.Lauf
@@ -118,6 +119,7 @@ func main() {
 	}()
 
 	srv := &http.Server{Addr: env("LISTEN", ":8080"), Handler: web, ReadHeaderTimeout: 20 * time.Second}
+	srv.RegisterOnShutdown(web.Puls.Schluss) // live pages end their stream at once
 	go func() {
 		log.Printf("archiv für %s hört auf %s (Tresor %s, Zustand %s)", person, srv.Addr, tresor.Cipher, tresor.Stand().Zustand)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
