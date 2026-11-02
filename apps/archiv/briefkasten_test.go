@@ -780,3 +780,57 @@ func TestWhatsAppIsReadOnlyWhileOpenWithTheKeyInsideTheVault(t *testing.T) {
 		t.Fatal("the next day's database is not read")
 	}
 }
+
+// 2026-11-02: a restart cut a mail import off and msgvault refused every
+// later packet; the page said „beim nächsten Öffnen“ and nothing happened
+// by itself. Now a failed packet is tried again while open, and the same
+// failure three times in a row turns the status red (that wakes the
+// Operator).
+func TestAFailedPacketIsTriedAgainAndTurnsRedWhenItKeepsFailing(t *testing.T) {
+	bt := neuerBriefkasten(t)
+	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
+	bt.run.xml["signal-1.backup"] = signalXML(sms(1700000000000, 1, "+4917011111111", "eins"))
+	bt.runde()
+	innen := Innen{Wurzel: t.TempDir()}
+	os.MkdirAll(innen.Arbeit(), 0o700)
+	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
+	mv := &fakeMsgvault{fehler: true}
+	jetzt := tag
+	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.b.Schluessel, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault", Now: func() time.Time { return jetzt }}
+	rot := func() bool {
+		s := statusBauen(Lage{Person: "anna", Stand: Stand{Zustand: Offen, Bereit: true}, Protokoll: bt.b.Protokoll, Jetzt: jetzt})
+		for _, f := range s.Findings {
+			if f.Severity == "rot" {
+				return true
+			}
+		}
+		return false
+	}
+	pb.Runde(context.Background(), innen)
+	pb.Runde(context.Background(), innen)
+	if len(mv.xml) != 1 {
+		t.Fatalf("tried %d times at once; want 1, then a wait", len(mv.xml))
+	}
+	if rot() {
+		t.Fatal("red after one failure: a passing cause must heal quietly")
+	}
+	for i := 0; i < 2; i++ {
+		jetzt = jetzt.Add(Erneut + time.Minute)
+		pb.Runde(context.Background(), innen)
+	}
+	if len(mv.xml) != 3 {
+		t.Fatalf("not tried again while open: %d tries", len(mv.xml))
+	}
+	if !rot() {
+		t.Fatal("three failures in a row and the status is not red")
+	}
+	mv.fehler = false
+	jetzt = jetzt.Add(Erneut + time.Minute)
+	pb.Runde(context.Background(), innen)
+	if len(Pakete(bt.b.Post)) != 0 {
+		t.Fatal("the packet did not go in once the cause was gone")
+	}
+	if rot() {
+		t.Fatal("still red after the packet went in")
+	}
+}

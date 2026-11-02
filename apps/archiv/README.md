@@ -280,6 +280,19 @@ backup waiting three days for an archive not set up, an error with its fix,
 missing keys while backups wait, msgvault not starting. The record lives
 beside it in `/data/archiv-stand.json`.
 
+
+### When something fails
+
+A packet or inbox file that fails stays where it is (nothing is lost) and
+is tried again every half hour while the vault is open, and at every
+opening — a cause that passes (a restart in the middle of an import, a busy
+database) heals without anyone. The page and the status say the sentence.
+The same file failing with the same sentence three times in a row
+(`DreimalRot`) turns the status finding red: no key the person could give
+fixes it, and a red wakes the box's Operator, which reads `laib logs` and
+the file named in the finding. Failures a person can fix (a wrong
+passphrase, a refused mail login) stay yellow and say what to enter.
+
 ## What the template must give (laib#986)
 
 | what | value |

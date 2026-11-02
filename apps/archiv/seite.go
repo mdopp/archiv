@@ -645,6 +645,9 @@ func (w *Web) fehlerVon(b *strings.Builder, quelle string) {
 	_, f, _ := w.Protokoll.Kopie()
 	if f != nil && f.Quelle == quelle {
 		fmt.Fprintf(b, `<p class="meldung fehler">%s <span class=k>(%s)</span></p>`, esc(f.Satz), datum(f.Am))
+		if f.Mal >= DreimalRot {
+			fmt.Fprintf(b, `<p class=k>Das ist jetzt %d-mal hintereinander passiert. Der Admin-Agent der Box ist benachrichtigt und sieht sich den Grund an.</p>`, f.Mal)
+		}
 	}
 }
 

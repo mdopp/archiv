@@ -48,6 +48,7 @@ type Fehler struct {
 	Quelle string    `json:"quelle"`
 	Datei  string    `json:"datei,omitempty"`
 	Satz   string    `json:"satz"`
+	Mal    int       `json:"mal,omitempty"` // how often in a row this file failed with this sentence
 }
 
 type Protokoll struct {
@@ -112,6 +113,10 @@ func (p *Protokoll) Gepackt(quelle string, g Gepackt) {
 func (p *Protokoll) Fehlschlag(f Fehler) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	f.Mal = 1
+	if l := p.LetzterFehler; l != nil && l.Quelle == f.Quelle && l.Datei == f.Datei && l.Satz == f.Satz {
+		f.Mal = l.Mal + 1
+	}
 	p.LetzterFehler = &f
 	p.speichern()
 }
