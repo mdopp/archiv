@@ -303,7 +303,7 @@ func ohne(liste []string, telefon string) []string {
 // XMLLesen streams the XML and hands every message to f. It fails when
 // the XML ends before </smses>: a cut export is never a packet.
 func XMLLesen(r io.Reader, telefon string, f func(xmlNachricht) error) error {
-	dec := xml.NewDecoder(r)
+	dec := xml.NewDecoder(ohneWaisen(r))
 	dec.Strict = false
 	ende := false
 	for {
@@ -349,6 +349,43 @@ func XMLLesen(r io.Reader, telefon string, f func(xmlNachricht) error) error {
 		return errors.New("das XML endet vor </smses>")
 	}
 	return nil
+}
+
+// ohneWaisen drops the lines signalbackup-tools writes for an attachment
+// the backup does not hold (exportxml.cc: the part's opening is written
+// only when the attachment is found, its "></part>" always): a line that
+// is nothing but "></part>" closes no element, and the XML decoder stops
+// on it ("unexpected end element </part>", the first real backup on the
+// box, 2026-11-02). Every other line passes unchanged; lines are not held
+// in memory beyond a short head (a part's base64 is megabytes long).
+func ohneWaisen(r io.Reader) io.Reader {
+	pr, pw := io.Pipe()
+	go func() {
+		br := bufio.NewReaderSize(r, 4096)
+		w := bufio.NewWriterSize(pw, 1<<16)
+		zeilenanfang := true
+		var err error
+		for err == nil {
+			var teil []byte
+			teil, err = br.ReadSlice('\n')
+			if err == bufio.ErrBufferFull {
+				err = nil // a long line: never a lone "></part>"
+				w.Write(teil)
+				zeilenanfang = false
+				continue
+			}
+			if zeilenanfang && bytes.Equal(bytes.TrimSpace(teil), []byte("></part>")) {
+				continue
+			}
+			w.Write(teil)
+			zeilenanfang = true
+		}
+		if err == io.EOF {
+			err = w.Flush()
+		}
+		pw.CloseWithError(err)
+	}()
+	return pr
 }
 
 func zahl(s string) int64 { n, _ := strconv.ParseInt(s, 10, 64); return n }
