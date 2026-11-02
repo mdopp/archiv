@@ -1,8 +1,8 @@
 # archiv
 
-Für die Familie in einem Satz: Dein Nachrichten-Archiv — Signal und E-Mail
-(später WhatsApp und Discord) durchsuchbar auf der Box, in einem Tresor, den
-nur dein Archiv-Passwort öffnet.
+Für die Familie in einem Satz: Dein Nachrichten-Archiv — Signal, SMS,
+Anrufe und E-Mail (später WhatsApp und Discord) durchsuchbar auf der Box, in
+einem Tresor, den nur dein Archiv-Passwort öffnet.
 
 One container per person ([laib ADR 0029](https://github.com/mdopp/laib/blob/main/docs/adr/0029-one-message-archive-per-person.md),
 laib#985, laib#986). Inside: a small Go supervisor (`archiv`, this folder),
@@ -14,8 +14,8 @@ through [go-imap](https://github.com/emersion/go-imap) v1.2.1.
 - Code: `*.go`, tests: `go test ./...`; `integration.sh <image>` runs the
   built image with a real FUSE mount (CI does, on every push and PR).
 - Image: `ghcr.io/mdopp/archiv:latest` and `:<sha>`, built by CI on main.
-- Laib template: not yet — it waits for laib#986's per-person design. What
-  it must give is below.
+- Laib template: `templates/archiv` in the laib repo, once per person
+  (laib#986). What it must give is below.
 
 ## The vault (Tresor)
 
@@ -289,21 +289,28 @@ beside it in `/data/archiv-stand.json`.
   inside the gocryptfs mount; the supervisor's whole cycle; packets made
   while the vault is closed (`archiv paket-aus-xml`), counted in the status,
   taken into the real msgvault on opening — an SMS and an MMS with a picture
-  arrive, and a packet of messages msgvault already has adds nothing;
-  WhatsApp media encrypted into `letzte/` and given back to Haus only while
-  open; a non-backup in `signal/` fails with the sentence, stays, and leaves
-  nothing in `/dev/shm/archiv`, the vault's work folder or the Briefkasten.
-- **Unproven**: rootless podman on the box (Fedora CoreOS, SELinux) mounting
-  FUSE with these flags; signalbackup-tools on a real backup, and writing
-  its XML into a named pipe (its code writes forward only, but no real
-  backup has gone through it yet).
-- **Only the first real Signal backup can tell**: whether this
-  signalbackup-tools reads the phone's backup format (Signal changed its
-  backup format in 2025; the XML export is, in its author's words, not well
-  tested), how many messages the XML carries — **messages of contacts
-  without a shared phone number are skipped** by the XML export (Signal has
-  made the number optional), quotes, reactions and edits are lost (SMS XML
-  cannot hold them), groups with the same members merge — and how long a
-  multi-GB backup takes and how much RAM signalbackup-tools needs for it
-  (it holds the backup's database in memory; the box's RAM is the limit,
-  not the disk). The first packet of a person holds the whole history.
+  arrive, and a packet of messages msgvault already has adds nothing; a mail
+  packet through the real `import-maildir`; WhatsApp media encrypted into
+  `letzte/` and given back to Haus only while open; a non-backup in
+  `signal/` fails with the sentence, stays, and leaves nothing in
+  `/dev/shm/archiv`, the vault's work folder or the Briefkasten.
+- **Proven on the box** (the Kraftwerk, 2026-11-02): rootless podman on
+  Fedora CoreOS mounts the vault with `/dev/fuse` and `SYS_ADMIN`. The
+  first real Signal backup went through: signalbackup-tools read it into a
+  packet of 41,437 messages and 6,202 attachments (2.6 GB) in about three
+  minutes, and msgvault took all 41,437 in about 40 minutes. On the way it
+  showed two things the tests now hold: signalbackup-tools writes a lone
+  `></part>` for a missing attachment (skipped), and msgvault's SMS import
+  refuses any attachment over 25 MiB and then fails the whole import (such
+  files now go to `grosse-anhaenge/` in the vault, the message says where).
+  The Gmail mailbox comes in over IMAP, oldest first, a few thousand mails
+  per packet.
+- **Unproven**: SMS and calls from the Haus app (built, not yet on a
+  phone); how much RAM signalbackup-tools needs for a larger backup (it
+  holds the backup's database in memory); WhatsApp (needs the 64-digit key;
+  a passkey cannot be read out).
+- **What the Signal XML cannot carry**: messages of contacts without a
+  shared phone number are skipped by the XML export (Signal has made the
+  number optional); quotes, reactions and edits are lost (SMS XML cannot
+  hold them); groups with the same members merge. The first packet of a
+  person holds the whole history.
