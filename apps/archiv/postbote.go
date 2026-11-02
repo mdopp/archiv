@@ -63,7 +63,7 @@ type Postbote struct {
 	Post       string     // /data/briefkasten
 	Eingang    *Eingang   // signal/, whatsapp/, sms/ (the phone's SMS and calls, age-encrypted to the Briefkasten)
 	Letzte     string     // /eingang/letzte: the newest imported Signal backup stays there for a new phone
-	Schluessel Schluessel // outside: the Signal passphrase and the number
+	Schluessel Schluessel // outside: the number (the Signal passphrase is inside, Innen.SignalPassphrase)
 	Protokoll  *Protokoll
 	Run        Ausfuehrer
 	Msgvault   string
@@ -338,8 +338,11 @@ func (p *Postbote) signal(ctx context.Context, innen Innen, backups []Datei, tel
 	if falsch {
 		return
 	}
-	pass, err := p.Schluessel.Lesen(SchluesselSignal)
+	pass, err := os.ReadFile(innen.SignalPassphrase())
 	if err != nil {
+		return
+	}
+	if pass = trimNL(pass); len(pass) == 0 {
 		return
 	}
 	defer nullen(pass)
