@@ -28,10 +28,11 @@ import (
 // folder is emptied after every packet.
 
 const (
-	saysPaketKaputt  = "Das Paket %s ließ sich nicht öffnen. Es bleibt im Briefkasten; sag dem Admin Bescheid."
-	saysUebernahme   = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Das Paket bleibt im Briefkasten; beim nächsten Öffnen versucht es das Archiv noch einmal."
-	saysKeineNummer  = "Pakete warten, aber deine Handynummer fehlt. Gib sie unter „Schlüssel“ ein."
-	saysAnderesPaket = "Das Paket %s hat ein Format, das dieses Archiv noch nicht kennt. Es bleibt im Briefkasten."
+	saysPaketKaputt   = "Das Paket %s ließ sich nicht öffnen. Es bleibt im Briefkasten; sag dem Admin Bescheid."
+	saysGrosserAnhang = "[Anhang %s, %d MB: zu groß für die Suche im Archiv. Er liegt im Tresor unter grosse-anhaenge/%s.]"
+	saysUebernahme    = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Das Paket bleibt im Briefkasten; beim nächsten Öffnen versucht es das Archiv noch einmal."
+	saysKeineNummer   = "Pakete warten, aber deine Handynummer fehlt. Gib sie unter „Schlüssel“ ein."
+	saysAnderesPaket  = "Das Paket %s hat ein Format, das dieses Archiv noch nicht kennt. Es bleibt im Briefkasten."
 )
 
 var (
@@ -208,8 +209,9 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	}
 	x, err := NeuesXML(out, telefon)
 	for i := 0; err == nil && i < len(nachrichten); i++ {
-		err = x.Nachricht(nachrichten[i], func(a Anhang) (io.ReadCloser, error) {
-			return os.Open(filepath.Join(arbeit, "anhaenge", filepath.Base(a.Datei)))
+		err = x.Nachricht(nachrichten[i], func(a Anhang) (io.ReadCloser, string, error) {
+			pfad := filepath.Join(arbeit, "anhaenge", filepath.Base(a.Datei))
+			return anhangOderHinweis(pfad, a, innen.GrosseAnhaenge(), strings.TrimSuffix(name, ".age"))
 		})
 	}
 	if err == nil {
@@ -245,6 +247,36 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	log.Printf("archiv: Paket %s eingelesen: %d SMS, %d MMS, %d Anhänge", name, z.SMS, z.MMS, z.Anhaenge)
 	p.Protokoll.Eingelesen(quelle, name, z, p.now())
 	return nil
+}
+
+// anhangOderHinweis opens an attachment for the XML, or, when msgvault
+// would refuse it (MaxAnhang), moves it into the vault beside the archive
+// and returns the note the message carries instead. The file is named by
+// packet and position, so a retried packet lands on the same name.
+func anhangOderHinweis(pfad string, a Anhang, ablage, paket string) (io.ReadCloser, string, error) {
+	fi, err := os.Stat(pfad)
+	if err != nil {
+		return nil, "", err
+	}
+	if fi.Size() <= MaxAnhang {
+		f, err := os.Open(pfad)
+		return f, "", err
+	}
+	ziel := paket + "-" + filepath.Base(a.Datei)
+	if n := filepath.Base(a.Name); a.Name != "" && n != "." && n != ".." && n != "/" {
+		ziel += "-" + n
+	}
+	if err := os.MkdirAll(ablage, 0o700); err != nil {
+		return nil, "", err
+	}
+	if err := os.Rename(pfad, filepath.Join(ablage, ziel)); err != nil {
+		return nil, "", err
+	}
+	was := a.Name
+	if was == "" {
+		was = a.Typ
+	}
+	return nil, fmt.Sprintf(saysGrosserAnhang, was, (fi.Size()+(1<<20)-1)>>20, ziel), nil
 }
 
 // maildirAnlegen makes a Maildir folder whole (cur, new, tmp): msgvault

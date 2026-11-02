@@ -470,6 +470,11 @@ func xa(name, wert string) string {
 	return " " + name + `="` + b.String() + `"`
 }
 
+// MaxAnhang is the largest attachment msgvault's SMS import takes
+// (synctechsms, 25 MiB, not configurable): one larger part fails the
+// whole import.
+const MaxAnhang = 25 << 20
+
 // XMLSchreiber writes messages as an SMS Backup & Restore XML. A message
 // without attachments with one other person is an <sms>, everything else
 // an <mms>; msgvault keys both by the same set of participants.
@@ -484,8 +489,10 @@ func NeuesXML(w io.Writer, telefon string) (*XMLSchreiber, error) {
 	return x, err
 }
 
-// Nachricht writes one message; anhang opens the data of an attachment.
-func (x *XMLSchreiber) Nachricht(n Nachricht, anhang func(Anhang) (io.ReadCloser, error)) error {
+// Nachricht writes one message. anhang opens the data of an attachment, or
+// returns a note to write in its place (an attachment msgvault refuses,
+// kept elsewhere; see MaxAnhang).
+func (x *XMLSchreiber) Nachricht(n Nachricht, anhang func(Anhang) (io.ReadCloser, string, error)) error {
 	w := x.w
 	gelesen := "0"
 	if n.Gelesen {
@@ -513,9 +520,14 @@ func (x *XMLSchreiber) Nachricht(n Nachricht, anhang func(Anhang) (io.ReadCloser
 		seq++
 	}
 	for _, a := range n.Anhaenge {
-		rc, err := anhang(a)
+		rc, hinweis, err := anhang(a)
 		if err != nil {
 			return err
+		}
+		if rc == nil {
+			fmt.Fprintf(w, "      <part seq=\"%d\" ct=\"text/plain\" chset=\"106\"%s />\n", seq, xa("text", hinweis))
+			seq++
+			continue
 		}
 		fmt.Fprintf(w, "      <part seq=\"%d\"%s%s%s data=\"", seq, xa("ct", a.Typ), xa("name", a.Name), xa("cl", a.Name))
 		enc := base64.NewEncoder(base64.StdEncoding, w)

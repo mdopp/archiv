@@ -97,7 +97,7 @@ func TestXMLThroughThePacketAndBack(t *testing.T) {
 	x, _ := NeuesXML(&out, annaTel)
 	for _, e := range erst {
 		daten := e.Daten
-		x.Nachricht(e.N, func(a Anhang) (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(daten[0])), nil })
+		x.Nachricht(e.N, func(a Anhang) (io.ReadCloser, string, error) { return io.NopCloser(bytes.NewReader(daten[0])), "", nil })
 	}
 	x.Schliessen()
 	var zweit []xmlNachricht
@@ -584,4 +584,51 @@ func TestHalfPacketsOfAStoppedRunAreRemovedAtStart(t *testing.T) {
 	if len(e) != 1 || e[0].Name() != "20261102T080000Z-mail.age" {
 		t.Fatalf("%v", e)
 	}
+}
+
+// msgvault's SMS import refuses a part over 25 MiB and then fails the whole
+// import (the owner's first Signal backup, 2026-11-02, held one video).
+func TestAnAttachmentTooBigForMsgvaultIsKeptInTheVaultAndNamedInTheMessage(t *testing.T) {
+	bt := neuerBriefkasten(t)
+	video := bytes.Repeat([]byte("v"), MaxAnhang+1)
+	gross := strings.Replace(strings.Replace(mmsMitBild(1700000200000), base64.StdEncoding.EncodeToString(bild), base64.StdEncoding.EncodeToString(video), 1), `"bild.png"`, `"urlaub.mp4"`, 2)
+	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
+	bt.run.xml["signal-1.backup"] = signalXML(sms(1700000000000, 1, "+4917011111111", "eins"), gross, mmsMitBild(1700000300000))
+	bt.runde()
+	pakete := Pakete(bt.b.Post)
+	if len(pakete) != 1 {
+		t.Fatalf("%v", pakete)
+	}
+
+	innen := Innen{Wurzel: t.TempDir()}
+	os.MkdirAll(innen.Arbeit(), 0o700)
+	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
+	mv := &fakeMsgvault{}
+	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.b.Schluessel, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
+	pb.Runde(context.Background(), innen)
+
+	if len(mv.xml) != 1 {
+		t.Fatalf("imports: %d", len(mv.xml))
+	}
+	x := mv.xml[0]
+	if strings.Contains(x, base64.StdEncoding.EncodeToString(video[:3000])) {
+		t.Fatal("the too-big video went to msgvault, which fails the whole import")
+	}
+	if !strings.Contains(x, base64.StdEncoding.EncodeToString(bild)) || !strings.Contains(x, `body="eins"`) {
+		t.Fatal("the rest of the packet did not go with it")
+	}
+	abgelegt, _ := os.ReadDir(innen.GrosseAnhaenge())
+	if len(abgelegt) != 1 || !strings.HasSuffix(abgelegt[0].Name(), "-urlaub.mp4") || !strings.HasPrefix(abgelegt[0].Name(), strings.TrimSuffix(pakete[0], ".age")) {
+		t.Fatalf("kept beside the archive: %v", abgelegt)
+	}
+	if got, _ := os.ReadFile(filepath.Join(innen.GrosseAnhaenge(), abgelegt[0].Name())); !bytes.Equal(got, video) {
+		t.Fatal("the kept video is not the video")
+	}
+	if !strings.Contains(x, "Anhang urlaub.mp4, 26 MB: zu groß für die Suche im Archiv. Er liegt im Tresor unter grosse-anhaenge/"+abgelegt[0].Name()) {
+		t.Fatalf("the message does not say where the video is:\n%s", x[:min(len(x), 3000)])
+	}
+	if len(Pakete(bt.b.Post)) != 0 {
+		t.Fatal("the packet stayed")
+	}
+	leer(t, innen.Arbeit(), "the vault's work folder")
 }
