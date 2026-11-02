@@ -174,6 +174,27 @@ importer in msgvault.
 `archiv paket-aus-xml -telefon <number> [-quelle sms] < backup.xml` packs
 any SMS Backup & Restore XML (an old Android SMS backup too).
 
+### SMS and calls: encrypted on the phone
+
+The Haus app (switch „SMS und Anrufliste übertragen“, ADR 0029 §9) writes
+the phone's SMS, MMS and call log as SMS Backup & Restore XML, encrypts
+each file with age to the Briefkasten's public key, and uploads it to
+`/eingang/sms/<name>.xml.age`. The key reaches the phone this way: the
+Briefkasten writes it into the inbox as `.briefkasten.pub` (a dot-file,
+never a backup), Haus serves it at `GET /napi/sicherung/schluessel`.
+
+These files need no packing: they are already unreadable on the box. When
+the vault opens, the Postbote decrypts each into the vault's work folder
+and runs `msgvault import-synctech-sms` with the person's number
+(`--owner-phone`; without the number the files wait). msgvault keeps one
+of each message and call, so a file sent twice adds nothing. Imported,
+the file leaves the inbox; one that cannot be decrypted stays, and the
+page says so. Attachments over 25 MiB fail msgvault's SMS import here
+(the Signal path sets them aside, this one does not yet).
+
+Contacts take another way: Haus mirrors the phone's contacts into the
+person's Radicale address book `handy-kontakte`, outside the vault.
+
 ### Paket format, version 1 (for the box and, later, the phone)
 
 A packet is a file `<YYYYMMDDTHHMMSSZ>-<quelle>.age` in the Briefkasten:

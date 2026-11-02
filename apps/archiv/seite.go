@@ -455,7 +455,9 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		}
 		w.signalKarte(&b, false)
 		w.mailKarte(&b, false)
+		w.smsKarte(&b)
 		w.whatsappKarte(&b)
+		w.kontakteKarte(&b)
 	case Offen:
 		if !st.Bereit {
 			if st.Fehler != "" {
@@ -480,7 +482,9 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		}
 		w.signalKarte(&b, true)
 		w.mailKarte(&b, true)
+		w.smsKarte(&b)
 		w.whatsappKarte(&b)
+		w.kontakteKarte(&b)
 	}
 	seite(rw, code, "Archiv", b.String(), extra)
 }
@@ -588,6 +592,8 @@ func (w *Web) laeuftJetzt(b *strings.Builder) bool {
 			was = "Mails"
 		} else if g.Quelle == "signal" {
 			was = "Signal-Nachrichten"
+		} else if g.Quelle == "sms" {
+			was = "SMS und Anrufe vom Handy"
 		}
 		menge := ""
 		if g.Gesamt > 0 {
@@ -698,6 +704,28 @@ func (w *Web) mailKarte(b *strings.Builder, offen bool) {
 <label>Benutzername, meist deine Mail-Adresse<input name=benutzer type=email autocomplete=off value="%s" placeholder="z. B. name@gmail.com"></label>
 <label>App-Passwort<input name=passwort type=password autocomplete=new-password></label>
 %s</form><p class=hinweis>%s</p></details></section>`, offenWenn(!ok), summary, erklaerung, esc(host), esc(z.Benutzer), knopf(knopfText, "Speichere …", ""), saysMailPreis)
+}
+
+func (w *Web) smsKarte(b *strings.Builder) {
+	b.WriteString(`<section class=quelle><h3>SMS und Anrufe</h3>`)
+	ein, _, _ := w.Protokoll.Kopie()
+	if e, ok := ein["sms"]; ok {
+		fmt.Fprintf(b, `<p>Zuletzt ins Archiv übernommen: %s und %s, am %s.</p>`, esc(anzahl(e.Zahlen.SMS+e.Zahlen.MMS, "Nachricht", "Nachrichten")), esc(anzahl(e.Zahlen.Anrufe, "Anruf", "Anrufe")), datum(e.Am))
+	} else {
+		b.WriteString(`<p class=k>Noch nichts im Archiv.</p>`)
+	}
+	if n := wartende(w.Eingang)["sms"].Wartend; n > 0 {
+		fmt.Fprintf(b, `<p>%s im Eingang, verschlüsselt. Beim Öffnen kommen sie ins Archiv.</p>`, esc(anzahl(n, "Datei wartet", "Dateien warten")))
+	}
+	w.fehlerVon(b, "sms")
+	if _, ok := w.Schluessel.Hinterlegt(SchluesselTelefon); !ok {
+		b.WriteString(`<p class=zugang><span class=fehlt>Deine Nummer fehlt</span> (bei Signal eintragen): ohne sie weiß das Archiv nicht, welche SMS du geschrieben hast.</p>`)
+	}
+	b.WriteString(`<p class=k>Kommen aus der Haus-App: Mehr → Nachrichten sichern → „SMS und Anrufliste übertragen“. Die App verschlüsselt sie schon auf dem Handy für dein Archiv; auf der Box kann sie niemand lesen, solange es zu ist.</p></section>`)
+}
+
+func (w *Web) kontakteKarte(b *strings.Builder) {
+	b.WriteString(`<section class=quelle><h3>Kontakte</h3><p class=k>Kommen aus der Haus-App: Mehr → Nachrichten sichern → „Kontakte übertragen“. Die App spiegelt alle Kontakte deines Handys, auch die von Google, jeden Tag in dein eigenes Adressbuch „Handy-Kontakte“ auf der Box. Das ist kein Teil des Tresors: Wie dein Kalender ist es für den Admin der Box lesbar. Damit das Archiv Namen statt Nummern zeigt, liest es dieses Adressbuch in einem nächsten Schritt.</p></section>`)
 }
 
 func (w *Web) whatsappKarte(b *strings.Builder) {

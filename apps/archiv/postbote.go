@@ -30,6 +30,7 @@ import (
 
 const (
 	saysPaketKaputt   = "Das Paket %s ließ sich nicht öffnen. Es bleibt im Briefkasten; sag dem Admin Bescheid."
+	saysSMSKaputt     = "Die SMS-Datei %s ließ sich nicht entschlüsseln. Sie bleibt im Eingang; schick sie aus der Haus-App noch einmal."
 	saysGrosserAnhang = "[Anhang %s, %d MB: zu groß für die Suche im Archiv. Er liegt im Tresor unter grosse-anhaenge/%s.]"
 	saysUebernahme    = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Das Paket bleibt im Briefkasten; beim nächsten Öffnen versucht es das Archiv noch einmal."
 	saysKeineNummer   = "Pakete warten, aber deine Handynummer fehlt. Gib sie unter „Schlüssel“ ein."
@@ -44,6 +45,7 @@ var (
 
 type Postbote struct {
 	Post       string     // /data/briefkasten
+	Eingang    *Eingang   // sms/: the phone's SMS and calls, age-encrypted to the Briefkasten
 	Schluessel Schluessel // outside: the number
 	Protokoll  *Protokoll
 	Run        Ausfuehrer
@@ -125,7 +127,11 @@ func (p *Postbote) Lauf(ctx context.Context, innen Innen) {
 
 func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 	pakete := Pakete(p.Post)
-	if len(pakete) == 0 {
+	var sms []Datei
+	if p.Eingang != nil {
+		sms, _ = p.Eingang.Stabil("sms")
+	}
+	if len(pakete) == 0 && len(sms) == 0 {
 		return
 	}
 	tel, _ := p.Schluessel.Lesen(SchluesselTelefon) // a mail packet needs none; a Signal packet waits for it
@@ -145,14 +151,116 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 			continue
 		}
 		if err := p.Zustellen(ctx, innen, id, name, string(tel)); err != nil && ctx.Err() == nil && !errors.Is(err, errOhneNummer) {
-			p.mu.Lock()
-			if p.zurueck == nil {
-				p.zurueck = map[string]bool{}
-			}
-			p.zurueck[name] = true
-			p.mu.Unlock()
+			p.zuruecklegen(name)
 		}
 	}
+	for _, d := range sms {
+		if ctx.Err() != nil {
+			return
+		}
+		p.mu.Lock()
+		weg := p.zurueck[d.Pfad]
+		p.mu.Unlock()
+		if weg {
+			continue
+		}
+		if err := p.SMSZustellen(ctx, innen, id, d, string(tel)); err != nil && ctx.Err() == nil && !errors.Is(err, errOhneNummer) {
+			p.zuruecklegen(d.Pfad)
+		}
+	}
+}
+
+// zuruecklegen: a failed packet or file waits for the next opening.
+func (p *Postbote) zuruecklegen(name string) {
+	p.mu.Lock()
+	if p.zurueck == nil {
+		p.zurueck = map[string]bool{}
+	}
+	p.zurueck[name] = true
+	p.mu.Unlock()
+}
+
+// SMSZustellen imports one file of the phone's SMS or calls: the Haus app
+// wrote it as an SMS Backup & Restore XML and encrypted it to the
+// Briefkasten, so it is read here, inside the open vault, and handed to
+// msgvault's own SMS import (which keeps one of each message, so a file
+// sent twice adds nothing). Imported, it leaves the inbox.
+func (p *Postbote) SMSZustellen(ctx context.Context, innen Innen, id age.Identity, d Datei, telefon string) error {
+	if p.Arbeit != nil {
+		defer p.Arbeit()()
+	}
+	if telefon == "" {
+		return errOhneNummer // the page says it: the number is missing
+	}
+	p.mu.Lock()
+	p.laeuft = d.Rel
+	p.gang = Gang{Was: d.Rel, Quelle: "sms", Seit: p.now()}
+	p.mu.Unlock()
+	p.geaendert()
+	defer func() {
+		p.mu.Lock()
+		p.laeuft = ""
+		p.gang = Gang{}
+		p.mu.Unlock()
+		p.geaendert()
+	}()
+	fehler := func(satz string, grund error) error {
+		log.Printf("archiv: SMS %s: %v", d.Rel, grund)
+		if ctx.Err() == nil {
+			p.Protokoll.Fehlschlag(Fehler{Am: p.now(), Quelle: "sms", Datei: d.Rel, Satz: satz})
+		}
+		return grund
+	}
+	xml := filepath.Join(innen.Arbeit(), "sms-"+zufall()+".xml")
+	defer os.Remove(xml)
+	if err := ageAuspacken(d.Pfad, xml, id); err != nil {
+		return fehler(fmt.Sprintf(saysSMSKaputt, d.Rel), err)
+	}
+	a, err := p.Run.Run(ctx, msgvaultImportSMS(p.Msgvault, innen.Home(), xml, telefon))
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil && a.Code != 0 {
+		err = fmt.Errorf("msgvault import-synctech-sms Code %d: %s", a.Code, fehlerzeilen(a.Text))
+	}
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	var z Zahlen
+	if m := importiert.FindStringSubmatch(a.Text); m != nil {
+		z.SMS, _ = strconv.Atoi(m[1])
+		z.MMS, _ = strconv.Atoi(m[2])
+		z.Anrufe, _ = strconv.Atoi(m[3])
+		z.Anhaenge, _ = strconv.Atoi(m[4])
+	}
+	if err := os.Remove(d.Pfad); err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	log.Printf("archiv: SMS %s eingelesen: %d SMS, %d MMS, %d Anrufe", d.Rel, z.SMS, z.MMS, z.Anrufe)
+	p.Protokoll.Eingelesen("sms", d.Rel, z, p.now())
+	return nil
+}
+
+// ageAuspacken decrypts an age file into a new 0600 file.
+func ageAuspacken(von, nach string, id age.Identity) error {
+	f, err := os.Open(von)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	r, err := age.Decrypt(f, id)
+	if err != nil {
+		return err
+	}
+	out, err := os.OpenFile(nach, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, r)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 // Zustellen imports one packet and deletes it. Its plaintext exists only

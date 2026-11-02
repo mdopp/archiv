@@ -72,7 +72,7 @@ func main() {
 		Protokoll: prot, Takt: takt}
 	mh := &Mailholer{Post: bk.Post, Empfaenger: empfaenger, Gesehen: bk.Gesehen, Schluessel: schluessel, Protokoll: prot,
 		Takt: sekunden("MAIL_TAKT", time.Hour)}
-	pb := &Postbote{Post: bk.Post, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
+	pb := &Postbote{Post: bk.Post, Eingang: eingang, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
 		Takt: takt, Arbeit: tresor.Arbeit}
 	web := &Web{Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
