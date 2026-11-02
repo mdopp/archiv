@@ -573,3 +573,15 @@ func TestALoneClosingPartFromSignalbackupToolsIsSkipped(t *testing.T) {
 		t.Fatal("a cut export was read as whole")
 	}
 }
+
+func TestHalfPacketsOfAStoppedRunAreRemovedAtStart(t *testing.T) {
+	post := t.TempDir()
+	os.WriteFile(filepath.Join(post, ".neu-mail-1.age"), []byte("halb"), 0o600)
+	os.WriteFile(filepath.Join(post, ".neu-signal-2.age"), []byte("halb"), 0o600)
+	os.WriteFile(filepath.Join(post, "20261102T080000Z-mail.age"), []byte("ganz"), 0o600)
+	HalbeWeg(post)
+	e, _ := os.ReadDir(post)
+	if len(e) != 1 || e[0].Name() != "20261102T080000Z-mail.age" {
+		t.Fatalf("%v", e)
+	}
+}

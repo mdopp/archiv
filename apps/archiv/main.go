@@ -100,6 +100,7 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
+	HalbeWeg(bk.Post)
 	go bk.Lauf(ctx) // the Briefkasten: open or closed
 	go mh.Lauf(ctx) // mail, hourly: open or closed
 	go func() {
