@@ -541,3 +541,35 @@ func TestTheVaultMakesTheKeyPairOnce(t *testing.T) {
 		t.Fatal("reopening made a new key pair: old packets would be unreadable")
 	}
 }
+
+// The first real backup on the box (2026-11-02): an attachment the backup
+// does not hold leaves a lone "></part>" in signalbackup-tools' XML. The
+// message stays (without that attachment), and nothing else is lost.
+func TestALoneClosingPartFromSignalbackupToolsIsSkipped(t *testing.T) {
+	x := `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<smses count="2">
+  <mms date="1700000300000" msg_box="1" read="1" address="+4915199999999" contact_name="Ben" m_type="132" text_only="0">
+    <parts>
+      <part seq="0" ct="text/plain" name="null" chset="106" cd="null" fn="null" cl="text000001.txt" ctt_s="null" ctt_t="null" text="Ein Bild, das fehlt" ></part>
+      ></part>
+      <part seq="1" ct="image/png" name="p.png" chset="null" cd="null" fn="null" cid="null" cl="p.png" ctt_s="null" ctt_t="null" text="null" data="` + strings.Repeat("QUFB", 3000) + `" ></part>
+    </parts>
+    <addrs>
+      <addr address="+4915199999999" type="137" charset="106" />
+    </addrs>
+  </mms>
+  <sms protocol="0" address="+4915199999999" date="1700000400000" type="1" body="danach" read="1" contact_name="Ben" />
+</smses>
+`
+	var ns []xmlNachricht
+	if err := XMLLesen(strings.NewReader(x), annaTel, func(n xmlNachricht) error { ns = append(ns, n); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if len(ns) != 2 || ns[0].N.Text != "Ein Bild, das fehlt" || len(ns[0].N.Anhaenge) != 1 || len(ns[0].Daten[0]) != 9000 || ns[1].N.Text != "danach" {
+		t.Fatalf("%+v", ns)
+	}
+	// a cut export still fails
+	if err := XMLLesen(strings.NewReader(x[:len(x)-10]), annaTel, func(xmlNachricht) error { return nil }); err == nil {
+		t.Fatal("a cut export was read as whole")
+	}
+}
