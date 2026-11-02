@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"net"
 	"os"
@@ -315,7 +316,9 @@ type Mailholer struct {
 
 	mu      sync.Mutex
 	laeuft  bool
+	gang    Gang
 	falsch  bool
+	wechsel bool // another mailbox was given: its fetch state starts over
 	anstoss chan struct{}
 }
 
@@ -346,6 +349,29 @@ func (h *Mailholer) Laeuft() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	return h.laeuft
+}
+
+// Gang says how far the running round is; Was is empty when none runs.
+func (h *Mailholer) Gang() Gang {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.gang
+}
+
+func (h *Mailholer) gangSetzen(f func(*Gang)) {
+	h.mu.Lock()
+	f(&h.gang)
+	h.mu.Unlock()
+	h.geaendert()
+}
+
+// KontoGewechselt: the next round starts the fetch state over (folder
+// numbers of another mailbox say nothing; the HMAC set still keeps out
+// what is already packed).
+func (h *Mailholer) KontoGewechselt() {
+	h.mu.Lock()
+	h.wechsel = true
+	h.mu.Unlock()
 }
 
 // NeuerSchluessel: new credentials; try at once, also after a refused login.
@@ -401,11 +427,20 @@ func (h *Mailholer) Runde(ctx context.Context) {
 		return
 	}
 	h.laeuft = true
+	h.gang = Gang{Was: z.Benutzer, Quelle: "mail", Seit: h.now()}
+	wechsel := h.wechsel
+	h.wechsel = false
 	h.mu.Unlock()
+	if wechsel {
+		if err := os.Remove(h.standDatei()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Printf("archiv: Mail-Stand: %v", err)
+		}
+	}
 	h.geaendert()
 	defer func() {
 		h.mu.Lock()
 		h.laeuft = false
+		h.gang = Gang{}
 		h.mu.Unlock()
 		h.geaendert()
 	}()
@@ -579,7 +614,9 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 		if err != nil {
 			return g, fmt.Errorf("SEARCH: %w", err)
 		}
+		h.gangSetzen(func(gg *Gang) { gg.Gesamt += len(uids) })
 		pfad := maildirPfad(o)
+		bis := h.Gang().Bis
 		for i := 0; i < len(uids); i += buendel {
 			if ctx.Err() != nil {
 				return g, ctx.Err()
@@ -607,6 +644,9 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 				}
 				pk.bytes += int64(len(m.Roh))
 				pk.n++
+				if m.Datum.After(bis) {
+					bis = m.Datum
+				}
 				pk.macs = append(pk.macs, d)
 				return nil
 			})
@@ -618,6 +658,7 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 			}
 			st.UID = teil[len(teil)-1]
 			neu[schl] = st
+			h.gangSetzen(func(gg *Gang) { gg.Fertig += len(teil); gg.Bis = bis }) // once per bundle: each change rewrites the status file
 			if pk == nil {
 				if err := h.standSpeichern(neu); err != nil {
 					return g, fmt.Errorf("%w: %v", errMailPaket, err)

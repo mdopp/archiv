@@ -138,7 +138,7 @@ func TestPagesPerState(t *testing.T) {
 	}
 	wt.oeffnen(t)
 	body = wt.rufe("GET", "/tresor?m=angelegt", anna, nil).Body.String()
-	for _, want := range []string{"Abschließen", "Archiv durchsuchen", "Signal-Passphrase", "IMAP", "fehlt", "um 12:00"} {
+	for _, want := range []string{"Abschließen", "Archiv durchsuchen", "Signal-Passphrase", "Postfach eintragen", "Passphrase fehlt", "Kein Postfach eingetragen", "um 12:00", "64-stelligen Schlüssel"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("offen lacks %q:\n%s", want, body)
 		}
@@ -150,8 +150,15 @@ func TestPagesPerState(t *testing.T) {
 	if strings.Contains(body, "123451234512345") || strings.Contains(body, "1511234567") {
 		t.Fatal("a stored key is shown again")
 	}
-	if strings.Count(body, "hinterlegt am") != 2 {
-		t.Fatalf("passphrase and number not marked as stored:\n%s", body)
+	if !strings.Contains(body, "Passphrase hinterlegt am") || !strings.Contains(body, "Nummer +49 … 67") || !strings.Contains(body, "Passphrase oder Nummer ändern") || !strings.Contains(body, "ersetzt das Bisherige") {
+		t.Fatalf("the page does not say what is stored and that a new entry replaces it:\n%s", body)
+	}
+	if rec := wt.rufe("POST", "/tresor/imap", anna, url.Values{"host": {"imap.gmail.com"}, "benutzer": {"anna@example.org"}, "passwort": {"abcd efgh ijkl mnop"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("imap: %d %s", rec.Code, rec.Body)
+	}
+	body = wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	if !strings.Contains(body, "Postfach <b>anna@example.org</b> auf imap.gmail.com") || !strings.Contains(body, "ersetzt anna@example.org") || strings.Contains(body, "abcd efgh") {
+		t.Fatalf("the mail card does not name the stored mailbox, or shows the password:\n%s", body)
 	}
 	// outside the vault (the Briefkasten reads them while it is closed), owner-only
 	if tel, _ := wt.w.Schluessel.Lesen(SchluesselTelefon); string(tel) != "+491511234567" || !strings.HasPrefix(wt.w.Schluessel.Dir, wt.data) {
@@ -414,5 +421,22 @@ func TestHausGetsMediaOnlyWhileOpen(t *testing.T) {
 	wt.tt.Abschliessen(context.Background(), "t")
 	if rec := wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", haus, nil); rec.Code != http.StatusLocked {
 		t.Fatalf("closed: %d", rec.Code)
+	}
+}
+
+func TestThePageShowsWhatRunsAndHowFar(t *testing.T) {
+	wt := neuesWeb(t)
+	wt.oeffnen(t)
+	wt.w.Mailholer = &Mailholer{}
+	wt.w.Mailholer.gang = Gang{Was: "anna@example.org", Quelle: "mail", Seit: time.Now(), Fertig: 2300, Gesamt: 48000, Bis: time.Date(2023, 3, 9, 0, 0, 0, 0, time.Local)}
+	wt.w.Postbote.gang = Gang{Was: "20261102T080204Z-signal.age", Quelle: "signal", Seit: time.Now(), Gesamt: 41437}
+	body := wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	for _, want := range []string{"Gerade in Arbeit", `<progress value=2300 max=48000>`, "2.300 von 48.000 Mails abgeholt, bisher bis März 2023", "41.437 Signal-Nachrichten ins Archiv übernehmen", "data-auffrischen=10"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("lacks %q:\n%s", want, body)
+		}
+	}
+	if p := os.Getenv("SEITE_NACH"); p != "" {
+		os.WriteFile(p, []byte(body), 0o644)
 	}
 }

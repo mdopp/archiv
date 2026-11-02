@@ -154,6 +154,7 @@ type Briefkasten struct {
 
 	mu         sync.Mutex
 	laeuft     string
+	seit       time.Time
 	zurueck    map[string]bool
 	falsch     bool
 	keinSignal bool
@@ -170,6 +171,13 @@ func (b *Briefkasten) geaendert() {
 	if b.Geaendert != nil {
 		b.Geaendert()
 	}
+}
+
+// LaeuftSeit says which backup is packed now, and since when.
+func (b *Briefkasten) LaeuftSeit() (string, time.Time) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.laeuft, b.seit
 }
 
 // Laeuft is the backup being packed now, or "".
@@ -278,7 +286,7 @@ func zufall() string {
 // vault; the plaintext flows through a named pipe and is never a file.
 func (b *Briefkasten) Packen(ctx context.Context, d Datei, empf age.Recipient, pass []byte, telefon string) error {
 	b.mu.Lock()
-	b.laeuft = d.Rel
+	b.laeuft, b.seit = d.Rel, time.Now()
 	b.mu.Unlock()
 	b.geaendert()
 	defer func() {
