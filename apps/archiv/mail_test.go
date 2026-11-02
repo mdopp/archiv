@@ -407,7 +407,7 @@ func TestPostboteHandsAMailPacketToImportMaildir(t *testing.T) {
 		t.Fatalf("%d", len(mv.befehle))
 	}
 	a := mv.befehle[0].Args
-	if a[0] != "import-maildir" || !strings.HasPrefix(a[1], innen.Arbeit()) || a[2] != "--identifier" || a[3] != "username" || len(a) != 4 {
+	if a[0] != "import-maildir" || !strings.HasPrefix(a[1], innen.Arbeit()) || a[2] != "--identifier" || a[3] != "username" || len(a) != 5 || a[4] != "--no-resume" {
 		t.Fatalf("%q", a)
 	}
 	baum := strings.Join(mv.baum, " ")

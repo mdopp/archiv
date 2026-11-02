@@ -96,7 +96,11 @@ func msgvaultImportSMS(bin, home, xml, telefon string) Befehl {
 // running msgvault under the person's mail account. Additive as above:
 // import-maildir only adds (and adds folder labels to a message it has).
 func msgvaultImportMaildir(bin, home, maildir, konto string) Befehl {
-	return Befehl{Pfad: bin, Args: []string{"import-maildir", maildir, "--identifier", konto}, Env: msgvaultUmgebung(home)}
+	// --no-resume: each packet is its own unpacked folder, so a checkpoint
+	// left by an import a restart cut off names a folder that is gone and
+	// msgvault refuses every later packet (2026-11-02). A packet is whole
+	// and msgvault keeps one of each message, so starting fresh is safe.
+	return Befehl{Pfad: bin, Args: []string{"import-maildir", maildir, "--identifier", konto, "--no-resume"}, Env: msgvaultUmgebung(home)}
 }
 
 // Ausgabe is what a finished program said: the tail of its output.
