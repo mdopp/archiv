@@ -58,12 +58,13 @@ const (
 )
 
 var meldungen = map[string]string{
-	"angelegt": "Dein Tresor ist angelegt und offen. Hinterlege jetzt unten deine Signal-Passphrase und deine Nummer.",
-	"offen":    "Das Archiv ist offen.",
-	"zu":       "Das Archiv ist abgeschlossen.",
-	"signal":   "Gespeichert. Wartende Signal-Sicherungen liest das Archiv gleich ein.",
-	"imap":     "Gespeichert. Das Archiv holt deine Mails jetzt ab, danach jede Stunde.",
-	"whatsapp": "Gespeichert. Das Archiv liest deine WhatsApp-Sicherung gleich ein.",
+	"angelegt":    "Dein Tresor ist angelegt und offen. Hinterlege jetzt unten deine Signal-Passphrase und deine Nummer.",
+	"offen":       "Das Archiv ist offen.",
+	"zu":          "Das Archiv ist abgeschlossen.",
+	"signal":      "Gespeichert. Wartende Signal-Sicherungen liest das Archiv gleich ein.",
+	"imap":        "Gespeichert. Das Archiv holt deine Mails jetzt ab, danach jede Stunde.",
+	"whatsapp":    "Gespeichert. Das Archiv liest deine WhatsApp-Sicherung gleich ein.",
+	"passkey-weg": "Der Passkey ist entfernt; er öffnet das Archiv nicht mehr.",
 }
 
 // Web is the whole HTTP side.
@@ -83,6 +84,7 @@ type Web struct {
 	Archiv      http.Handler // msgvault, see archivProxy
 	Geaendert   func()
 	Puls        *Puls // open pages listen here (/tresor/live)
+	Passkeys    *Passkeys
 }
 
 type sitzungArt int
@@ -234,6 +236,9 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("GET /tresor/live", w.live)
 	mux.HandleFunc("POST /tresor/anlegen", w.anlegen)
 	mux.HandleFunc("POST /tresor/oeffnen", w.oeffnen)
+	mux.HandleFunc("GET /tresor/passkey/optionen", w.passkeyOptionen)
+	mux.HandleFunc("POST /tresor/oeffnen-passkey", w.oeffnenPasskey)
+	mux.HandleFunc("POST /tresor/passkey/weg", w.passkeyWeg)
 	mux.HandleFunc("POST /tresor/abschliessen", w.abschliessen)
 	mux.HandleFunc("POST /tresor/signal", w.signal)
 	mux.HandleFunc("POST /tresor/imap", w.imap)
@@ -303,8 +308,12 @@ func (w *Web) oeffnen(rw http.ResponseWriter, r *http.Request) {
 		w.antwort(rw, r, http.StatusBadRequest, "", saysPasswortFalsch)
 		return
 	}
+	warZu := w.Tresor.Stand().Zustand == Verschlossen
 	err := w.Tresor.Oeffnen(r.Context(), pw)
 	switch {
+	case err == nil && warZu && r.PostFormValue("pk_id") != "":
+		// the password opened a closed vault: it is the right one to keep for the passkey
+		w.antwort(rw, r, http.StatusOK, w.passkeyNachOeffnen(r, pw), "")
 	case err == nil:
 		http.Redirect(rw, r, "/tresor?m=offen", http.StatusSeeOther)
 	case errors.Is(err, ErrFalschesPasswort):
@@ -477,9 +486,14 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		b.WriteString(w.eingangText(false))
 	case Verschlossen:
 		b.WriteString(`<h2>Dein Archiv ist abgeschlossen</h2><div id=briefkasten data-live>` + w.briefkastenText() + `</div>`)
-		fmt.Fprintf(&b, `<form method=post action="/tresor/oeffnen" class=feld>
+		if len(w.Passkeys.Liste()) > 0 {
+			b.WriteString(`<form method=post action="/tresor/oeffnen-passkey" id=mit-passkey hidden><input type=hidden name=id><input type=hidden name=prf>` + knopf("Mit Passkey öffnen", "Öffne das Archiv …", "") + `</form><p class=k id=oder-passwort hidden>oder mit dem Archiv-Passwort:</p>`)
+		}
+		fmt.Fprintf(&b, `<form method=post action="/tresor/oeffnen" class=feld id=mit-passwort>
 <input name=konto autocomplete=username value="%s" hidden>
 <label>Archiv-Passwort<input type=password name=passwort autocomplete=current-password required autofocus></label>
+<label class=haken id=passkey-neu hidden><input type=checkbox name=pk_neu value=1> Künftig mit Passkey öffnen (dieses Gerät fragt nach Fingerabdruck oder PIN)</label>
+<input type=hidden name=pk_id><input type=hidden name=pk_salt><input type=hidden name=pk_prf>
 %s</form>`, esc("Archiv "+w.Person), knopf("Archiv öffnen", "Öffne das Archiv …", ""))
 		fmt.Fprintf(&b, `<p class=k>%s Schlüssel ändern kannst du, wenn es offen ist.</p>`, saysAdminLiest)
 		w.laeuftJetzt(&b)
@@ -516,6 +530,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		w.smsKarte(&b)
 		w.whatsappKarte(&b)
 		w.kontakteKarte(&b)
+		w.passkeyKarte(&b)
 	}
 	seite(rw, code, "Archiv", b.String(), extra)
 }
@@ -835,6 +850,25 @@ func seite(rw http.ResponseWriter, code int, titel, body, extra string) {
 const skript = `<script>
 document.addEventListener('submit',function(e){var b=e.submitter||e.target.querySelector('button');if(!b||!b.dataset.laeuft)return;setTimeout(function(){b.textContent=b.dataset.laeuft;b.disabled=true;b.setAttribute('aria-busy','true')},0)});
 document.addEventListener('DOMContentLoaded',function(){
+if(!window.PublicKeyCredential||!window.fetch)return;
+['passkey-neu','mit-passkey','oder-passwort'].forEach(function(i){var e=document.getElementById(i);if(e)e.hidden=false});
+function ab(s){s=s.replace(/-/g,'+').replace(/_/g,'/');while(s.length%4)s+='=';var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u.buffer}
+function b64(buf){var u=new Uint8Array(buf),s='';for(var i=0;i<u.length;i++)s+=String.fromCharCode(u[i]);return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')}
+function sag(form,text){var p=form.parentNode.querySelector('.passkey-fehler');if(!p){p=document.createElement('p');p.className='meldung fehler passkey-fehler';p.setAttribute('role','alert');form.parentNode.insertBefore(p,form)}p.textContent=text;var b=form.querySelector('button');if(b){b.disabled=false;b.removeAttribute('aria-busy')}}
+function optionen(){return fetch('/tresor/passkey/optionen',{credentials:'same-origin',cache:'no-store'}).then(function(r){return r.json()})}
+var pw=document.getElementById('mit-passwort');
+if(pw)pw.addEventListener('submit',function(e){var h=pw.querySelector('[name=pk_neu]');if(!h||!h.checked||pw.dataset.fertig)return;e.preventDefault();e.stopImmediatePropagation();
+optionen().then(function(o){var salt=ab(o.salt);return navigator.credentials.create({publicKey:{rp:{id:o.rpId,name:'Archiv'},user:{id:ab(o.user.id),name:o.user.name,displayName:o.user.name},challenge:ab(o.challenge),pubKeyCredParams:[{type:'public-key',alg:-7},{type:'public-key',alg:-257}],authenticatorSelection:{residentKey:'required',userVerification:'required'},extensions:{prf:{eval:{first:salt}}}}}).then(function(c){
+var x=c.getClientExtensionResults().prf||{};pw.pk_id.value=c.id;pw.pk_salt.value=o.salt;
+if(x.results&&x.results.first)return b64(x.results.first);if(!x.enabled)return '';
+return navigator.credentials.get({publicKey:{rpId:o.rpId,challenge:ab(o.challenge),allowCredentials:[{type:'public-key',id:c.rawId}],userVerification:'required',extensions:{prf:{eval:{first:salt}}}}}).then(function(a){var r=a.getClientExtensionResults().prf;return r&&r.results&&r.results.first?b64(r.results.first):''})})
+}).then(function(prf){pw.pk_prf.value=prf;pw.dataset.fertig=1;pw.submit()}).catch(function(){sag(pw,'Der Passkey wurde nicht angelegt. Das Archiv öffnet sich trotzdem, wenn du den Haken entfernst.')})});
+var mp=document.getElementById('mit-passkey');
+if(mp)mp.addEventListener('submit',function(e){if(mp.dataset.fertig)return;e.preventDefault();e.stopImmediatePropagation();
+optionen().then(function(o){var by={};o.credentials.forEach(function(c){by[c.id]={first:ab(c.salt)}});
+return navigator.credentials.get({publicKey:{rpId:o.rpId,challenge:ab(o.challenge),allowCredentials:o.credentials.map(function(c){return {type:'public-key',id:ab(c.id)}}),userVerification:'required',extensions:{prf:{evalByCredential:by}}}})}).then(function(a){var r=a.getClientExtensionResults().prf;if(!r||!r.results||!r.results.first)throw 0;mp.elements.namedItem('id').value=a.id;mp.elements.namedItem('prf').value=b64(r.results.first);mp.dataset.fertig=1;mp.submit()}).catch(function(){sag(mp,'Das hat nicht geklappt. Öffne das Archiv mit deinem Archiv-Passwort.')})});
+});
+document.addEventListener('DOMContentLoaded',function(){
 if(!window.EventSource||!window.fetch||!window.DOMParser)return;
 var warte=document.querySelector('[data-bis-bereit]'),live=document.querySelector('[data-live]');if(!warte&&!live)return;
 function beschaeftigt(el){var a=document.activeElement;if(a&&el.contains(a)&&(a.tagName==='INPUT'||a.tagName==='BUTTON'))return true;return [].some.call(el.querySelectorAll('input:not([hidden])'),function(i){return i.value&&i.value!==i.defaultValue})}
@@ -871,6 +905,8 @@ input{display:block;font:inherit;padding:.5rem .6rem;margin-top:.2rem;border:1px
 button{font:inherit;padding:.55rem 1.1rem;border:1px solid var(--akzent);border-radius:8px;background:var(--akzent);color:#fff;min-height:44px}button.k{background:none;color:var(--fg);border-color:var(--line)}
 button[aria-busy=true]{opacity:.6;cursor:progress}
 section{margin-top:1.2rem;border-top:1px solid var(--line)}
+.haken{display:flex!important;gap:.5rem;align-items:flex-start}.haken input{width:auto;margin-top:.2rem}
+form.zeile{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:.3rem 0}
 section.quelle{border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem .6rem;margin-top:1rem}section.quelle h3{margin-top:.8rem}
 section.jetzt{border:1px solid var(--akzent);border-radius:10px;padding:.2rem 1rem .6rem;margin-top:1rem}
 progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-color:var(--akzent)}

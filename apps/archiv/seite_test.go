@@ -52,7 +52,7 @@ func neuesWeb(t *testing.T) *webTest {
 		Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Schluessel: sch, Klartext: t.TempDir(), Run: &fakeSignal{}, Protokoll: prot}
 	pb := &Postbote{Post: bk.Post, Schluessel: sch, Protokoll: prot, Run: &fakeMsgvault{}}
 	wt.data = data
-	wt.w = &Web{Person: "anna", Secret: "s3cret", HausSecret: "haus-geheim", Tresor: tt.Tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang,
+	wt.w = &Web{Passkeys: &Passkeys{Datei: filepath.Join(data, "schluessel", "passkeys.json")}, Person: "anna", Secret: "s3cret", HausSecret: "haus-geheim", Tresor: tt.Tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang,
 		Protokoll: prot, Schluessel: sch, Letzte: bk.Letzte, Archiv: archivProxy(port)}
 	return wt
 }
@@ -481,5 +481,66 @@ func TestTheLiveStreamSaysEveryChange(t *testing.T) {
 	}
 	if zaehltAlsNutzung(httptest.NewRequest("GET", "/tresor/live", nil)) {
 		t.Fatal("an open tab would keep the vault open forever")
+	}
+}
+
+// A passkey opens the vault: the password that just opened a closed vault
+// is kept, wrapped under the passkey's PRF secret; only that secret
+// unwraps it, and a vault already open never stores a password unchecked.
+func TestAPasskeyOpensTheVaultWithThePasswordItWasGiven(t *testing.T) {
+	wt := neuesWeb(t)
+	wt.oeffnen(t)
+	prf := bytes.Repeat([]byte{7}, 32)
+	salt := bytes.Repeat([]byte{9}, 32)
+	pk := url.Values{"passwort": {"irgendwas-falsches"}, "pk_neu": {"1"}, "pk_id": {"cred-1"}, "pk_salt": {b64.EncodeToString(salt)}, "pk_prf": {b64.EncodeToString(prf)}}
+	wt.rufe("POST", "/tresor/oeffnen", anna, pk) // already open: Oeffnen does not check the password
+	if len(wt.w.Passkeys.Liste()) != 0 {
+		t.Fatal("a password was kept that never opened the vault")
+	}
+	if rec := wt.rufe("POST", "/tresor/abschliessen", anna, url.Values{}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("abschliessen: %d", rec.Code)
+	}
+	body := wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	if strings.Contains(body, `id=mit-passkey`) || !strings.Contains(body, "Künftig mit Passkey öffnen") {
+		t.Fatalf("closed, no passkey yet: %s", body)
+	}
+	pk.Set("passwort", geheim)
+	rec := wt.rufe("POST", "/tresor/oeffnen", anna, pk)
+	if !strings.Contains(rec.Body.String(), saysPasskeyNeu) {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	roh, _ := os.ReadFile(wt.w.Passkeys.Datei)
+	if bytes.Contains(roh, []byte(geheim)) {
+		t.Fatal("the password lies in the clear")
+	}
+	if fi, _ := os.Stat(wt.w.Passkeys.Datei); fi.Mode().Perm() != 0o600 {
+		t.Fatal("passkeys.json is not 0600")
+	}
+	wt.tt.bereit(t)
+	wt.rufe("POST", "/tresor/abschliessen", anna, url.Values{})
+	zu := wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	if !strings.Contains(zu, "Mit Passkey öffnen") {
+		t.Fatal("the closed page offers no passkey")
+	}
+	if p := os.Getenv("SEITE_ZU"); p != "" {
+		os.WriteFile(p, []byte(zu), 0o644)
+	}
+	falsch := wt.rufe("POST", "/tresor/oeffnen-passkey", anna, url.Values{"id": {"cred-1"}, "prf": {b64.EncodeToString(bytes.Repeat([]byte{8}, 32))}})
+	if falsch.Code != http.StatusForbidden || wt.w.Tresor.Stand().Zustand != Verschlossen {
+		t.Fatalf("another secret opened it: %d", falsch.Code)
+	}
+	if rec := wt.rufe("POST", "/tresor/oeffnen-passkey", anna, url.Values{"id": {"cred-1"}, "prf": {b64.EncodeToString(prf)}}); rec.Code != http.StatusSeeOther || wt.w.Tresor.Stand().Zustand != Offen {
+		t.Fatalf("the passkey did not open it: %d %s", rec.Code, rec.Body)
+	}
+	wt.tt.bereit(t)
+	if !strings.Contains(wt.rufe("GET", "/tresor", anna, nil).Body.String(), "Entfernen") {
+		t.Fatal("the open page does not list the passkey")
+	}
+	wt.rufe("POST", "/tresor/passkey/weg", anna, url.Values{"id": {"cred-1"}})
+	if len(wt.w.Passkeys.Liste()) != 0 {
+		t.Fatal("not removed")
+	}
+	if o := wt.rufe("GET", "/tresor/passkey/optionen", map[string]string{proxyHeader: "s3cret", "Remote-User": "ben"}, nil); o.Code == 200 {
+		t.Fatal("another person gets the options")
 	}
 }
