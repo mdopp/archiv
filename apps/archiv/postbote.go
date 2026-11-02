@@ -34,7 +34,7 @@ const (
 	saysWASchluesselFalsch = "Die WhatsApp-Sicherung ließ sich mit deinem Schlüssel nicht öffnen. Prüf den 64-stelligen Schlüssel und trag ihn noch einmal ein."
 	saysSMSKaputt          = "Die SMS-Datei %s ließ sich nicht entschlüsseln. Sie bleibt im Eingang; schick sie aus der Haus-App noch einmal."
 	saysGrosserAnhang      = "[Anhang %s, %d MB: zu groß für die Suche im Archiv. Er liegt im Tresor unter grosse-anhaenge/%s.]"
-	saysUebernahme         = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Das Paket bleibt im Briefkasten; beim nächsten Öffnen versucht es das Archiv noch einmal."
+	saysUebernahme         = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Verloren geht nichts: es versucht es in einer halben Stunde noch einmal und bei jedem Öffnen."
 	saysKeineNummer        = "Pakete warten, aber deine Handynummer fehlt. Gib sie unter „Schlüssel“ ein."
 	saysAnderesPaket       = "Das Paket %s hat ein Format, das dieses Archiv noch nicht kennt. Es bleibt im Briefkasten."
 )
@@ -61,7 +61,7 @@ type Postbote struct {
 	mu      sync.Mutex
 	laeuft  string
 	gang    Gang
-	zurueck map[string]bool
+	zurueck map[string]time.Time // a failed packet or file: when to try again
 }
 
 // Gang is one piece of work running now, as the page shows it. Gesamt 0:
@@ -151,10 +151,7 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 		if ctx.Err() != nil {
 			return
 		}
-		p.mu.Lock()
-		weg := p.zurueck[name]
-		p.mu.Unlock()
-		if weg {
+		if p.wartet(name) {
 			continue
 		}
 		if err := p.Zustellen(ctx, innen, id, name, string(tel)); err != nil && ctx.Err() == nil && !errors.Is(err, errOhneNummer) {
@@ -165,10 +162,7 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 		if ctx.Err() != nil {
 			return
 		}
-		p.mu.Lock()
-		weg := p.zurueck[d.Pfad]
-		p.mu.Unlock()
-		if weg {
+		if p.wartet(d.Pfad) {
 			continue
 		}
 		if err := p.SMSZustellen(ctx, innen, id, d, string(tel)); err != nil && ctx.Err() == nil && !errors.Is(err, errOhneNummer) {
@@ -196,7 +190,9 @@ func (p *Postbote) whatsappNeueste() (Datei, bool) {
 	return n, true
 }
 
-func waMarke(d Datei) string { return fmt.Sprintf("whatsapp:%s %d %d", d.Rel, d.Groesse, d.Mtime.Unix()) }
+func waMarke(d Datei) string {
+	return fmt.Sprintf("whatsapp:%s %d %d", d.Rel, d.Groesse, d.Mtime.Unix())
+}
 
 // whatsappWartet: a key is there and a database not yet imported.
 func (p *Postbote) whatsappWartet(innen Innen) bool {
@@ -222,10 +218,7 @@ func (p *Postbote) whatsapp(ctx context.Context, innen Innen, telefon string) {
 	}
 	d, _ := p.whatsappNeueste()
 	marke := waMarke(d)
-	p.mu.Lock()
-	weg := p.zurueck[marke]
-	p.mu.Unlock()
-	if weg {
+	if p.wartet(marke) {
 		return
 	}
 	if telefon == "" {
@@ -312,14 +305,28 @@ func (p *Postbote) NeuerWASchluessel() {
 	p.mu.Unlock()
 }
 
-// zuruecklegen: a failed packet or file waits for the next opening.
+// Erneut is how long a failed packet or file waits before the next try
+// while the vault stays open (and at every opening). A cause that passes —
+// a restart, a busy database — heals by itself; one that does not turns
+// the status red after DreimalRot tries, which wakes the box's Operator.
+const Erneut = 30 * time.Minute
+
+// zuruecklegen: a failed packet or file waits, then is tried again.
 func (p *Postbote) zuruecklegen(name string) {
 	p.mu.Lock()
 	if p.zurueck == nil {
-		p.zurueck = map[string]bool{}
+		p.zurueck = map[string]time.Time{}
 	}
-	p.zurueck[name] = true
+	p.zurueck[name] = p.now().Add(Erneut)
 	p.mu.Unlock()
+}
+
+// wartet says whether a failed name is still waiting for its next try.
+func (p *Postbote) wartet(name string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	t, ok := p.zurueck[name]
+	return ok && p.now().Before(t)
 }
 
 // SMSZustellen imports one file of the phone's SMS or calls: the Haus app

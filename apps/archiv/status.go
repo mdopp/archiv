@@ -94,6 +94,10 @@ type Lage struct {
 	Jetzt            time.Time
 }
 
+// DreimalRot: after this many failures in a row of the same file with the
+// same sentence the status turns red (the Operator wakes on red).
+const DreimalRot = 3
+
 func statusBauen(l Lage) statusDatei {
 	ein, fehler, zuSeit := l.Protokoll.Kopie()
 	st := l.Stand
@@ -177,7 +181,14 @@ func statusBauen(l Lage) statusDatei {
 		if fehler.Satz == saysSignalFalsch {
 			fix = "Öffne dein Archiv " + wo + " und gib die Signal-Passphrase unter „Schlüssel“ neu ein."
 		}
-		s.Findings = append(s.Findings, befund{Severity: "gelb", Detail: fehler.Satz, Fix: fix})
+		stufe := "gelb"
+		if fehler.Mal >= DreimalRot && fix == "Sag dem Admin Bescheid (laib logs)." {
+			// the same file failed again and again: no key the person can give
+			// fixes it, so it is red, and a red wakes the box's Operator
+			stufe = "rot"
+			fix = fmt.Sprintf("Das Archiv kommt hier allein nicht weiter (%d Versuche); verloren geht nichts, die Datei wartet. Der Grund steht in laib logs, in der Zeile mit „%s“.", fehler.Mal, fehler.Datei)
+		}
+		s.Findings = append(s.Findings, befund{Severity: stufe, Detail: fehler.Satz, Fix: fix})
 	}
 	if st.Fehler != "" {
 		s.Findings = append(s.Findings, befund{Severity: "gelb", Detail: st.Fehler, Fix: "laib logs"})
