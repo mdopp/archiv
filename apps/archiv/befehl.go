@@ -26,8 +26,8 @@ type Befehl struct {
 	Eingabe  []byte   // secret, written to stdin, then stdin is closed
 	Terminal []byte   // secret, typed into a pseudo-terminal on stdin once the program has switched echo off
 	// Unterwegs, when set, gets the program's last output line every few
-	// seconds while it runs: msgvault's import-whatsapp rewrites one
-	// progress line with \r ("Processed: N | Added: M …").
+	// seconds while it runs: msgvault's import-whatsapp and import-signal
+	// rewrite one progress line with \r ("Processed: N | Added: M …").
 	Unterwegs func(zeile string)
 }
 
@@ -92,18 +92,31 @@ func msgvaultServe(bin, home string) Befehl {
 	return Befehl{Pfad: bin, Args: []string{"serve"}, Env: msgvaultUmgebung(home)}
 }
 
-// signalExport writes the backup as an SMS Backup & Restore XML into a
-// named pipe (--overwrite: the pipe exists already; the tool only
-// writes forward, it never seeks). Its
-// passphrase is typed into a terminal: signalbackup-tools asks for it when
-// none is on the command line, and only reads a terminal (it fails on a pipe).
-func signalExport(bin, backup, xml, telefon string, passphrase []byte) Befehl {
-	return Befehl{Pfad: bin, Args: []string{backup, "--exportxml", xml, "--overwrite", "--setselfid", telefon, "--no-showprogress"},
+// signalEntpacken decrypts a Signal backup into dir (database.sqlite and
+// one Attachment_*.bin per attachment). dir must exist and be empty, and
+// is passed with a trailing slash: given a path that is not an existing
+// directory, signalbackup-tools writes an encrypted backup FILE instead and
+// asks a second time, for that file's passphrase (main.cc, tag 20261014).
+// The passphrase is typed into a terminal: signalbackup-tools asks for it
+// when none is on the command line, and only reads a terminal (it fails on
+// a pipe).
+func signalEntpacken(bin, backup, dir string, passphrase []byte) Befehl {
+	return Befehl{Pfad: bin, Args: []string{backup, "--output", strings.TrimSuffix(dir, "/") + "/", "--no-showprogress"},
 		Env: grundumgebung("/tmp"), Terminal: zeile(passphrase)}
 }
 
-// msgvaultImportSMS imports the XML through the running msgvault (the
-// CLI hands it to the daemon). Only import flags: import-synctech-sms
+// msgvaultImportSignal imports a decrypted Signal backup (the folder
+// signalEntpacken wrote) through the running msgvault, under msgvault's
+// own "signal" account for the person's number. Additive: msgvault keys a
+// message by its author's Signal id and sent time, a newer backup adds and
+// updates, and import-signal has no option that deletes.
+func msgvaultImportSignal(bin, home, dir, telefon string) Befehl {
+	return Befehl{Pfad: bin, Args: []string{"import-signal", dir, "--phone", telefon}, Env: msgvaultUmgebung(home)}
+}
+
+// msgvaultImportSMS imports an SMS Backup & Restore XML (the phone's SMS
+// and calls, or a packet) through the running msgvault (the CLI hands it
+// to the daemon). Only import flags: import-synctech-sms
 // has no option that deletes or mirrors deletions, and nothing here may
 // add one — the archive is additive (laib#985).
 func msgvaultImportSMS(bin, home, xml, telefon string) Befehl {

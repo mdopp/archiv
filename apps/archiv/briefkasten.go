@@ -9,7 +9,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -17,33 +16,25 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"filippo.io/age"
 )
 
-// The Briefkasten (owner, 2026-11-01): the inbox is read while the vault
-// is CLOSED, without being able to read the archive. Each new stable
-// Signal backup, oldest first, is decrypted by signalbackup-tools into a
-// named pipe (the plaintext is never a file), the messages not seen
-// before are written as ONE packet, age-encrypted to the person's public
-// key, into /data/briefkasten/, and the backup moves to /eingang/letzte/
-// (the newest one stays there for restoring a new phone; the older one
-// goes). When the vault opens, the Postbote brings the packets into
-// msgvault. The price, said on the page: the Signal passphrase lies on
-// the box, outside the vault, so root can decrypt FUTURE backups as they
-// arrive; the archive's history stays readable only with the password.
+// The Briefkasten (owner, 2026-11-01): what arrives while the vault is
+// CLOSED is made unreadable on the box without being able to read the
+// archive. The Mailholer writes new mail as packets, age-encrypted to the
+// person's public key, into /data/briefkasten/; WhatsApp's newest database
+// is kept in /eingang/letzte/ and its plaintext media are encrypted there.
+// When the vault opens, the Postbote brings the packets into msgvault.
+// Signal backups are no longer packed here (2026-11-02): msgvault's
+// import-signal reads the decrypted backup as a folder, and that plaintext
+// may exist only inside the vault, so the Postbote reads them while open.
 
 // What the Briefkasten says, one German sentence each.
 const (
-	saysSignalFalsch   = "Die Signal-Passphrase passt nicht zu dieser Sicherung. Gib sie neu ein."
-	saysSignalUnlesbar = "Die Signal-Sicherung %s ließ sich nicht lesen. Sie bleibt im Eingang; sag dem Admin Bescheid."
-	saysPaketFehler    = "Aus der Signal-Sicherung %s ließ sich kein Paket schreiben. Sie bleibt im Eingang; sag dem Admin Bescheid."
-	saysLetzteFehler   = "Die neueste Sicherung ließ sich nicht für ein neues Handy zurücklegen. Sag dem Admin Bescheid."
+	saysLetzteFehler = "Die neueste Sicherung ließ sich nicht für ein neues Handy zurücklegen. Sag dem Admin Bescheid."
 )
-
-var ErrSignalPassphrase = errors.New(saysSignalFalsch)
 
 // Gesehen is the set of messages already packed, per source: HMAC-SHA256
 // of each message's identity under a key that lives beside it, so the
@@ -137,28 +128,17 @@ func (g *Gesehen) Anhaengen(quelle string, neu [][32]byte) error {
 	return f.Close()
 }
 
-// Briefkasten turns inbox backups into packets, vault closed or open.
+// Briefkasten keeps the inbox safe while the vault is closed or open.
 type Briefkasten struct {
 	Eingang    *Eingang
 	Letzte     string // /eingang/letzte
 	Post       string // /data/briefkasten: the packets
 	Empfaenger string // /data/briefkasten.pub: the person's public key
 	Gesehen    *Gesehen
-	Schluessel Schluessel // /data/schluessel: the Signal passphrase and the number, outside the vault
-	Klartext   string     // a tmpfs folder for the named pipe (/dev/shm/archiv)
-	Run        Ausfuehrer
-	SignalBin  string
 	Protokoll  *Protokoll
 	Takt       time.Duration
 	Geaendert  func()
 	Now        func() time.Time
-
-	mu         sync.Mutex
-	laeuft     string
-	seit       time.Time
-	zurueck    map[string]bool
-	falsch     bool
-	keinSignal bool
 }
 
 func (b *Briefkasten) now() time.Time {
@@ -172,35 +152,6 @@ func (b *Briefkasten) geaendert() {
 	if b.Geaendert != nil {
 		b.Geaendert()
 	}
-}
-
-// LaeuftSeit says which backup is packed now, and since when.
-func (b *Briefkasten) LaeuftSeit() (string, time.Time) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.laeuft, b.seit
-}
-
-// Laeuft is the backup being packed now, or "".
-func (b *Briefkasten) Laeuft() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.laeuft
-}
-
-// FehlenSchluessel says whether Signal backups wait for the passphrase or the number.
-func (b *Briefkasten) FehlenSchluessel() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.keinSignal
-}
-
-// NeuerSchluessel lets the backups that failed try again.
-func (b *Briefkasten) NeuerSchluessel() {
-	b.mu.Lock()
-	b.zurueck, b.falsch = nil, false
-	b.mu.Unlock()
-	b.Protokoll.FehlerWeg("signal")
 }
 
 // Lauf packs until ctx ends: at once, then every Takt.
@@ -226,10 +177,7 @@ func (b *Briefkasten) Runde(ctx context.Context) {
 		return // no vault made yet: nobody to write to
 	}
 	b.aushaengen(empf)
-	b.signal(ctx, empf)
-	if ctx.Err() == nil {
-		b.whatsapp(ctx, empf)
-	}
+	b.whatsapp(ctx, empf)
 }
 
 // aushaengen puts the Briefkasten's public key into the inbox as
@@ -253,179 +201,10 @@ func (b *Briefkasten) aushaengen(empf *age.X25519Recipient) {
 	}
 }
 
-func (b *Briefkasten) signal(ctx context.Context, empf age.Recipient) {
-	stabil, err := b.Eingang.Stabil("signal")
-	if err != nil {
-		log.Printf("archiv: Eingang lesen: %v", err)
-	}
-	pass, errP := b.Schluessel.Lesen(SchluesselSignal)
-	tel, errT := b.Schluessel.Lesen(SchluesselTelefon)
-	defer nullen(pass)
-	b.mu.Lock()
-	b.keinSignal = len(stabil) > 0 && (errP != nil || errT != nil)
-	falsch := b.falsch
-	b.mu.Unlock()
-	if errP != nil || errT != nil || falsch {
-		return
-	}
-	for _, d := range stabil {
-		if ctx.Err() != nil {
-			return
-		}
-		b.mu.Lock()
-		weg := b.zurueck[d.schluessel()]
-		b.mu.Unlock()
-		if weg {
-			continue
-		}
-		err := b.Packen(ctx, d, empf, pass, string(tel))
-		if ctx.Err() != nil {
-			return
-		}
-		if err != nil {
-			b.mu.Lock()
-			if b.zurueck == nil {
-				b.zurueck = map[string]bool{}
-			}
-			b.zurueck[d.schluessel()] = true
-			if errors.Is(err, ErrSignalPassphrase) {
-				b.falsch = true // the same key fails on the others too
-			}
-			b.mu.Unlock()
-			if errors.Is(err, ErrSignalPassphrase) {
-				return
-			}
-		}
-	}
-}
-
 func zufall() string {
 	r := make([]byte, 8)
 	rand.Read(r)
 	return hex.EncodeToString(r)
-}
-
-// Packen makes the packet of one Signal backup. Nothing of it touches the
-// vault; the plaintext flows through a named pipe and is never a file.
-func (b *Briefkasten) Packen(ctx context.Context, d Datei, empf age.Recipient, pass []byte, telefon string) error {
-	b.mu.Lock()
-	b.laeuft, b.seit = d.Rel, time.Now()
-	b.mu.Unlock()
-	b.geaendert()
-	defer func() {
-		b.mu.Lock()
-		b.laeuft = ""
-		b.mu.Unlock()
-		b.geaendert()
-	}()
-	fehler := func(satz string, grund error) error {
-		log.Printf("archiv: signal %s: %v", d.Rel, grund)
-		if ctx.Err() == nil {
-			b.Protokoll.Fehlschlag(Fehler{Am: b.now(), Quelle: "signal", Datei: d.Rel, Satz: satz})
-		}
-		return grund
-	}
-
-	if err := os.MkdirAll(b.Klartext, 0o700); err != nil {
-		return fehler(fmt.Sprintf(saysPaketFehler, d.Rel), err)
-	}
-	rohr := filepath.Join(b.Klartext, "signal-"+zufall()+".xml")
-	if err := syscall.Mkfifo(rohr, 0o600); err != nil {
-		return fehler(fmt.Sprintf(saysPaketFehler, d.Rel), fmt.Errorf("mkfifo: %w", err))
-	}
-	defer os.Remove(rohr)
-
-	if err := os.MkdirAll(b.Post, 0o700); err != nil {
-		return fehler(fmt.Sprintf(saysPaketFehler, d.Rel), err)
-	}
-	jetzt := b.now().UTC()
-	tmp := filepath.Join(b.Post, ".neu-signal-"+zufall()+".age")
-	defer os.Remove(tmp) // gone unless renamed into place
-
-	gesehen, err := b.Gesehen.Laden("signal")
-	if err != nil {
-		return fehler(fmt.Sprintf(saysPaketFehler, d.Rel), err)
-	}
-
-	type ergebnis struct {
-		neu   [][32]byte
-		n, an int
-		err   error
-	}
-	leser := make(chan ergebnis, 1)
-	go func() {
-		var e ergebnis
-		e.neu, e.n, e.an, e.err = b.lesen(rohr, tmp, empf, d, telefon, gesehen, jetzt)
-		leser <- e
-	}()
-
-	a, err := b.Run.Run(ctx, signalExport(b.SignalBin, d.Pfad, rohr, telefon, pass))
-	// a reader still waiting for the pipe to open: let it see the end
-	var e ergebnis
-	for warten := true; warten; {
-		select {
-		case e = <-leser:
-			warten = false
-		case <-time.After(50 * time.Millisecond):
-			if w, err := os.OpenFile(rohr, os.O_WRONLY|syscall.O_NONBLOCK, 0); err == nil {
-				w.Close()
-			}
-		}
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	if err == nil && a.Code != 0 {
-		err = fmt.Errorf("signalbackup-tools Code %d", a.Code)
-	}
-	if err != nil {
-		if falschePassphrase(a.Text) {
-			return fehler(saysSignalFalsch, ErrSignalPassphrase)
-		}
-		log.Printf("archiv: signalbackup-tools: %s", fehlerzeilen(schwaerzen(a.Text, pass)))
-		return fehler(fmt.Sprintf(saysSignalUnlesbar, d.Rel), err)
-	}
-	if e.err != nil {
-		return fehler(fmt.Sprintf(saysPaketFehler, d.Rel), e.err)
-	}
-	paket := ""
-	if e.n > 0 {
-		name, err := einwerfen(tmp, b.Post, "signal", jetzt)
-		if err != nil {
-			return fehler(fmt.Sprintf(saysPaketFehler, d.Rel), err)
-		}
-		paket = name
-	}
-	if err := b.Gesehen.Anhaengen("signal", e.neu); err != nil {
-		log.Printf("archiv: gesehen: %v (the next packet repeats these messages; msgvault keeps one of each)", err)
-	}
-	log.Printf("archiv: signal %s → %d neue Nachrichten, %d Anhänge %s", d.Rel, e.n, e.an, paket)
-	b.Protokoll.Gepackt("signal", Gepackt{Am: b.now(), Sicherung: d.Rel, Paket: paket, Nachrichten: e.n, Anhaenge: e.an})
-	if err := b.zuruecklegen("signal", d, filepath.Base(d.Rel)); err != nil {
-		return fehler(saysLetzteFehler, err)
-	}
-	return nil
-}
-
-// lesen reads the XML from the pipe and writes the packet to tmp.
-func (b *Briefkasten) lesen(rohr, tmp string, empf age.Recipient, d Datei, telefon string, gesehen map[[32]byte]bool, jetzt time.Time) (neu [][32]byte, n, an int, err error) {
-	in, err := os.Open(rohr) // blocks until signalbackup-tools opens it, or Packen does
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		io.Copy(io.Discard, in)
-		return nil, 0, 0, err
-	}
-	defer out.Close()
-	neu, n, an, err = PackeXML(in, out, empf, Manifest{Quelle: "signal", Herkunft: "box", Sicherung: filepath.Base(d.Rel)}, telefon, b.Gesehen, gesehen, jetzt)
-	if err != nil {
-		io.Copy(io.Discard, in) // let the writer finish or fail on its own
-		return nil, 0, 0, err
-	}
-	return neu, n, an, out.Sync()
 }
 
 // PackeXML writes the messages of an SMS Backup & Restore XML that are
@@ -469,10 +248,10 @@ func PackeXML(in io.Reader, out io.Writer, empf age.Recipient, m Manifest, telef
 	return neu, p.Anzahl(), an, nil
 }
 
-// zuruecklegen moves a packed backup to letzte/<quelle>/ when it is the
-// newest there, and removes the older one; an older backup is deleted.
-func (b *Briefkasten) zuruecklegen(quelle string, d Datei, name string) error {
-	dir := filepath.Join(b.Letzte, quelle)
+// letzteBehalten moves an imported backup to letzte/<quelle>/ when it is
+// the newest there, and removes the older one; an older backup is deleted.
+func letzteBehalten(letzte, quelle string, d Datei, name string) error {
+	dir := filepath.Join(letzte, quelle)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}

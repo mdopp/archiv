@@ -49,8 +49,8 @@ func neuesWeb(t *testing.T) *webTest {
 	sch := Schluessel{Dir: filepath.Join(data, "schluessel")}
 	tt.Empfaenger = filepath.Join(data, "briefkasten.pub")
 	bk := &Briefkasten{Eingang: eingang, Letzte: filepath.Join(wt.inbox, "letzte"), Post: filepath.Join(data, "briefkasten"), Empfaenger: tt.Empfaenger,
-		Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Schluessel: sch, Klartext: t.TempDir(), Run: &fakeSignal{}, Protokoll: prot}
-	pb := &Postbote{Post: bk.Post, Schluessel: sch, Protokoll: prot, Run: &fakeMsgvault{}}
+		Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Protokoll: prot}
+	pb := &Postbote{Post: bk.Post, Eingang: eingang, Letzte: bk.Letzte, Schluessel: sch, Protokoll: prot, Run: &fakeMsgvault{}}
 	wt.data = data
 	wt.w = &Web{Passkeys: &Passkeys{Datei: filepath.Join(data, "schluessel", "passkeys.json")}, Person: "anna", Secret: "s3cret", HausSecret: "haus-geheim", Tresor: tt.Tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang,
 		Protokoll: prot, Schluessel: sch, Letzte: bk.Letzte, Archiv: archivProxy(port)}
@@ -161,14 +161,14 @@ func TestPagesPerState(t *testing.T) {
 	if !strings.Contains(body, "Postfach <b>anna@example.org</b> auf imap.gmail.com") || !strings.Contains(body, "ersetzt anna@example.org") || strings.Contains(body, "abcd efgh") {
 		t.Fatalf("the mail card does not name the stored mailbox, or shows the password:\n%s", body)
 	}
-	// outside the vault (the Briefkasten reads them while it is closed), owner-only
+	// outside the vault, owner-only
 	if tel, _ := wt.w.Schluessel.Lesen(SchluesselTelefon); string(tel) != "+491511234567" || !strings.HasPrefix(wt.w.Schluessel.Dir, wt.data) {
 		t.Fatalf("number stored as %q in %s", tel, wt.w.Schluessel.Dir)
 	}
 	if fi, _ := os.Stat(filepath.Join(wt.w.Schluessel.Dir, SchluesselSignal)); fi == nil || fi.Mode().Perm() != 0o600 {
 		t.Fatal("the passphrase file is not 0600")
 	}
-	if !strings.Contains(body, "Wer Root auf der Box hat, kann damit künftige Sicherungen entschlüsseln") {
+	if !strings.Contains(body, "Wer Root auf der Box hat, kann damit deine Signal-Sicherungen entschlüsseln") || !strings.Contains(body, "während es offen ist") {
 		t.Fatal("the page does not say what the passphrase on the box means")
 	}
 	if rec := wt.rufe("POST", "/tresor/abschliessen", anna, url.Values{}); rec.Code != http.StatusSeeOther {

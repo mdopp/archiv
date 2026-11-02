@@ -253,7 +253,8 @@ func PaketLesen(r io.Reader, id age.Identity, anhang func(name string, r io.Read
 	return m, nil
 }
 
-// --- from SMS Backup & Restore XML (signalbackup-tools --exportxml)
+// --- from SMS Backup & Restore XML (signalbackup-tools --exportxml, before
+// import-signal; `archiv paket-aus-xml`)
 
 // xmlNachricht is one message of the XML, with its attachments' data.
 type xmlNachricht struct {

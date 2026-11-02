@@ -18,8 +18,11 @@ import (
 	"filippo.io/age"
 )
 
-// The Postbote brings the Briefkasten's packets into msgvault while the
-// vault is open: oldest first, each decrypted with the private key from
+// The Postbote brings into msgvault, while the vault is open, what waits:
+// Signal backups from the inbox (decrypted by signalbackup-tools into a
+// folder in the vault's work folder, handed to msgvault's import-signal,
+// the folder removed on every path), WhatsApp's newest database, the
+// phone's SMS files, and the Briefkasten's packets: oldest first, each decrypted with the private key from
 // the vault, its attachments unpacked into the vault's work folder,
 // written as an SMS Backup & Restore XML there, imported, and deleted.
 // A mail packet is a Maildir: unpacked there and handed to
@@ -37,6 +40,9 @@ const (
 	saysUebernahme         = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Verloren geht nichts: es versucht es in einer halben Stunde noch einmal und bei jedem Öffnen."
 	saysKeineNummer        = "Pakete warten, aber deine Handynummer fehlt. Gib sie unter „Schlüssel“ ein."
 	saysAnderesPaket       = "Das Paket %s hat ein Format, das dieses Archiv noch nicht kennt. Es bleibt im Briefkasten."
+	saysSignalFalsch       = "Die Signal-Passphrase passt nicht zu dieser Sicherung. Gib sie neu ein."
+	saysSignalUnlesbar     = "Die Signal-Sicherung %s ließ sich nicht lesen. Sie bleibt im Eingang; sag dem Admin Bescheid."
+	saysSignalNummer       = "Die Signal-Sicherung gehört zu einer anderen Handynummer als der eingetragenen. Prüf deine Nummer bei Signal und gib sie noch einmal ein."
 )
 
 var (
@@ -45,24 +51,33 @@ var (
 	waImportiert    = regexp.MustCompile(`Messages:\s+(\d+) processed, (\d+) added`)
 	waUnterwegs     = regexp.MustCompile(`Processed: (\d+) \| Added: (\d+)`)
 	errOhneNummer   = errors.New("ohne Nummer")
+	errFalsch       = errors.New(saysSignalFalsch)
 )
+
+// SignalMaxAnhang is the largest attachment msgvault's import-signal stores
+// (its default MaxAttachmentSize); a larger one is skipped by it and kept
+// here in the vault instead.
+var SignalMaxAnhang int64 = 100 << 20
 
 type Postbote struct {
 	Post       string     // /data/briefkasten
-	Eingang    *Eingang   // sms/: the phone's SMS and calls, age-encrypted to the Briefkasten
-	Schluessel Schluessel // outside: the number
+	Eingang    *Eingang   // signal/, whatsapp/, sms/ (the phone's SMS and calls, age-encrypted to the Briefkasten)
+	Letzte     string     // /eingang/letzte: the newest imported Signal backup stays there for a new phone
+	Schluessel Schluessel // outside: the Signal passphrase and the number
 	Protokoll  *Protokoll
 	Run        Ausfuehrer
 	Msgvault   string
+	SignalBin  string // signalbackup-tools
 	Takt       time.Duration
 	Arbeit     func() func() // Tresor.Arbeit: no idle close while one is delivered
 	Geaendert  func()
 	Now        func() time.Time
 
-	mu      sync.Mutex
-	laeuft  string
-	gang    Gang
-	zurueck map[string]time.Time // a failed packet or file: when to try again
+	mu           sync.Mutex
+	laeuft       string
+	gang         Gang
+	zurueck      map[string]time.Time // a failed packet or file: when to try again
+	signalFalsch bool                 // the passphrase failed: no backup is tried until a new one is entered
 }
 
 // Gang is one piece of work running now, as the page shows it. Gesamt 0:
@@ -136,11 +151,18 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 	if p.Eingang != nil {
 		sms, _ = p.Eingang.Stabil("sms")
 	}
-	if len(pakete) == 0 && len(sms) == 0 && !p.whatsappWartet(innen) {
+	var signal []Datei
+	if p.Eingang != nil {
+		signal, _ = p.Eingang.Stabil("signal")
+	}
+	if len(pakete) == 0 && len(sms) == 0 && len(signal) == 0 && !p.whatsappWartet(innen) {
 		return
 	}
 	tel, _ := p.Schluessel.Lesen(SchluesselTelefon) // a mail packet needs none; a Signal packet waits for it
 	p.whatsapp(ctx, innen, string(tel))             // needs the WhatsApp key, not the Briefkasten's
+	if ctx.Err() == nil {
+		p.signal(ctx, innen, signal, string(tel))
+	}
 	if len(pakete) == 0 && len(sms) == 0 {
 		return
 	}
@@ -301,6 +323,177 @@ func (p *Postbote) whatsappZustellen(ctx context.Context, innen Innen, d Datei, 
 	p.Protokoll.Eingelesen("whatsapp", d.Rel, z, p.now())
 	p.Protokoll.FehlerWeg("whatsapp")
 	return nil
+}
+
+// signal imports the stable Signal backups, oldest first, once the
+// passphrase and the number are stored. A wrong passphrase stops the round
+// (it fails on every backup) until a new one is entered.
+func (p *Postbote) signal(ctx context.Context, innen Innen, backups []Datei, telefon string) {
+	if len(backups) == 0 || telefon == "" {
+		return // the page and the status say what is missing
+	}
+	p.mu.Lock()
+	falsch := p.signalFalsch
+	p.mu.Unlock()
+	if falsch {
+		return
+	}
+	pass, err := p.Schluessel.Lesen(SchluesselSignal)
+	if err != nil {
+		return
+	}
+	defer nullen(pass)
+	for _, d := range backups {
+		if ctx.Err() != nil {
+			return
+		}
+		marke := "signal:" + d.Pfad
+		if p.wartet(marke) {
+			continue
+		}
+		err := p.SignalZustellen(ctx, innen, d, pass, telefon)
+		if err == nil || ctx.Err() != nil {
+			continue
+		}
+		p.zuruecklegen(marke)
+		if errors.Is(err, errFalsch) {
+			p.mu.Lock()
+			p.signalFalsch = true
+			p.mu.Unlock()
+			return
+		}
+	}
+}
+
+// SignalZustellen imports one Signal backup: signalbackup-tools decrypts
+// it into a new folder in the vault's work folder (the plaintext exists
+// only inside the vault, and only for this call: the folder is removed on
+// every path), msgvault's import-signal reads that folder, and the backup
+// moves to letzte/signal/ (the newest stays for a new phone). A failed
+// backup stays in the inbox.
+func (p *Postbote) SignalZustellen(ctx context.Context, innen Innen, d Datei, pass []byte, telefon string) error {
+	if p.Arbeit != nil {
+		defer p.Arbeit()()
+	}
+	p.mu.Lock()
+	p.laeuft = d.Rel
+	p.gang = Gang{Was: d.Rel, Quelle: "signal", Seit: p.now()}
+	p.mu.Unlock()
+	p.geaendert()
+	defer func() {
+		p.mu.Lock()
+		p.laeuft = ""
+		p.gang = Gang{}
+		p.mu.Unlock()
+		p.geaendert()
+	}()
+	fehler := func(satz string, grund error) error {
+		log.Printf("archiv: Signal %s: %v", d.Rel, grund)
+		if ctx.Err() == nil {
+			p.Protokoll.Fehlschlag(Fehler{Am: p.now(), Quelle: "signal", Datei: d.Rel, Satz: satz})
+		}
+		return grund
+	}
+
+	dir := filepath.Join(innen.Arbeit(), "signal-"+zufall())
+	defer os.RemoveAll(dir)
+	if err := os.Mkdir(dir, 0o700); err != nil { // existing and empty: see signalEntpacken
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	bin := p.SignalBin
+	if bin == "" {
+		bin = "signalbackup-tools"
+	}
+	a, err := p.Run.Run(ctx, signalEntpacken(bin, d.Pfad, dir, pass))
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil && a.Code != 0 {
+		err = fmt.Errorf("signalbackup-tools Code %d: %s", a.Code, fehlerzeilen(schwaerzen(a.Text, pass)))
+	}
+	if err == nil {
+		if _, serr := os.Stat(filepath.Join(dir, "database.sqlite")); serr != nil {
+			err = fmt.Errorf("signalbackup-tools schrieb keine database.sqlite: %w", serr)
+		}
+	}
+	if err != nil {
+		if falschePassphrase(a.Text) {
+			fehler(saysSignalFalsch, err)
+			return errFalsch
+		}
+		return fehler(fmt.Sprintf(saysSignalUnlesbar, d.Rel), err)
+	}
+
+	imp := msgvaultImportSignal(p.Msgvault, innen.Home(), dir, telefon)
+	imp.Unterwegs = func(zeile string) {
+		if m := waUnterwegs.FindStringSubmatch(zeile); m != nil {
+			fertig, _ := strconv.Atoi(m[1])
+			neu, _ := strconv.Atoi(m[2])
+			p.gangSetzen(func(g *Gang) { g.Fertig, g.Neu = fertig, neu })
+		}
+	}
+	a, err = p.Run.Run(ctx, imp)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil && a.Code != 0 {
+		err = fmt.Errorf("msgvault import-signal Code %d: %s", a.Code, fehlerzeilen(a.Text))
+	}
+	if err != nil {
+		if strings.Contains(a.Text, "--phone does not match") {
+			return fehler(saysSignalNummer, err)
+		}
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	var z Zahlen
+	if m := waImportiert.FindStringSubmatch(a.Text); m != nil { // import-signal ends with the same summary as import-whatsapp
+		z.Signal, _ = strconv.Atoi(m[2])
+	}
+	grosseBehalten(dir, innen.GrosseAnhaenge())
+	if err := letzteBehalten(p.Letzte, "signal", d, filepath.Base(d.Rel)); err != nil {
+		return fehler(saysLetzteFehler, err)
+	}
+	log.Printf("archiv: Signal %s eingelesen: %d neue Nachrichten", d.Rel, z.Signal)
+	p.Protokoll.Eingelesen("signal", d.Rel, z, p.now())
+	return nil
+}
+
+// grosseBehalten moves the attachment files import-signal skipped for
+// their size (over SignalMaxAnhang) into the vault beside the archive, as
+// signal-<file>: the name signalbackup-tools gives is the attachment's row
+// and unique id, the same in every backup, so the next night's backup lands
+// on the same name instead of a second copy.
+func grosseBehalten(dir, ablage string) {
+	eintraege, _ := os.ReadDir(dir)
+	for _, e := range eintraege {
+		if !e.Type().IsRegular() || !strings.HasPrefix(e.Name(), "Attachment_") || !strings.HasSuffix(e.Name(), ".bin") {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil || fi.Size() <= SignalMaxAnhang {
+			continue
+		}
+		if err := os.MkdirAll(ablage, 0o700); err == nil {
+			err = os.Rename(filepath.Join(dir, e.Name()), filepath.Join(ablage, "signal-"+e.Name()))
+		}
+		if err != nil {
+			log.Printf("archiv: großer Signal-Anhang %s: %v", e.Name(), err)
+		}
+	}
+}
+
+// NeuerSignalSchluessel: a new passphrase or number; the backups that
+// failed are tried again at once.
+func (p *Postbote) NeuerSignalSchluessel() {
+	p.mu.Lock()
+	p.signalFalsch = false
+	for k := range p.zurueck {
+		if strings.HasPrefix(k, "signal:") {
+			delete(p.zurueck, k)
+		}
+	}
+	p.mu.Unlock()
+	p.Protokoll.FehlerWeg("signal")
 }
 
 // NeuerWASchluessel: a new key; the database a wrong key failed on is
