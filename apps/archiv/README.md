@@ -1,14 +1,15 @@
 # archiv
 
-Für die Familie in einem Satz: Dein Nachrichten-Archiv — Signal (später
-WhatsApp, E-Mail und Discord) durchsuchbar auf der Box, in einem Tresor, den
+Für die Familie in einem Satz: Dein Nachrichten-Archiv — Signal und E-Mail
+(später WhatsApp und Discord) durchsuchbar auf der Box, in einem Tresor, den
 nur dein Archiv-Passwort öffnet.
 
 One container per person ([laib ADR 0029](https://github.com/mdopp/laib/blob/main/docs/adr/0029-one-message-archive-per-person.md),
 laib#985, laib#986). Inside: a small Go supervisor (`archiv`, this folder),
 [msgvault](https://github.com/wesm/msgvault) 0.22.0, gocryptfs (Debian
 package), [signalbackup-tools](https://github.com/bepaald/signalbackup-tools)
-20261014 and wa-crypt-tools 0.1.0 (for WhatsApp, not used yet).
+20261014 and wa-crypt-tools 0.1.0 (for WhatsApp, not used yet); IMAP
+through [go-imap](https://github.com/emersion/go-imap) v1.2.1.
 
 - Code: `*.go`, tests: `go test ./...`; `integration.sh <image>` runs the
   built image with a real FUSE mount (CI does, on every push and PR).
@@ -51,8 +52,9 @@ vault, so the Briefkasten can read backups while it is closed. They are
 accepted only while the vault is open (so only the person sets them) and
 never shown again: the page shows „hinterlegt am …“ and says the price in
 plain words: whoever has root on the box can decrypt **future** backups with
-the passphrase as they arrive; what is already in the archive stays readable
-only with the Archiv-Passwort.
+the passphrase as they arrive, and read the person's mail with the app
+password (which the provider can revoke); what is already in the archive
+stays readable only with the Archiv-Passwort.
 
 ## Who gets in
 
@@ -130,10 +132,45 @@ Media need the private key: Haus asks the archive,
 <ARCHIV_HAUS_SECRET>`, answered only while the vault is open (423 while
 closed). `GET /intern/empfaenger` gives Haus the public key.
 
+### Mail: fetched every hour, vault closed or open
+
+Owner, 2026-11-02 („A“). Once the IMAP access is stored (host, user, app
+password), the Mailholer runs at start, every hour (`MAIL_TAKT`, seconds)
+and at once when the access is entered anew:
+
+1. TLS to port 993 (or the port given; 143 only with STARTTLS — a server
+   without TLS is refused), LOGIN with the app password.
+2. Folders: a server with a `\All` folder (Gmail's „Alle Nachrichten“) is
+   read there only, so every message comes once and Spam and Trash stay
+   out; Gmail's labels are lost. Elsewhere every selectable folder but
+   `\Junk` and `\Trash`.
+3. Per folder, read-only (`EXAMINE`): `UID SEARCH` above the last UID
+   fetched, then `UID FETCH BODY.PEEK[] FLAGS` in bundles of 100 — nothing
+   on the server changes, not even \Seen. A changed UIDVALIDITY starts the
+   folder again.
+4. A message whose raw bytes were packed before (HMAC-SHA256 of their
+   SHA-256 in `/data/gesehen/mail`, as for Signal) is left out — also a
+   copy in a second folder.
+5. The new messages become ONE packet `<UTC>-mail.age` (another one each
+   256 MiB, so a first fetch of a big mailbox arrives in pieces). The
+   fetch state `/data/gesehen/mail-stand.json` (per folder, keyed by an
+   HMAC of its name: UIDVALIDITY and the last UID) moves on only once the
+   messages up to it are in a packet in place; a break fetches them again.
+6. A refused login: „Der Mail-Server hat die Anmeldung abgelehnt …“, and no
+   further try with that password until a new one is entered. A server out
+   of reach or a break: the sentence, and the next hour tries again.
+
+At the opening, the Postbote unpacks the packet's Maildir into the vault's
+work folder and runs `msgvault import-maildir <dir> --identifier <konto>`:
+folders become labels, a message is keyed by the hash of its raw bytes, a
+copy in another folder only gets the label. Additive as for Signal.
+`archiv paket-aus-mails -konto <adresse> <ordner>` packs a folder of
+`.eml` files the same way (an old export; CI uses it).
+
 **WhatsApp's messages and Discord** are not imported yet: WhatsApp needs the
 64-digit key (`wadecrypt`, then `msgvault import-whatsapp`) — a next step,
 which will write packets as Signal does. Discord's data package has no
-importer in msgvault. IMAP credentials are stored, mail is not fetched yet.
+importer in msgvault.
 `archiv paket-aus-xml -telefon <number> [-quelle sms] < backup.xml` packs
 any SMS Backup & Restore XML (an old Android SMS backup too).
 
@@ -151,11 +188,16 @@ beginning with `.` and renames it into place when complete.
 - **Inside:** a POSIX tar (ustar or PAX), UTF-8 names, regular files only:
   1. `manifest.json` — **the first entry**:
      `{"format":"archiv-paket","version":1,"quelle":"signal","erstellt":"2026-11-01T22:00:00Z","herkunft":"box"|"telefon","sicherung":"signal-….backup"}`
-     (`sicherung` optional). A reader refuses another format or version.
+     (`sicherung` optional; a mail packet has `"quelle":"mail"` and
+     `"konto"`, the account). A reader refuses another format or version.
   2. `anhaenge/<name>` — one file per attachment, raw bytes; `<name>` is
      any file name without `/` (the box writes `000001`, `000002`, …).
   3. `nachrichten.jsonl` — one JSON object per line, one message each.
   Entries 2 and 3 may come in any order (the box writes attachments first).
+  A **mail packet** instead carries `maildir/<folder>/…/cur/<name>`, one
+  raw RFC 5322 message each (`<name>` = `<uidvalidity>.<uid>.<16 hex>:2,<flags>`,
+  Maildir's flags D F R S T), and an empty `nachrichten.jsonl`. No level of
+  the path is empty or begins with a dot; a reader refuses one that does.
 - **A message:**
 
   | field | type | meaning |
@@ -193,7 +235,7 @@ beginning with `.` and renames it into place when complete.
 `bereit`, `wartend.<quelle>.{wartend, aelteste_seit}` (the inbox),
 `briefkasten.{wartend, aeltestes}` (packets waiting for the opening),
 `letztes_paket.<quelle>.{am, sicherung, paket, nachrichten, anhaenge}`,
-`letzter_import.<quelle>.{am, datei, zahlen{sms,mms,anrufe,anhaenge}, anzahl}`,
+`letzter_import.<quelle>.{am, datei, zahlen{sms,mms,anrufe,anhaenge,mails}, anzahl}`,
 `letzter_fehler{am, quelle, datei, satz}`, `packt`, `liefert`. Findings
 (gelb): packets waiting more than three days while the archive is not open
 („Dein Archiv ist seit … zu, X Pakete mit neuen Nachrichten warten.“), a

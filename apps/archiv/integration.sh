@@ -3,7 +3,11 @@
 # real gocryptfs init/mount/unmount, real signalbackup-tools and msgvault,
 # and the supervisor end to end (anlegen, öffnen, the key reaching msgvault,
 # an additive import, a Signal backup that fails, abschließen, a wrong
-# password, öffnen again).
+# password, öffnen again, packets of Signal messages and of mail going into
+# msgvault at the opening).
+#
+# The IMAP fetch itself is proven by `go test` against go-imap's server;
+# a real provider (Gmail) only on the box with the person's app password.
 #
 # What it is NOT: the runner is rootful Docker on Ubuntu (AppArmor). The
 # box is rootless podman on Fedora CoreOS (SELinux). That FUSE mounts there
@@ -164,19 +168,31 @@ docker exec -i archiv archiv paket-aus-xml -telefon +4917000000000 <"$D/a.xml" |
 out=$(docker exec -i archiv archiv paket-aus-xml -telefon +4917000000000 <"$D/c.xml")
 grep -q "nichts Neues" <<<"$out" || fail "the same messages packed twice: $out"
 [ "$(sudo find "$D/data/briefkasten" -name '*-signal.age' | wc -l)" = 2 ] || fail "not two packets"
+
+echo "mail: a packet of two mails (what the hourly IMAP round writes), again nothing new"
+mkdir -p "$D/mails"
+printf 'From: Ben <ben@example.org>\r\nTo: anna@example.org\r\nSubject: Briefkasten-Mail eins\r\nDate: Mon, 02 Nov 2026 08:00:00 +0100\r\nMessage-ID: <eins@example.org>\r\n\r\nMAILTEXT-EINS\r\n' >"$D/mails/1.eml"
+printf 'From: Ben <ben@example.org>\r\nTo: anna@example.org\r\nSubject: Briefkasten-Mail zwei\r\nDate: Mon, 02 Nov 2026 09:00:00 +0100\r\nMessage-ID: <zwei@example.org>\r\n\r\nMAILTEXT-ZWEI\r\n' >"$D/mails/2.eml"
+docker cp "$D/mails" archiv:/tmp/mails
+sleep 1
+docker exec archiv archiv paket-aus-mails -konto anna@example.org /tmp/mails || fail "paket-aus-mails"
+out=$(docker exec archiv archiv paket-aus-mails -konto anna@example.org /tmp/mails)
+grep -q "nichts Neues" <<<"$out" || fail "the same mails packed twice: $out"
+[ "$(sudo find "$D/data/briefkasten" -name '*-mail.age' | wc -l)" = 1 ] || fail "not one mail packet"
+if sudo grep -rq "MAILTEXT" "$D/data/briefkasten"; then fail "plaintext mail in a packet"; fi
 if sudo grep -rq "Briefkasten" "$D/data/briefkasten"; then fail "plaintext in a packet"; fi
-curl -fsS "${H[@]}" "$U/tresor/stand" | jq -e '.briefkasten.wartend == 2' || fail "status does not count the packets"
+curl -fsS "${H[@]}" "$U/tresor/stand" | jq -e '.briefkasten.wartend == 3' || fail "status does not count the packets"
 
 code=$(curl -s -o "$D/falsch.html" -w '%{http_code}' "${H[@]}" --data-urlencode "passwort=falsch-falsch" "$U/tresor/oeffnen")
 [ "$code" = 403 ] && grep -q "stimmt nicht" "$D/falsch.html" || fail "wrong password: $code"
 code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passwort=$PW" "$U/tresor/oeffnen")
 [ "$code" = 303 ] || fail "öffnen: $code"
 warte 180 '.zustand == "offen" and .bereit == true'
-warte 120 '.briefkasten.wartend == 0 and .letzter_import.signal.anzahl == 2'
+warte 120 '.briefkasten.wartend == 0 and .letzter_import.signal.anzahl == 2 and .letzter_import.mail.zahlen.mails == 2'
 curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_import, .letztes_paket'
 [ -z "$(docker exec archiv ls -A /run/tresor/arbeit)" ] || fail "plaintext left in the vault's work folder after delivery"
-# 2 from before, 2 new from the first packet; the packet of a.xml brings nothing twice
-curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 4 and .active_messages == 4 and .total_accounts == 1 and .total_attachments >= 1' || { curl -fsS "${H[@]}" "$U/api/v1/stats"; fail "the packets did not arrive as they should (or duplicated)"; }
+# 2 from before, 2 new from the first packet; the packet of a.xml brings nothing twice; 2 mails under their own account
+curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 6 and .active_messages == 6 and .total_accounts == 2 and .total_attachments >= 1' || { curl -fsS "${H[@]}" "$U/api/v1/stats"; fail "the packets did not arrive as they should (or duplicated)"; }
 
 docker stop -t 90 archiv >/dev/null
 docker logs archiv >"$D/log" 2>&1

@@ -132,6 +132,9 @@ func statusBauen(l Lage) statusDatei {
 	if e, ok := ein["signal"]; ok {
 		teile = append(teile, fmt.Sprintf("Signal zuletzt am %s ins Archiv übernommen (%d Nachrichten)", datum(e.Am), e.Zahlen.Nachrichten()))
 	}
+	if e, ok := ein["mail"]; ok {
+		teile = append(teile, fmt.Sprintf("Mail zuletzt am %s ins Archiv übernommen (%d Mails)", datum(e.Am), e.Zahlen.Mails))
+	}
 	if l.Packt != "" {
 		teile = append(teile, "packt gerade "+l.Packt)
 	}
@@ -159,6 +162,9 @@ func statusBauen(l Lage) statusDatei {
 	}
 	if fehler != nil {
 		fix := "Sag dem Admin Bescheid (laib logs)."
+		if fehler.Satz == saysMailAnmeldung {
+			fix = "Leg bei deinem Mail-Anbieter ein neues App-Passwort an und gib es in deinem Archiv " + wo + " unter „Schlüssel“ ein."
+		}
 		if fehler.Satz == saysSignalFalsch {
 			fix = "Öffne dein Archiv " + wo + " und gib die Signal-Passphrase unter „Schlüssel“ neu ein."
 		}

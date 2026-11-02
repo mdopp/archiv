@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
+
+	"github.com/emersion/go-imap"
 )
 
 // werkzeug: `archiv paket-aus-xml` turns an SMS Backup & Restore XML
@@ -76,3 +81,84 @@ func werkzeug(args []string) int {
 	fmt.Printf("%s: %d Nachrichten, %d Anhänge\n", name, n, an)
 	return 0
 }
+
+// mailWerkzeug: `archiv paket-aus-mails -konto <adresse> <ordner>` packs
+// the .eml files of a folder (an old export, or the CI test's mails) as
+// one mail packet, as the hourly IMAP round does: only the messages not
+// packed before, into INBOX, as read.
+func mailWerkzeug(args []string) int {
+	fs := flag.NewFlagSet("paket-aus-mails", flag.ContinueOnError)
+	konto := fs.String("konto", "", "the mail account the messages belong to")
+	data := fs.String("data", env("DATA", "/data"), "the instance's data folder")
+	if err := fs.Parse(args); err != nil || *konto == "" || fs.NArg() != 1 {
+		fmt.Fprintln(os.Stderr, "archiv paket-aus-mails -konto <adresse> <ordner mit .eml>")
+		return 2
+	}
+	empf, err := empfaengerLesen(filepath.Join(*data, "briefkasten.pub"))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "Das Archiv ist noch nicht eingerichtet (kein öffentlicher Schlüssel):", err)
+		return 1
+	}
+	pf, err := ordnerPostfach(fs.Arg(0))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	h := &Mailholer{Post: filepath.Join(*data, "briefkasten"), Gesehen: &Gesehen{Dir: filepath.Join(*data, "gesehen")}}
+	g, err := h.holen(context.Background(), pf, empf, *konto)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if g.Paket == "" {
+		fmt.Println("nichts Neues, kein Paket")
+		return 0
+	}
+	fmt.Printf("%s: %d Mails\n", g.Paket, g.Nachrichten)
+	return 0
+}
+
+// lokalesPostfach is a folder of .eml files as one IMAP folder, INBOX.
+type lokalesPostfach struct{ dateien []string }
+
+func ordnerPostfach(dir string) (*lokalesPostfach, error) {
+	e, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	p := &lokalesPostfach{}
+	for _, x := range e {
+		if x.Type().IsRegular() && strings.HasSuffix(x.Name(), ".eml") {
+			p.dateien = append(p.dateien, filepath.Join(dir, x.Name()))
+		}
+	}
+	sort.Strings(p.dateien)
+	return p, nil
+}
+
+func (p *lokalesPostfach) Ordner() ([]PostOrdner, error) {
+	return []PostOrdner{{Name: "INBOX", Trenner: "/"}}, nil
+}
+func (p *lokalesPostfach) Waehlen(string) (uint32, error) { return 1, nil }
+func (p *lokalesPostfach) NeueUIDs(nach uint32) ([]uint32, error) {
+	var out []uint32
+	for i := range p.dateien {
+		if u := uint32(i + 1); u > nach {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+func (p *lokalesPostfach) Holen(uids []uint32, f func(Mail) error) error {
+	for _, u := range uids {
+		b, err := os.ReadFile(p.dateien[u-1])
+		if err != nil {
+			return err
+		}
+		if err := f(Mail{UID: u, Flags: []string{imap.SeenFlag}, Roh: b}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (p *lokalesPostfach) Abmelden() error { return nil }

@@ -92,6 +92,13 @@ func msgvaultImportSMS(bin, home, xml, telefon string) Befehl {
 	return Befehl{Pfad: bin, Args: []string{"import-synctech-sms", xml, "--owner-phone", telefon}, Env: msgvaultUmgebung(home)}
 }
 
+// msgvaultImportMaildir imports a mail packet's Maildir through the
+// running msgvault under the person's mail account. Additive as above:
+// import-maildir only adds (and adds folder labels to a message it has).
+func msgvaultImportMaildir(bin, home, maildir, konto string) Befehl {
+	return Befehl{Pfad: bin, Args: []string{"import-maildir", maildir, "--identifier", konto}, Env: msgvaultUmgebung(home)}
+}
+
 // Ausgabe is what a finished program said: the tail of its output.
 type Ausgabe struct {
 	Code   int

@@ -50,6 +50,7 @@ const (
 	saysArchivWeg       = "Das Archiv-Programm antwortet gerade nicht. Lade die Seite gleich neu."
 	saysVerloren        = "Wenn du das Archiv-Passwort verlierst, ist dein Archiv verloren. Niemand kann es wiederherstellen, auch der Admin nicht. Leg es deshalb gleich in Vaultwarden ab."
 	saysAdminLiest      = "Solange dein Archiv offen ist, kann der Admin der Box es lesen. Abgeschlossen sieht niemand etwas, auch nicht in den Sicherungen der Box."
+	saysMailPreis       = "Dafür liegt das App-Passwort auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit deine Mails lesen. Du kannst das App-Passwort bei deinem Anbieter jederzeit widerrufen; dann holt das Archiv nichts mehr ab."
 	saysBriefkasten     = "Neue Sicherungen liest die Box auch, wenn dein Archiv zu ist: Sie legt die neuen Nachrichten verschlossen in deinen Briefkasten, und beim Öffnen kommen sie ins Archiv. Dafür liegt deine Signal-Passphrase auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit künftige Sicherungen entschlüsseln, sobald sie ankommen. Was schon in deinem Archiv ist, bleibt nur mit deinem Archiv-Passwort lesbar."
 )
 
@@ -58,7 +59,7 @@ var meldungen = map[string]string{
 	"offen":    "Das Archiv ist offen.",
 	"zu":       "Das Archiv ist abgeschlossen.",
 	"signal":   "Gespeichert. Wartende Signal-Sicherungen liest das Archiv gleich ein.",
-	"imap":     "Gespeichert.",
+	"imap":     "Gespeichert. Das Archiv holt deine Mails jetzt ab, danach jede Stunde.",
 }
 
 // Web is the whole HTTP side.
@@ -68,6 +69,7 @@ type Web struct {
 	PublicURL   string
 	Tresor      *Tresor
 	Briefkasten *Briefkasten
+	Mailholer   *Mailholer
 	Postbote    *Postbote
 	Eingang     *Eingang
 	Protokoll   *Protokoll
@@ -244,10 +246,21 @@ func (w *Web) stand(rw http.ResponseWriter, r *http.Request) {
 // lage is what the status and the page are made of.
 func (w *Web) lage(st Stand) Lage {
 	return Lage{Person: w.Person, Stand: st, Wartend: wartende(w.Eingang), Briefkasten: briefkastenStand(w.Briefkasten.Post), Protokoll: w.Protokoll,
-		Packt: w.Briefkasten.Laeuft(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.Briefkasten.FehlenSchluessel(), URL: w.PublicURL, Jetzt: time.Now()}
+		Packt: w.packt(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.Briefkasten.FehlenSchluessel(), URL: w.PublicURL, Jetzt: time.Now()}
 }
 
 // antwort ends a form: back to the page with the sentence.
+// packt names what becomes a packet now: a backup, or the mail.
+func (w *Web) packt() string {
+	if l := w.Briefkasten.Laeuft(); l != "" {
+		return l
+	}
+	if w.Mailholer != nil && w.Mailholer.Laeuft() {
+		return "neue Mails"
+	}
+	return ""
+}
+
 func (w *Web) antwort(rw http.ResponseWriter, r *http.Request, code int, meldung, fehler string) {
 	w.tresorSeite(rw, r, code, meldung, fehler)
 }
@@ -377,6 +390,12 @@ func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
 		w.antwort(rw, r, http.StatusInternalServerError, "", saysSpeichernFehler)
 		return
 	}
+	if w.Mailholer != nil {
+		w.Mailholer.NeuerSchluessel()
+	}
+	if w.Geaendert != nil {
+		w.Geaendert()
+	}
 	http.Redirect(rw, r, "/tresor?m=imap", http.StatusSeeOther)
 }
 
@@ -405,7 +424,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 	switch st.Zustand {
 	case Uneingerichtet:
 		b.WriteString(`<h2>Dein Nachrichten-Archiv einrichten</h2>
-<p>Hier landen deine Signal-Nachrichten, später auch WhatsApp und E-Mail: durchsuchbar und nur für dich. Alles liegt in einem Tresor, den nur dein Archiv-Passwort öffnet.</p>`)
+<p>Hier landen deine Signal-Nachrichten und deine E-Mails, später auch WhatsApp: durchsuchbar und nur für dich. Alles liegt in einem Tresor, den nur dein Archiv-Passwort öffnet.</p>`)
 		fmt.Fprintf(&b, `<p class=hinweis>%s</p><p class=hinweis>%s</p>`, saysVerloren, saysAdminLiest)
 		fmt.Fprintf(&b, `<form method=post action="/tresor/anlegen" class=feld>
 <input name=konto autocomplete=username value="%s" hidden>
@@ -440,7 +459,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 				dauerText(w.Tresor.Leerlauf), st.ZuUm.Local().Format("15:04"), saysAdminLiest)
 		}
 		w.importStand(&b)
-		if extra == "" && (w.Briefkasten.Laeuft() != "" || w.Postbote.Laeuft() != "") {
+		if extra == "" && (w.Briefkasten.Laeuft() != "" || w.Postbote.Laeuft() != "" || (w.Mailholer != nil && w.Mailholer.Laeuft())) {
 			extra = `<div hidden data-auffrischen=10></div>`
 		}
 		w.schluesselFormulare(&b)
@@ -508,6 +527,12 @@ func (w *Web) letzteImporte(b *strings.Builder) {
 	if e, ok := ein["signal"]; ok {
 		fmt.Fprintf(b, `<p class=k>Zuletzt ins Archiv übernommen am %s: %s.</p>`, datum(e.Am), anzahl(e.Zahlen.Nachrichten(), "Nachricht", "Nachrichten"))
 	}
+	if g, ok := w.Protokoll.Pakete()["mail"]; ok {
+		fmt.Fprintf(b, `<p class=k>Mails zuletzt abgeholt am %s: %s.</p>`, datum(g.Am), anzahl(g.Nachrichten, "neue Mail", "neue Mails"))
+	}
+	if e, ok := ein["mail"]; ok {
+		fmt.Fprintf(b, `<p class=k>Mails zuletzt ins Archiv übernommen am %s: %s.</p>`, datum(e.Am), anzahl(e.Zahlen.Mails, "Mail", "Mails"))
+	}
 	if fehler != nil {
 		fmt.Fprintf(b, `<p class="meldung fehler">%s <span class=k>(%s)</span></p>`, esc(fehler.Satz), datum(fehler.Am))
 	}
@@ -517,6 +542,9 @@ func (w *Web) importStand(b *strings.Builder) {
 	b.WriteString(`<section><h3>Einlesen</h3>`)
 	if l := w.Briefkasten.Laeuft(); l != "" {
 		fmt.Fprintf(b, `<p class=laeuft aria-live=polite>Liest gerade %s …</p>`, esc(l))
+	}
+	if w.Mailholer != nil && w.Mailholer.Laeuft() {
+		b.WriteString(`<p class=laeuft aria-live=polite>Holt gerade neue Mails ab …</p>`)
 	}
 	if l := w.Postbote.Laeuft(); l != "" {
 		fmt.Fprintf(b, `<p class=laeuft aria-live=polite>Übernimmt gerade %s ins Archiv …</p>`, esc(l))
@@ -550,11 +578,12 @@ func (w *Web) schluesselFormulare(b *strings.Builder) {
 %s</form>`, saysBriefkasten, hinterlegt(SchluesselSignal), hinterlegt(SchluesselTelefon), knopf("Speichern", "Speichere …", ""))
 	fmt.Fprintf(b, `<form method=post action="/tresor/imap" class=feld>
 <p><b>E-Mail (IMAP)</b>: %s</p>
-<p class=k>Mit einem App-Passwort deines Mail-Anbieters, nicht deinem normalen Passwort. Es liegt wie die Signal-Passphrase auf der Box. Das Abholen der Mails kommt in einem nächsten Schritt; der Zugang liegt dann schon bereit.</p>
+<p class=k>Mit einem App-Passwort deines Mail-Anbieters, nicht deinem normalen Passwort (Gmail: Google-Konto → Sicherheit → App-Passwörter; dafür muss die Bestätigung in zwei Schritten an sein). Das Archiv holt jede Stunde die neuen Mails ab, auch wenn es zu ist, und ändert auf dem Server nichts, nicht einmal „gelesen“. Bei Gmail liest es „Alle Nachrichten“ (ohne Spam und Papierkorb); deine Gmail-Labels kommen nicht mit.</p>
+<p class=hinweis>%s</p>
 <label>Server<input name=host autocomplete=off placeholder="imap.gmail.com"></label>
 <label>Benutzername<input name=benutzer autocomplete=off></label>
 <label>App-Passwort<input name=passwort type=password autocomplete=new-password></label>
-%s</form></section>`, hinterlegt(SchluesselIMAP), knopf("Speichern", "Speichere …", ""))
+%s</form></section>`, hinterlegt(SchluesselIMAP), saysMailPreis, knopf("Speichern", "Speichere …", ""))
 }
 
 // seite wraps a page: the same head, one stylesheet, one small script.

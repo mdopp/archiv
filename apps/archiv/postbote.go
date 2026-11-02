@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,9 +21,11 @@ import (
 // vault is open: oldest first, each decrypted with the private key from
 // the vault, its attachments unpacked into the vault's work folder,
 // written as an SMS Backup & Restore XML there, imported, and deleted.
-// Additive only: msgvault upserts every message by a stable id, and
-// import-synctech-sms has no option that deletes; nothing here runs
-// anything else. The work folder is emptied after every packet.
+// A mail packet is a Maildir: unpacked there and handed to
+// import-maildir. Additive only: msgvault upserts every message by a
+// stable id (mail: by a hash of the raw message), and neither import has
+// an option that deletes; nothing here runs anything else. The work
+// folder is emptied after every packet.
 
 const (
 	saysPaketKaputt  = "Das Paket %s ließ sich nicht öffnen. Es bleibt im Briefkasten; sag dem Admin Bescheid."
@@ -31,7 +34,11 @@ const (
 	saysAnderesPaket = "Das Paket %s hat ein Format, das dieses Archiv noch nicht kennt. Es bleibt im Briefkasten."
 )
 
-var importiert = regexp.MustCompile(`Imported (\d+) SMS, (\d+) MMS, (\d+) calls, (\d+) attachments`)
+var (
+	importiert      = regexp.MustCompile(`Imported (\d+) SMS, (\d+) MMS, (\d+) calls, (\d+) attachments`)
+	mailsImportiert = regexp.MustCompile(`Messages: (\d+) added, (\d+) updated, (\d+) skipped`)
+	errOhneNummer   = errors.New("ohne Nummer")
+)
 
 type Postbote struct {
 	Post       string     // /data/briefkasten
@@ -92,10 +99,7 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 	if len(pakete) == 0 {
 		return
 	}
-	tel, err := p.Schluessel.Lesen(SchluesselTelefon)
-	if err != nil {
-		return // the page says it: saysKeineNummer
-	}
+	tel, _ := p.Schluessel.Lesen(SchluesselTelefon) // a mail packet needs none; a Signal packet waits for it
 	id, err := identitaetLesen(innen.Identitaet())
 	if err != nil {
 		log.Printf("archiv: der private Schlüssel fehlt im Tresor: %v", err)
@@ -111,7 +115,7 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 		if weg {
 			continue
 		}
-		if err := p.Zustellen(ctx, innen, id, name, string(tel)); err != nil && ctx.Err() == nil {
+		if err := p.Zustellen(ctx, innen, id, name, string(tel)); err != nil && ctx.Err() == nil && !errors.Is(err, errOhneNummer) {
 			p.mu.Lock()
 			if p.zurueck == nil {
 				p.zurueck = map[string]bool{}
@@ -162,7 +166,14 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	var nachrichten []Nachricht
 	m, err := PaketLesen(f, id,
 		func(datei string, r io.Reader) error {
-			out, err := os.OpenFile(filepath.Join(arbeit, "anhaenge", datei), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+			ziel := filepath.Join(arbeit, "anhaenge", datei)
+			if strings.HasPrefix(datei, "maildir/") { // checked by PaketLesen: clean, no dot-level
+				ziel = filepath.Join(arbeit, filepath.FromSlash(datei))
+				if err := maildirAnlegen(filepath.Dir(filepath.Dir(ziel))); err != nil {
+					return err
+				}
+			}
+			out, err := os.OpenFile(ziel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 			if err != nil {
 				return err
 			}
@@ -182,6 +193,13 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	}
 	if err != nil {
 		return fehler(fmt.Sprintf(saysPaketKaputt, name), err)
+	}
+
+	if quelle == "mail" {
+		return p.mailZustellen(ctx, innen, name, m, filepath.Join(arbeit, "maildir"), fehler)
+	}
+	if telefon == "" {
+		return errOhneNummer // the page says it (saysKeineNummer); the packet waits
 	}
 
 	out, err := os.OpenFile(xml, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -226,5 +244,47 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	}
 	log.Printf("archiv: Paket %s eingelesen: %d SMS, %d MMS, %d Anhänge", name, z.SMS, z.MMS, z.Anhaenge)
 	p.Protokoll.Eingelesen(quelle, name, z, p.now())
+	return nil
+}
+
+// maildirAnlegen makes a Maildir folder whole (cur, new, tmp): msgvault
+// takes only a folder with all three as a mailbox; a packet carries cur.
+func maildirAnlegen(dir string) error {
+	for _, d := range []string{"cur", "new", "tmp"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mailZustellen hands a mail packet's Maildir to msgvault, under the
+// account the packet names, and deletes the packet.
+func (p *Postbote) mailZustellen(ctx context.Context, innen Innen, name string, m Manifest, maildir string, fehler func(string, error) error) error {
+	if m.Konto == "" {
+		return fehler(fmt.Sprintf(saysAnderesPaket, name), errors.New("ein Mail-Paket ohne Konto"))
+	}
+	if _, err := os.Stat(maildir); err != nil {
+		return fehler(fmt.Sprintf(saysPaketKaputt, name), errors.New("ein Mail-Paket ohne Mails"))
+	}
+	a, err := p.Run.Run(ctx, msgvaultImportMaildir(p.Msgvault, innen.Home(), maildir, m.Konto))
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err == nil && a.Code != 0 {
+		err = fmt.Errorf("msgvault import-maildir Code %d: %s", a.Code, fehlerzeilen(a.Text))
+	}
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, name), err)
+	}
+	var z Zahlen
+	if x := mailsImportiert.FindStringSubmatch(a.Text); x != nil {
+		z.Mails, _ = strconv.Atoi(x[1]) // added; "updated" are messages it had, now with one more folder
+	}
+	if err := os.Remove(filepath.Join(p.Post, name)); err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, name), err)
+	}
+	log.Printf("archiv: Paket %s eingelesen: %d Mails", name, z.Mails)
+	p.Protokoll.Eingelesen("mail", name, z, p.now())
 	return nil
 }
