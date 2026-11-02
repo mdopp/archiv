@@ -165,6 +165,10 @@ func statusBauen(l Lage) statusDatei {
 		}
 		s.Findings = append(s.Findings, befund{Severity: "gelb", Detail: detail, Fix: "Öffne dein Archiv " + wo + " mit deinem Archiv-Passwort; dann übernimmt es die Pakete."})
 	}
+	if st.Zustand == Verschlossen && signal.Wartend > 0 && signal.AeltesteSeit != nil && l.Jetzt.Sub(*signal.AeltesteSeit) > wartenZuLange {
+		s.Findings = append(s.Findings, befund{Severity: "gelb", Detail: fmt.Sprintf("Dein Archiv ist zu, %s seit %s.", anzahl(signal.Wartend, "Signal-Sicherung wartet", "Signal-Sicherungen warten"), datum(*signal.AeltesteSeit)),
+			Fix: "Öffne dein Archiv " + wo + " mit deinem Archiv-Passwort; dann liest es die Sicherungen ein."})
+	}
 	if st.Zustand == Uneingerichtet && signal.Wartend > 0 && signal.AeltesteSeit != nil && l.Jetzt.Sub(*signal.AeltesteSeit) > wartenZuLange {
 		s.Findings = append(s.Findings, befund{Severity: "gelb", Detail: fmt.Sprintf("Dein Archiv ist noch nicht eingerichtet, %s.", anzahl(signal.Wartend, "Sicherung wartet", "Sicherungen warten")),
 			Fix: "Richte dein Archiv " + wo + " ein."})
@@ -180,6 +184,9 @@ func statusBauen(l Lage) statusDatei {
 		}
 		if fehler.Satz == saysSignalFalsch {
 			fix = "Öffne dein Archiv " + wo + " und gib die Signal-Passphrase unter „Schlüssel“ neu ein."
+		}
+		if fehler.Satz == saysSignalNummer {
+			fix = "Öffne dein Archiv " + wo + " und prüf deine Handynummer bei Signal."
 		}
 		stufe := "gelb"
 		if fehler.Mal >= DreimalRot && fix == "Sag dem Admin Bescheid (laib logs)." {

@@ -68,7 +68,8 @@ func TestNoSecretInArgvOrEnv(t *testing.T) {
 		"gocryptfs mount": gocryptfsMount("gocryptfs", "/data/tresor", "/run/tresor", pw),
 		"fusermount":      fusermountU("fusermount3", "/run/tresor", false),
 		"msgvault serve":  msgvaultServe("msgvault", "/run/tresor/msgvault"),
-		"signal export":   signalExport("signalbackup-tools", "/eingang/signal/signal-1.backup", "/run/tresor/arbeit/x.xml", "+4915112345678", pp),
+		"signal decrypt":  signalEntpacken("signalbackup-tools", "/eingang/signal/signal-1.backup", "/run/tresor/arbeit/signal-x", pp),
+		"import-signal":   msgvaultImportSignal("msgvault", "/run/tresor/msgvault", "/run/tresor/arbeit/signal-x", "+4915112345678"),
 		"msgvault import": msgvaultImportSMS("msgvault", "/run/tresor/msgvault", "/run/tresor/arbeit/x.xml", "+4915112345678"),
 	} {
 		alles := strings.Join(append(append([]string{b.Pfad}, b.Args...), b.Env...), "\x00")
@@ -86,7 +87,7 @@ func TestNoSecretInArgvOrEnv(t *testing.T) {
 	if b := gocryptfsMount("g", "c", "m", pw); string(b.Eingabe) != geheim+"\n" || b.Terminal != nil {
 		t.Errorf("mount: the password goes on stdin, got %q", b.Eingabe)
 	}
-	if b := signalExport("s", "b", "x", "+49", pp); string(b.Terminal) != passphrase+"\n" || b.Eingabe != nil {
+	if b := signalEntpacken("s", "b", "x", pp); string(b.Terminal) != passphrase+"\n" || b.Eingabe != nil {
 		t.Errorf("signal: the passphrase is typed into a terminal, got %q", b.Terminal)
 	}
 }
@@ -94,7 +95,8 @@ func TestNoSecretInArgvOrEnv(t *testing.T) {
 // msgvault runs with telemetry off by every switch it honours and its
 // home inside the vault.
 func TestMsgvaultEnvironment(t *testing.T) {
-	for _, b := range []Befehl{msgvaultServe("msgvault", "/run/tresor/msgvault"), msgvaultImportSMS("msgvault", "/run/tresor/msgvault", "x", "+49")} {
+	for _, b := range []Befehl{msgvaultServe("msgvault", "/run/tresor/msgvault"), msgvaultImportSMS("msgvault", "/run/tresor/msgvault", "x", "+49"),
+		msgvaultImportSignal("msgvault", "/run/tresor/msgvault", "x", "+49")} {
 		env := strings.Join(b.Env, " ")
 		for _, want := range []string{"MSGVAULT_HOME=/run/tresor/msgvault", "MSGVAULT_TELEMETRY_ENABLED=0", "DO_NOT_TRACK=1", "HOME=/run/tresor/msgvault"} {
 			if !strings.Contains(env, want) {
@@ -111,6 +113,26 @@ func TestImportCommandIsAdditiveOnly(t *testing.T) {
 	want := []string{"import-synctech-sms", "/x.xml", "--owner-phone", "+4915112345678"}
 	if strings.Join(b.Args, " ") != strings.Join(want, " ") {
 		t.Fatalf("args %q, want %q", b.Args, want)
+	}
+}
+
+// Signal: signalbackup-tools decrypts into a folder, import-signal reads
+// it. The folder goes with a trailing slash: without one, a path that is
+// not an existing folder makes signalbackup-tools write an encrypted
+// backup file and ask for a second passphrase nobody types. Only import
+// flags, as for SMS.
+func TestSignalCommands(t *testing.T) {
+	for _, dir := range []string{"/run/tresor/arbeit/signal-1", "/run/tresor/arbeit/signal-1/"} {
+		b := signalEntpacken("signalbackup-tools", "/eingang/signal/signal-1.backup", dir, []byte(passphrase))
+		want := []string{"/eingang/signal/signal-1.backup", "--output", "/run/tresor/arbeit/signal-1/", "--no-showprogress"}
+		if strings.Join(b.Args, " ") != strings.Join(want, " ") {
+			t.Fatalf("decrypt args %q, want %q", b.Args, want)
+		}
+	}
+	b := msgvaultImportSignal("msgvault", "/h", "/run/tresor/arbeit/signal-1", "+4915112345678")
+	want := []string{"import-signal", "/run/tresor/arbeit/signal-1", "--phone", "+4915112345678"}
+	if strings.Join(b.Args, " ") != strings.Join(want, " ") {
+		t.Fatalf("import args %q, want %q", b.Args, want)
 	}
 }
 
@@ -148,7 +170,7 @@ func TestExecFeedsTheSecretOnStdin(t *testing.T) {
 // A program that reads only a terminal (signalbackup-tools) gets the
 // passphrase typed in once it has switched echo off; it never shows.
 func TestExecTypesThePassphraseIntoATerminal(t *testing.T) {
-	b := helfer(t, "terminal", signalExport("x", "/eingang/signal/signal-1.backup", "/tmp/x.xml", "+49151", []byte(passphrase)))
+	b := helfer(t, "terminal", signalEntpacken("x", "/eingang/signal/signal-1.backup", "/tmp/signal-x", []byte(passphrase)))
 	a, err := execAusfuehrer{}.Run(context.Background(), b)
 	if err != nil || a.Code != 0 {
 		t.Fatalf("%v %d %s", err, a.Code, a.Text)
@@ -169,7 +191,7 @@ func TestExecTypesThePassphraseIntoATerminal(t *testing.T) {
 // A program that ends before it asks does not hold the import for the
 // two minutes of waiting for its question.
 func TestExecDoesNotWaitForAQuestionThatNeverComes(t *testing.T) {
-	b := helfer(t, "frueh", signalExport("x", "/fehlt.backup", "/tmp/x.xml", "+49151", []byte(passphrase)))
+	b := helfer(t, "frueh", signalEntpacken("x", "/fehlt.backup", "/tmp/signal-x", []byte(passphrase)))
 	start := time.Now()
 	a, err := execAusfuehrer{}.Run(context.Background(), b)
 	if err != nil || a.Code != 1 || !strings.Contains(a.Text, "file not found") {

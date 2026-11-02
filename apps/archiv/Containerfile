@@ -1,12 +1,15 @@
 # Built and published by the repo's CI (.github/workflows/apps.yml), never on the box.
-# Four stages: msgvault's own release image (only its binary is taken),
+# Four stages: msgvault's image (our fork with import-signal; only its binary is taken),
 # signalbackup-tools built from a pinned tag, the supervisor, and a Debian
 # runtime with gocryptfs and wa-crypt-tools from their packages.
 
-# msgvault 0.22.0 (wesm/msgvault, MIT): pinned by version and digest. Its
-# binary is built on Debian bookworm with CGO (SQLite, DuckDB) and needs
-# glibc, libstdc++ and libpcre2 at run time.
-FROM ghcr.io/kenn-io/msgvault:0.22.0@sha256:a437d86a700154118caf37e56687bc84f8afda7b6db502ce4fc5fb8f292678e8 AS msgvault
+# msgvault (kenn-io/msgvault, MIT): our fork's image, msgvault 0.22.0 plus
+# `import-signal` (Signal Android backups decrypted by signalbackup-tools),
+# built from github.com/mdopp/msgvault tag signal-import-0.22.0. Upstream PR:
+# kenn-io/msgvault#1722; return to the upstream image once a release has it.
+# Pinned by digest. Its binary is built on Debian bookworm with CGO (SQLite,
+# DuckDB) and needs glibc, libstdc++ and libpcre2 at run time.
+FROM ghcr.io/mdopp/msgvault:0.22.0-signal@sha256:b3f8e5d98f9b494864475044e2f99c48430de095dad6db2d041a79e99d3bacd9 AS msgvault
 
 # signalbackup-tools (bepaald, GPLv3) has no Linux release binary: built
 # from the tag, checked against its commit.
@@ -47,6 +50,6 @@ COPY --from=build /archiv /usr/local/bin/archiv
 # The supervisor runs as the container's root: it mounts FUSE (/dev/fuse
 # and CAP_SYS_ADMIN in the container's own user namespace, see README).
 # Under rootless podman that root is the box's unprivileged service user.
-ENV DATA=/data EINGANG=/eingang TRESOR_MOUNT=/run/tresor KLARTEXT=/dev/shm/archiv LISTEN=:8080 MSGVAULT_PORT=8090
+ENV DATA=/data EINGANG=/eingang TRESOR_MOUNT=/run/tresor LISTEN=:8080 MSGVAULT_PORT=8090
 EXPOSE 8080
 ENTRYPOINT ["/usr/local/bin/archiv"]

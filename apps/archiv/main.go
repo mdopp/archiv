@@ -67,13 +67,11 @@ func main() {
 	}
 	takt := sekunden("IMPORT_TAKT", 20*time.Second)
 	bk := &Briefkasten{Eingang: eingang, Letzte: filepath.Join(eingangDir, "letzte"), Post: filepath.Join(data, "briefkasten"),
-		Empfaenger: empfaenger, Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Schluessel: schluessel,
-		Klartext: env("KLARTEXT", "/dev/shm/archiv"), Run: run, SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"),
-		Protokoll: prot, Takt: takt}
+		Empfaenger: empfaenger, Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Protokoll: prot, Takt: takt}
 	mh := &Mailholer{Post: bk.Post, Empfaenger: empfaenger, Gesehen: bk.Gesehen, Schluessel: schluessel, Protokoll: prot,
 		Takt: sekunden("MAIL_TAKT", time.Hour)}
-	pb := &Postbote{Post: bk.Post, Eingang: eingang, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
-		Takt: takt, Arbeit: tresor.Arbeit}
+	pb := &Postbote{Post: bk.Post, Eingang: eingang, Letzte: bk.Letzte, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
+		SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"), Takt: takt, Arbeit: tresor.Arbeit}
 	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
 		Letzte: bk.Letzte, Archiv: archivProxy(port)}

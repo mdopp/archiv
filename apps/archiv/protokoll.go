@@ -21,16 +21,17 @@ type Zahlen struct {
 	Anhaenge int `json:"anhaenge"`
 	Mails    int `json:"mails,omitempty"`
 	WhatsApp int `json:"whatsapp,omitempty"`
+	Signal   int `json:"signal,omitempty"` // new messages from msgvault's import-signal
 }
 
-func (z Zahlen) Nachrichten() int { return z.SMS + z.MMS + z.Mails + z.WhatsApp }
+func (z Zahlen) Nachrichten() int { return z.SMS + z.MMS + z.Mails + z.WhatsApp + z.Signal }
 
-// Eingelesen is the last packet of a source that went into msgvault.
+// Eingelesen is the last packet or backup of a source that went into msgvault.
 type Eingelesen struct {
 	Am     time.Time `json:"am"`
-	Datei  string    `json:"datei"` // the packet
+	Datei  string    `json:"datei"` // the packet, or the backup
 	Zahlen Zahlen    `json:"zahlen"`
-	Anzahl int       `json:"anzahl"` // packets imported since the vault was made
+	Anzahl int       `json:"anzahl"` // packets or backups imported since the vault was made
 }
 
 // Gepackt is the last backup of a source that became a packet.

@@ -119,101 +119,54 @@ func TestACutXMLIsNoPacket(t *testing.T) {
 	}
 }
 
-// --- the Briefkasten, vault closed
-
-// fakeSignal plays signalbackup-tools: it writes an XML into the pipe.
-type fakeSignal struct {
-	mu      sync.Mutex
-	befehle []Befehl
-	xml     map[string]string // backup name → XML; missing: exit 1 without touching the pipe
-	halb    bool              // write half the XML, then fail
-	falsch  bool
-}
-
-func (f *fakeSignal) Run(ctx context.Context, b Befehl) (Ausgabe, error) {
-	f.mu.Lock()
-	f.befehle = append(f.befehle, b)
-	f.mu.Unlock()
-	if f.falsch {
-		return Ausgabe{Code: 1, Text: " *** NOTE : IT IS LIKELY AN INCORRECT PASSPHRASE WAS PROVIDED ***"}, nil
-	}
-	x, ok := f.xml[filepath.Base(b.Args[0])]
-	if !ok {
-		return Ausgabe{Code: 1, Text: "[Error]: Failed to open input file"}, nil
-	}
-	rohr := b.Args[2]
-	if fi, err := os.Stat(rohr); err != nil || fi.Mode()&os.ModeNamedPipe == 0 {
-		return Ausgabe{Code: 2, Text: "the XML target is not a named pipe"}, nil
-	}
-	w, err := os.OpenFile(rohr, os.O_WRONLY, 0) // blocks until the reader is there, like the real one
-	if err != nil {
-		return Ausgabe{Code: 1}, nil
-	}
-	if f.halb {
-		w.Write([]byte(x[:len(x)/2]))
-		w.Close()
-		return Ausgabe{Code: 1, Text: "[Error]: write failed"}, nil
-	}
-	w.Write([]byte(x))
-	w.Close()
-	return Ausgabe{Text: "Exporting backup to '" + rohr + "'"}, nil
-}
-
-func (f *fakeSignal) anzahl() int { f.mu.Lock(); defer f.mu.Unlock(); return len(f.befehle) }
+// --- the Briefkasten
 
 type bkTest struct {
 	b     *Briefkasten
-	run   *fakeSignal
+	sch   Schluessel
 	id    *age.X25519Identity
 	inbox string
 	data  string
-	klar  string
 }
 
 func neuerBriefkasten(t *testing.T) *bkTest {
 	t.Helper()
-	inbox, data, klar := t.TempDir(), t.TempDir(), t.TempDir()
+	inbox, data := t.TempDir(), t.TempDir()
 	id, _ := age.GenerateX25519Identity()
 	os.WriteFile(filepath.Join(data, "briefkasten.pub"), []byte(id.Recipient().String()+"\n"), 0o644)
 	sch := Schluessel{Dir: filepath.Join(data, "schluessel")}
 	sch.Speichern(SchluesselSignal, []byte(passphrase))
 	sch.Speichern(SchluesselTelefon, []byte(annaTel))
-	run := &fakeSignal{xml: map[string]string{}}
 	b := &Briefkasten{Eingang: &Eingang{Dir: inbox}, Letzte: filepath.Join(inbox, "letzte"), Post: filepath.Join(data, "briefkasten"),
-		Empfaenger: filepath.Join(data, "briefkasten.pub"), Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Schluessel: sch,
-		Klartext: klar, Run: run, SignalBin: "signalbackup-tools", Protokoll: LadeProtokoll(filepath.Join(data, "archiv-stand.json")),
-		Now: func() time.Time { return tag.Add(240 * time.Hour) }}
-	return &bkTest{b: b, run: run, id: id, inbox: inbox, data: data, klar: klar}
+		Empfaenger: filepath.Join(data, "briefkasten.pub"), Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")},
+		Protokoll: LadeProtokoll(filepath.Join(data, "archiv-stand.json")), Now: func() time.Time { return tag.Add(240 * time.Hour) }}
+	return &bkTest{b: b, sch: sch, id: id, inbox: inbox, data: data}
 }
 
 func (bt *bkTest) runde() {
-	bt.b.Eingang.Stabil("signal")
 	bt.b.Eingang.StabilMedien()
 	bt.b.Eingang.Stabil("whatsapp")
 	bt.b.Runde(context.Background())
 }
 
-// lies opens every packet with the private key.
-func (bt *bkTest) lies(t *testing.T) (pakete []string, ns []Nachricht) {
+// paket writes the messages of an XML as one packet into the Briefkasten,
+// as the box did with a Signal backup before 2026-11-02 (such packets may
+// still wait) and as `archiv paket-aus-xml` does.
+func (bt *bkTest) paket(t *testing.T, xml string, jetzt time.Time) string {
 	t.Helper()
-	for _, name := range Pakete(bt.b.Post) {
-		f, _ := os.Open(filepath.Join(bt.b.Post, name))
-		_, err := PaketLesen(f, bt.id, func(string, io.Reader) error { return nil }, func(n Nachricht) error { ns = append(ns, n); return nil })
-		f.Close()
-		if err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-		pakete = append(pakete, name)
+	os.MkdirAll(bt.b.Post, 0o700)
+	tmp := filepath.Join(bt.b.Post, ".neu-signal-"+zufall()+".age")
+	out, _ := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	_, n, _, err := PackeXML(strings.NewReader(xml), out, bt.id.Recipient(), Manifest{Quelle: "signal", Herkunft: "box"}, annaTel, bt.b.Gesehen, map[[32]byte]bool{}, jetzt)
+	out.Close()
+	if err != nil || n == 0 {
+		t.Fatalf("paket: %v (%d)", err, n)
 	}
-	return
-}
-
-func leer(t *testing.T, dir, was string) {
-	t.Helper()
-	e, _ := os.ReadDir(dir)
-	if len(e) != 0 {
-		t.Fatalf("%s not empty: %s", was, e[0].Name())
+	name, err := einwerfen(tmp, bt.b.Post, "signal", jetzt)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return name
 }
 
 func keineTmp(t *testing.T, post string) {
@@ -226,171 +179,11 @@ func keineTmp(t *testing.T, post string) {
 	}
 }
 
-func TestBriefkastenPacksWhileClosedAndKeepsTheNewestBackup(t *testing.T) {
-	bt := neuerBriefkasten(t)
-	tt := neuerTresor(t) // a vault that is never opened: the Briefkasten has no way to it
-	tt.Anlegen(context.Background(), []byte("richtig-langes-pw"))
-	tt.bereit(t)
-	<-tt.lauf
-	tt.Abschliessen(context.Background(), "test")
-
-	legen(t, bt.inbox, "signal/signal-2026-10-01.backup", 5, tag)
-	bt.run.xml["signal-2026-10-01.backup"] = signalXML(sms(1700000000000, 1, "+4917011111111", "eins"), mmsMitBild(1700000200000))
-	bt.runde()
-
-	pakete, ns := bt.lies(t)
-	if len(pakete) != 1 || !strings.HasSuffix(pakete[0], "-signal.age") || len(ns) != 2 || ns[0].Text != "eins" || ns[1].Anhaenge[0].Datei != "anhaenge/000001" {
-		t.Fatalf("%v %+v", pakete, ns)
-	}
-	if !strings.HasPrefix(ns[0].ID, "signal:") {
-		t.Fatalf("id %q", ns[0].ID)
-	}
-	if _, err := os.Stat(filepath.Join(bt.inbox, "signal", "signal-2026-10-01.backup")); !os.IsNotExist(err) {
-		t.Fatal("the packed backup is still in the inbox")
-	}
-	if _, err := os.Stat(filepath.Join(bt.inbox, "letzte", "signal", "signal-2026-10-01.backup")); err != nil {
-		t.Fatalf("the newest backup is not kept for a new phone: %v", err)
-	}
-	leer(t, bt.klar, "the plaintext folder")
-	keineTmp(t, bt.b.Post)
-	if e, _ := os.ReadDir(tt.Mnt); len(e) != 0 {
-		t.Fatal("the closed vault's mount point got files")
-	}
-	if g := bt.b.Protokoll.Pakete()["signal"]; g.Nachrichten != 2 || g.Anhaenge != 1 || g.Paket != pakete[0] {
-		t.Fatalf("protokoll: %+v", g)
-	}
-	// the pipe was a pipe, the passphrase never on the command line
-	b := bt.run.befehle[0]
-	if strings.Contains(strings.Join(b.Args, " "), passphrase) || string(b.Terminal) != passphrase+"\n" || !strings.HasPrefix(b.Args[2], bt.klar) {
-		t.Fatalf("%q", b.Args)
-	}
-}
-
-func TestBriefkastenPacksOnlyWhatItHasNotSeen(t *testing.T) {
-	bt := neuerBriefkasten(t)
-	alt := []string{sms(1700000000000, 1, "+4917011111111", "eins"), sms(1700000100000, 2, "+4917011111111", "zwei"), mmsMitBild(1700000200000)}
-	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
-	bt.run.xml["signal-1.backup"] = signalXML(alt...)
-	bt.runde()
-	// the next night: the same history, one new message, one deleted on the phone
-	legen(t, bt.inbox, "signal/signal-2.backup", 5, tag.Add(24*time.Hour))
-	bt.run.xml["signal-2.backup"] = signalXML(alt[0], alt[2], sms(1700000300000, 1, "+4917011111111", "drei"))
-	bt.runde()
-	pakete, ns := bt.lies(t)
-	if len(pakete) != 1 && len(pakete) != 2 {
-		t.Fatalf("pakete %v", pakete)
-	}
-	var texte []string
-	for _, n := range ns {
-		texte = append(texte, n.Text)
-	}
-	if strings.Join(texte, "|") != "eins|zwei|Schaut mal & staunt|drei" {
-		t.Fatalf("messages over both packets: %q", texte)
-	}
-	// a third night with nothing new: no packet, the backup still becomes the newest kept
-	legen(t, bt.inbox, "signal/signal-3.backup", 5, tag.Add(48*time.Hour))
-	bt.run.xml["signal-3.backup"] = signalXML(alt[0])
-	vorher := len(Pakete(bt.b.Post))
-	bt.runde()
-	if len(Pakete(bt.b.Post)) != vorher {
-		t.Fatal("a packet without new messages")
-	}
-	if e, _ := os.ReadDir(filepath.Join(bt.inbox, "letzte", "signal")); len(e) != 1 || e[0].Name() != "signal-3.backup" {
-		t.Fatalf("letzte/signal: %v", e)
-	}
-	// the set says nothing about the messages
-	set, _ := os.ReadFile(filepath.Join(bt.data, "gesehen", "signal"))
-	if len(set) != 4*32 || bytes.Contains(set, []byte("eins")) || bytes.Contains(set, []byte("4917011111111")) {
-		t.Fatalf("gesehen: %d bytes", len(set))
-	}
-}
-
-func TestAnOlderBackupDoesNotReplaceTheNewestKept(t *testing.T) {
-	bt := neuerBriefkasten(t)
-	legen(t, bt.inbox, "signal/signal-neu.backup", 5, tag.Add(48*time.Hour))
-	bt.run.xml["signal-neu.backup"] = signalXML(sms(2, 1, "+491", "neu"))
-	bt.runde()
-	legen(t, bt.inbox, "signal/signal-alt.backup", 5, tag) // arrives late
-	bt.run.xml["signal-alt.backup"] = signalXML(sms(1, 1, "+491", "alt"))
-	bt.runde()
-	if e, _ := os.ReadDir(filepath.Join(bt.inbox, "letzte", "signal")); len(e) != 1 || e[0].Name() != "signal-neu.backup" {
-		t.Fatalf("letzte/signal: %v", e)
-	}
-	if l, _ := bt.b.Eingang.Liste("signal"); len(l) != 0 {
-		t.Fatal("the older backup stayed in the inbox after its packet")
-	}
-}
-
-func TestBriefkastenFailureLeavesNoPlaintextAndKeepsTheBackup(t *testing.T) {
-	for _, fall := range []string{"halb", "nie"} {
-		t.Run(fall, func(t *testing.T) {
-			bt := neuerBriefkasten(t)
-			p := legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
-			if fall == "halb" {
-				bt.run.halb = true
-				bt.run.xml["signal-1.backup"] = signalXML(sms(1, 1, "+491", "eins"), sms(2, 1, "+491", "zwei"))
-			} // "nie": the program fails before it opens the pipe
-			fertig := make(chan struct{})
-			go func() { bt.runde(); close(fertig) }()
-			select {
-			case <-fertig:
-			case <-time.After(10 * time.Second):
-				t.Fatal("hangs on a pipe nobody opened")
-			}
-			if _, err := os.Stat(p); err != nil {
-				t.Fatal("the failed backup left the inbox")
-			}
-			if len(Pakete(bt.b.Post)) != 0 {
-				t.Fatal("a packet from a failed export")
-			}
-			keineTmp(t, bt.b.Post)
-			leer(t, bt.klar, "the plaintext folder")
-			if _, f, _ := bt.b.Protokoll.Kopie(); f == nil || !strings.Contains(f.Satz, "signal-1.backup") {
-				t.Fatalf("fehler %+v", f)
-			}
-			if set, _ := os.ReadFile(filepath.Join(bt.data, "gesehen", "signal")); len(set) != 0 {
-				t.Fatal("a failed packet marked messages as seen")
-			}
-		})
-	}
-}
-
-func TestBriefkastenWrongPassphrase(t *testing.T) {
-	bt := neuerBriefkasten(t)
-	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
-	legen(t, bt.inbox, "signal/signal-2.backup", 5, tag.Add(time.Hour))
-	bt.run.falsch = true
-	bt.runde()
-	bt.runde()
-	if bt.run.anzahl() != 1 {
-		t.Fatalf("the wrong passphrase was tried %d times", bt.run.anzahl())
-	}
-	if _, f, _ := bt.b.Protokoll.Kopie(); f == nil || f.Satz != "Die Signal-Passphrase passt nicht zu dieser Sicherung. Gib sie neu ein." {
-		t.Fatalf("%+v", f)
-	}
-	bt.run.falsch = false
-	bt.run.xml["signal-1.backup"] = signalXML(sms(1, 1, "+491", "eins"))
-	bt.run.xml["signal-2.backup"] = signalXML(sms(2, 1, "+491", "zwei"))
-	bt.b.NeuerSchluessel()
-	bt.runde()
-	if _, f, _ := bt.b.Protokoll.Kopie(); f != nil || len(Pakete(bt.b.Post)) == 0 {
-		t.Fatalf("after the new key: %+v", f)
-	}
-}
-
-func TestBriefkastenWaitsForTheKeys(t *testing.T) {
-	bt := neuerBriefkasten(t)
-	os.Remove(filepath.Join(bt.data, "schluessel", SchluesselSignal))
-	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
-	bt.runde()
-	if bt.run.anzahl() != 0 || !bt.b.FehlenSchluessel() {
-		t.Fatal("ran without the passphrase")
-	}
-	os.Remove(filepath.Join(bt.data, "briefkasten.pub"))
-	bt.b.Schluessel.Speichern(SchluesselSignal, []byte(passphrase))
-	bt.runde()
-	if bt.run.anzahl() != 0 {
-		t.Fatal("packed without a public key: the vault was never made")
+func leer(t *testing.T, dir, was string) {
+	t.Helper()
+	e, _ := os.ReadDir(dir)
+	if len(e) != 0 {
+		t.Fatalf("%s not empty: %s", was, e[0].Name())
 	}
 }
 
@@ -455,13 +248,8 @@ func (f *fakeMsgvault) Run(ctx context.Context, b Befehl) (Ausgabe, error) {
 
 func TestPostboteBringsPacketsInOldestFirstAndDeletesThem(t *testing.T) {
 	bt := neuerBriefkasten(t)
-	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
-	bt.run.xml["signal-1.backup"] = signalXML(sms(1700000000000, 1, "+4917011111111", "eins"), mmsMitBild(1700000200000))
-	bt.runde()
-	bt.b.Now = func() time.Time { return tag.Add(241 * time.Hour) }
-	legen(t, bt.inbox, "signal/signal-2.backup", 5, tag.Add(time.Hour))
-	bt.run.xml["signal-2.backup"] = signalXML(sms(1700000300000, 2, "+4917011111111", "zwei"))
-	bt.runde()
+	bt.paket(t, signalXML(sms(1700000000000, 1, "+4917011111111", "eins"), mmsMitBild(1700000200000)), tag)
+	bt.paket(t, signalXML(sms(1700000300000, 2, "+4917011111111", "zwei")), tag.Add(time.Hour))
 	pakete := Pakete(bt.b.Post)
 	if len(pakete) != 2 {
 		t.Fatalf("%v", pakete)
@@ -471,7 +259,7 @@ func TestPostboteBringsPacketsInOldestFirstAndDeletesThem(t *testing.T) {
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{}
-	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.b.Schluessel, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
+	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.sch, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
 	pb.Runde(context.Background(), innen)
 
 	if len(mv.xml) != 2 || !strings.Contains(mv.xml[0], `body="eins"`) || !strings.Contains(mv.xml[1], `body="zwei"`) {
@@ -497,14 +285,12 @@ func TestPostboteBringsPacketsInOldestFirstAndDeletesThem(t *testing.T) {
 
 func TestPostboteKeepsAPacketItCouldNotImport(t *testing.T) {
 	bt := neuerBriefkasten(t)
-	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
-	bt.run.xml["signal-1.backup"] = signalXML(mmsMitBild(1700000200000))
-	bt.runde()
+	bt.paket(t, signalXML(mmsMitBild(1700000200000)), tag)
 	innen := Innen{Wurzel: t.TempDir()}
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{fehler: true}
-	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.b.Schluessel, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
+	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.sch, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
 	pb.Runde(context.Background(), innen)
 	pb.Runde(context.Background(), innen)
 	if len(Pakete(bt.b.Post)) != 1 || len(mv.befehle) != 1 {
@@ -592,9 +378,7 @@ func TestAnAttachmentTooBigForMsgvaultIsKeptInTheVaultAndNamedInTheMessage(t *te
 	bt := neuerBriefkasten(t)
 	video := bytes.Repeat([]byte("v"), MaxAnhang+1)
 	gross := strings.Replace(strings.Replace(mmsMitBild(1700000200000), base64.StdEncoding.EncodeToString(bild), base64.StdEncoding.EncodeToString(video), 1), `"bild.png"`, `"urlaub.mp4"`, 2)
-	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
-	bt.run.xml["signal-1.backup"] = signalXML(sms(1700000000000, 1, "+4917011111111", "eins"), gross, mmsMitBild(1700000300000))
-	bt.runde()
+	bt.paket(t, signalXML(sms(1700000000000, 1, "+4917011111111", "eins"), gross, mmsMitBild(1700000300000)), tag)
 	pakete := Pakete(bt.b.Post)
 	if len(pakete) != 1 {
 		t.Fatalf("%v", pakete)
@@ -604,7 +388,7 @@ func TestAnAttachmentTooBigForMsgvaultIsKeptInTheVaultAndNamedInTheMessage(t *te
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{}
-	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.b.Schluessel, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
+	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.sch, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
 	pb.Runde(context.Background(), innen)
 
 	if len(mv.xml) != 1 {
@@ -671,7 +455,7 @@ func TestThePhonesSMSAndCallsComeInEncryptedAndAreImportedWhenOpen(t *testing.T)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{}
-	pb := &Postbote{Post: bt.b.Post, Eingang: bt.b.Eingang, Schluessel: bt.b.Schluessel, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
+	pb := &Postbote{Post: bt.b.Post, Eingang: bt.b.Eingang, Schluessel: bt.sch, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
 	pb.Runde(context.Background(), innen)
 
 	alle := strings.Join(mv.xml, "\n")
@@ -788,15 +572,13 @@ func TestWhatsAppIsReadOnlyWhileOpenWithTheKeyInsideTheVault(t *testing.T) {
 // Operator).
 func TestAFailedPacketIsTriedAgainAndTurnsRedWhenItKeepsFailing(t *testing.T) {
 	bt := neuerBriefkasten(t)
-	legen(t, bt.inbox, "signal/signal-1.backup", 5, tag)
-	bt.run.xml["signal-1.backup"] = signalXML(sms(1700000000000, 1, "+4917011111111", "eins"))
-	bt.runde()
+	bt.paket(t, signalXML(sms(1700000000000, 1, "+4917011111111", "eins")), tag)
 	innen := Innen{Wurzel: t.TempDir()}
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{fehler: true}
 	jetzt := tag
-	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.b.Schluessel, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault", Now: func() time.Time { return jetzt }}
+	pb := &Postbote{Post: bt.b.Post, Schluessel: bt.sch, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault", Now: func() time.Time { return jetzt }}
 	rot := func() bool {
 		s := statusBauen(Lage{Person: "anna", Stand: Stand{Zustand: Offen, Bereit: true}, Protokoll: bt.b.Protokoll, Jetzt: jetzt})
 		for _, f := range s.Findings {

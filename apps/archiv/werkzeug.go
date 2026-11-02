@@ -15,8 +15,9 @@ import (
 
 // werkzeug: `archiv paket-aus-xml` turns an SMS Backup & Restore XML
 // (from signalbackup-tools, or an Android SMS backup) into a packet in
-// the Briefkasten, as the nightly run does with a Signal backup: only
-// the messages not packed before, encrypted to the person's public key.
+// the Briefkasten, as the nightly run did with a Signal backup before
+// import-signal: only the messages not packed before, encrypted to the
+// person's public key.
 // The CI integration test uses it to send a packet through the real
 // msgvault; an admin can use it to bring an old SMS backup in.
 //

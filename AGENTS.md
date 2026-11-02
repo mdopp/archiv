@@ -17,9 +17,10 @@ Outside the Werkstatt, the same guide is `werkstatt/guide/` in github.com/mdopp/
   environment variable or a log: stdin or a pseudo-terminal only. Every
   program call is built in `befehl.go`, where `befehl_test.go` checks it.
 - The import is additive: nothing here may call a msgvault command that
-  deletes. Plaintext of a backup is never a file (a named pipe while the
-  vault is closed; the vault's work folder, emptied on every path, while
-  open). The Briefkasten never touches the vault.
+  deletes. Plaintext of a backup is never a file outside the vault: only
+  in the vault's work folder while it is open, emptied on every path (so
+  Signal backups, which msgvault's import-signal reads as a decrypted
+  folder, are read only while open). The Briefkasten never touches the vault.
 - The packet format (`paket.go`, README "Paket format") is a contract with
   the phone: a change readers must understand is a new version.
 - `go test` cannot mount FUSE or run signalbackup-tools; `integration.sh`

@@ -2,9 +2,11 @@
 # The closest proof before the box: the built image on a GitHub runner —
 # real gocryptfs init/mount/unmount, real signalbackup-tools and msgvault,
 # and the supervisor end to end (anlegen, öffnen, the key reaching msgvault,
-# an additive import, a Signal backup that fails, abschließen, a wrong
-# password, öffnen again, packets of Signal messages and of mail going into
-# msgvault at the opening).
+# an additive import, a Signal backup that fails, a real Signal backup —
+# made here by signalbackup-tools, two messages added — decrypted into the
+# vault and read by msgvault's import-signal, abschließen, a wrong
+# password, öffnen again, packets of SMS-XML messages and of mail going
+# into msgvault at the opening).
 #
 # The IMAP fetch itself is proven by `go test` against go-imap's server;
 # a real provider (Gmail) only on the box with the person's app password.
@@ -130,13 +132,56 @@ warte 120 '.letzter_fehler.quelle == "signal"'
 curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_fehler, .findings'
 test -f "$D/eingang/signal/signal-2026-10-01-03-00-00.backup" || fail "the failed backup left the inbox"
 test -f "$D/eingang/.teil/abc" || fail "a dot-entry was touched"
-[ -z "$(docker exec archiv ls -A /run/tresor/arbeit)" ] || fail "plaintext left in the vault's work folder"
-[ -z "$(docker exec archiv ls -A /dev/shm/archiv)" ] || fail "something left in the plaintext pipe folder"
+arbeit_leer() { # the folder is removed right after the error is recorded
+  for _ in $(seq 10); do [ -z "$(docker exec archiv ls -A /run/tresor/arbeit)" ] && return 0; sleep 1; done
+  docker exec archiv ls -la /run/tresor/arbeit >&2
+  fail "plaintext left in the vault's work folder"
+}
+arbeit_leer
 [ -z "$(sudo find "$D/data/briefkasten" -name '.*' 2>/dev/null)" ] || fail "an unfinished packet stayed"
 sudo test -f "$D/data/schluessel/signal" || fail "the passphrase is not outside the vault"
 [ "$(sudo stat -c %a "$D/data/schluessel/signal")" = 600 ] || fail "the passphrase file is not 0600"
 curl -fsS "${H[@]}" "$U/tresor" | grep -q "hinterlegt am" || fail "the keys are not shown as stored"
 if curl -fsS "${H[@]}" "$U/tresor" | grep -q "$PASSPHRASE"; then fail "the passphrase is shown"; fi
+
+echo "Signal: a real backup, decrypted inside the vault and read by msgvault's import-signal"
+# The backup is made here with the image's own signalbackup-tools: a dummy
+# (its full database schema, version 223, no messages), decrypted, two
+# messages added with python's sqlite3, encrypted again with the passphrase.
+# Setup failures say "setup:"; everything after that is the archive's.
+docker exec -e PP="$PASSPHRASE" archiv sh -c '
+set -e
+rm -rf /tmp/sig && mkdir -p /tmp/sig/leer /tmp/sig/neu
+signalbackup-tools --generatedummy /tmp/sig/dummy.backup --opassphrase "$PP" --no-showprogress >/tmp/sig/log 2>&1 || true
+test -s /tmp/sig/dummy.backup || { cat /tmp/sig/log; echo "setup: no dummy backup"; exit 1; }
+signalbackup-tools /tmp/sig/dummy.backup "$PP" --output /tmp/sig/leer/ --no-showprogress >>/tmp/sig/log 2>&1 || { cat /tmp/sig/log; echo "setup: dummy does not decrypt"; exit 1; }
+python3 - /tmp/sig/leer/database.sqlite <<PY
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+c.execute("INSERT INTO recipient (_id, e164, aci, profile_joined_name) VALUES (1, ?, ?, ?)", ("+4917000000000", "0f0f0f0f-0000-4000-8000-000000000001", "Anna"))
+c.execute("INSERT INTO recipient (_id, e164, aci, system_joined_name) VALUES (2, ?, ?, ?)", ("+4915177777777", "0f0f0f0f-0000-4000-8000-000000000002", "Carla"))
+c.execute("INSERT INTO thread (_id, recipient_id) VALUES (1, 2)")
+ein, aus = 20 | 0x200000 | 0x800000, 23 | 0x200000 | 0x800000
+c.execute("INSERT INTO message (date_sent, date_received, thread_id, from_recipient_id, to_recipient_id, type, body) VALUES (1700000500000, 1700000500001, 1, 2, 1, ?, ?)", (ein, "SIGNALTEXT eins"))
+c.execute("INSERT INTO message (date_sent, date_received, thread_id, from_recipient_id, to_recipient_id, type, body) VALUES (1700000600000, 1700000600001, 1, 1, 2, ?, ?)", (aus, "SIGNALTEXT zwei"))
+c.commit()
+PY
+signalbackup-tools /tmp/sig/leer/ --output /tmp/sig/neu/signal.backup --opassphrase "$PP" --no-showprogress >>/tmp/sig/log 2>&1 || { cat /tmp/sig/log; echo "setup: cannot encrypt the backup again"; exit 1; }
+test -s /tmp/sig/neu/signal.backup || { echo "setup: no backup written"; exit 1; }
+' || fail "setup: making a Signal backup"
+sudo rm -f "$D/eingang/signal/signal-2026-10-01-03-00-00.backup" # the broken one: no longer in the way
+docker exec archiv sh -c 'cp /tmp/sig/neu/signal.backup /eingang/signal/.neu && mv /eingang/signal/.neu /eingang/signal/signal-2026-10-02-03-00-00.backup && rm -rf /tmp/sig'
+if sudo grep -rq SIGNALTEXT "$D/eingang"; then fail "setup: the backup is not encrypted"; fi
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passphrase=$PASSPHRASE" "$U/tresor/signal") # a key entered again: what failed is tried at once
+[ "$code" = 303 ] || fail "keys again: $code"
+warte 180 '.letzter_import.signal.datei == "signal-2026-10-02-03-00-00.backup"'
+curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_import.signal, .letzter_fehler'
+curl -fsS "${H[@]}" "$U/tresor/stand" | jq -e '.letzter_import.signal.zahlen.signal == 2' || fail "import-signal did not report 2 new messages"
+curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 4' || { curl -fsS "${H[@]}" "$U/api/v1/stats"; fail "the two Signal messages are not in msgvault"; }
+arbeit_leer
+sudo test -f "$D/eingang/letzte/signal/signal-2026-10-02-03-00-00.backup" || fail "the imported backup is not kept in letzte/ for a new phone"
+[ -z "$(sudo find "$D/eingang/signal" -name 'signal-*.backup')" ] || fail "the imported backup stayed in the inbox"
+if sudo grep -rq SIGNALTEXT "$D/data"; then fail "Signal plaintext outside the vault"; fi
 
 echo "WhatsApp: the newest database kept, the media only encrypted, Haus gets them back while open"
 for _ in $(seq 30); do sudo test -f "$D/eingang/letzte/whatsapp/Media/WhatsApp Images/IMG-1.jpg.age" && break; sleep 1; done
@@ -156,7 +201,7 @@ if docker exec archiv grep -q " /run/tresor " /proc/self/mounts; then fail "stil
 
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Archiv-Haus: haus' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = 423 ] || fail "media while closed is not 423"
 
-echo "the Briefkasten while closed: packets the vault cannot see, the real msgvault takes them on opening"
+echo "the Briefkasten while closed: packets the vault cannot see (an SMS XML, as Signal packets were made before import-signal), the real msgvault takes them on opening"
 PNG=iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==
 cat >"$D/c.xml" <<XML
 <?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
@@ -201,11 +246,11 @@ code=$(curl -s -o "$D/falsch.html" -w '%{http_code}' "${H[@]}" --data-urlencode 
 code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passwort=$PW" "$U/tresor/oeffnen")
 [ "$code" = 303 ] || fail "öffnen: $code"
 warte 180 '.zustand == "offen" and .bereit == true'
-warte 120 '.briefkasten.wartend == 0 and .letzter_import.signal.anzahl == 2 and .letzter_import.mail.zahlen.mails == 2'
+warte 120 '.briefkasten.wartend == 0 and .letzter_import.signal.anzahl == 3 and .letzter_import.mail.zahlen.mails == 2'
 curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_import, .letztes_paket'
 [ -z "$(docker exec archiv ls -A /run/tresor/arbeit)" ] || fail "plaintext left in the vault's work folder after delivery"
-# 2 from before, 2 new from the first packet; the packet of a.xml brings nothing twice; 2 mails under their own account
-curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 6 and .active_messages == 6 and .total_accounts == 2 and .total_attachments >= 1' || { curl -fsS "${H[@]}" "$U/api/v1/stats"; fail "the packets did not arrive as they should (or duplicated)"; }
+# 2 from before, 2 from Signal, 2 new from the first packet; the packet of a.xml brings nothing twice; 2 mails under their own account
+curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 8 and .active_messages == 8 and .total_accounts == 3 and .total_attachments >= 1' || { curl -fsS "${H[@]}" "$U/api/v1/stats"; fail "the packets did not arrive as they should (or duplicated)"; }
 
 docker stop -t 90 archiv >/dev/null
 docker logs archiv >"$D/log" 2>&1

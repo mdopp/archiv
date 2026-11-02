@@ -6,10 +6,12 @@ einem Tresor, den nur dein Archiv-Passwort öffnet.
 
 One container per person ([laib ADR 0029](https://github.com/mdopp/laib/blob/main/docs/adr/0029-one-message-archive-per-person.md),
 laib#985, laib#986). Inside: a small Go supervisor (`archiv`, this folder),
-[msgvault](https://github.com/wesm/msgvault) 0.22.0, gocryptfs (Debian
+[msgvault](https://github.com/kenn-io/msgvault) 0.22.0 with `import-signal`
+(our fork's image `ghcr.io/mdopp/msgvault:0.22.0-signal`, pinned by digest,
+until upstream PR kenn-io/msgvault#1722 is released), gocryptfs (Debian
 package), [signalbackup-tools](https://github.com/bepaald/signalbackup-tools)
-20261014 and wa-crypt-tools 0.1.0 (for WhatsApp, not used yet); IMAP
-through [go-imap](https://github.com/emersion/go-imap) v1.2.1.
+20261014 and wa-crypt-tools 0.1.0 (WhatsApp); IMAP through
+[go-imap](https://github.com/emersion/go-imap) v1.2.1.
 
 - Code: `*.go`, tests: `go test ./...`; `integration.sh <image>` runs the
   built image with a real FUSE mount (CI does, on every push and PR).
@@ -27,7 +29,7 @@ mounted at `/run/tresor` only while open.
 |---|---|
 | uneingerichtet | no `/data/tresor/gocryptfs.conf`. The page asks for the Archiv-Passwort twice, says losing it loses the archive (so: Vaultwarden) and that an open archive is readable by the box's admin. `gocryptfs -init`, then open; the first opening makes the age X25519 key pair (private: `/run/tresor/age-identitaet`, public: `/data/briefkasten.pub`). |
 | verschlossen | ciphertext only. msgvault is stopped. One password field. |
-| offen | mounted; `msgvault serve` runs with `MSGVAULT_HOME=/run/tresor/msgvault`, loopback `127.0.0.1:8090`, its key in `api-key` (generated on the first opening), telemetry off (config and env). The Postbote brings the Briefkasten's packets in. |
+| offen | mounted; `msgvault serve` runs with `MSGVAULT_HOME=/run/tresor/msgvault`, loopback `127.0.0.1:8090`, its key in `api-key` (generated on the first opening), telemetry off (config and env). The Postbote brings in the Signal backups, WhatsApp, the phone's SMS and the Briefkasten's packets. |
 
 Closing: „Abschließen“, two hours without use (`LEERLAUF`), or the container
 stopping (SIGTERM): the Postbote stops and deletes its plaintext, msgvault
@@ -48,11 +50,13 @@ error output is scrubbed of the secret before it is logged. Tests:
 
 Keys the person enters (Signal passphrase, own number, IMAP host/user/app
 password) are owner-only files in `/data/schluessel/`, **outside** the
-vault, so the Briefkasten can read backups while it is closed. They are
+vault: the Mailholer fetches mail while it is closed. (The Signal
+passphrase is used only while the vault is open since 2026-11-02, so it
+could move inside, as the WhatsApp key is; not done yet.) They are
 accepted only while the vault is open (so only the person sets them) and
 never shown again: the page shows „hinterlegt am …“ and says the price in
-plain words: whoever has root on the box can decrypt **future** backups with
-the passphrase as they arrive, and read the person's mail with the app
+plain words: whoever has root on the box can decrypt the person's Signal
+backups with the passphrase, and read the person's mail with the app
 password (which the provider can revoke); what is already in the archive
 stays readable only with the Archiv-Passwort.
 
@@ -90,34 +94,73 @@ page says so).
   A forged `Remote-User` on this way gets no key. How the agent learns the
   key (it is in the vault) is laib#986's question.
 
-## The Briefkasten: importing while the vault is closed
+## The inbox
 
 Haus puts the backups into `/eingang/<quelle>/…` (haus#207); `.teil/`,
-every dot-entry and `letzte/` are never read as inbox. The Briefkasten runs
-every 20 s whether the vault is open or closed, as soon as the vault has
-been made once (it needs the public key):
+every dot-entry and `letzte/` are never read as inbox. A file counts once
+its size and mtime stayed the same for a minute (as this process saw it —
+Haus sets the phone's mtime).
 
-1. Each `signal/**/signal-*.backup` whose size and mtime stayed the same
-   for a minute (as this process saw it — Haus sets the phone's mtime),
-   **oldest first** (by mtime), once the Signal passphrase and the person's
-   number are stored:
-   `signalbackup-tools <backup> --exportxml /dev/shm/archiv/<rand>.xml --overwrite --setselfid <number> --no-showprogress`,
-   the passphrase typed in by pty. `<rand>.xml` is a **named pipe**: the
-   archive reads the XML from it as it is written, so the plaintext is never
-   a file, not even in tmpfs. The pipe is removed in every case.
-2. Only messages not packed before go into the packet: the set of packed
-   messages is `/data/gesehen/signal`, HMAC-SHA256 of each message's
-   identity under the key `/data/gesehen/schluessel` — 32 bytes per message,
-   nothing readable.
-3. ONE packet `/data/briefkasten/<UTC time>-signal.age` (written under a
-   dot-name, moved into place when whole; none when nothing is new).
-4. The backup moves to `/eingang/letzte/signal/` and the older one there
-   goes; an older backup that arrives late is deleted after its packet.
-5. On failure the backup stays in the inbox, the page and the status say
-   why, no packet, no digest is added. A wrong passphrase („…IT IS LIKELY AN
-   INCORRECT PASSPHRASE…“) becomes „Die Signal-Passphrase passt nicht zu
-   dieser Sicherung. Gib sie neu ein.“, and no backup is tried with that key
-   until a new one is entered.
+### Signal: read while open, by msgvault's import-signal
+
+Since 2026-11-02 (owner's decision; before, signalbackup-tools exported an
+SMS Backup & Restore XML into a named pipe while the vault was closed, and
+the messages went in as packets under msgvault's SMS account). msgvault's
+`import-signal` reads the decrypted backup as a folder — its SQLite
+database and the attachment files — and that plaintext may exist only
+inside the vault. So Signal backups wait, still encrypted by Signal, in
+the inbox until the vault is open. Then the Postbote takes each stable
+`signal/**/signal-*.backup`, **oldest first** (by mtime), once the Signal
+passphrase and the person's number are stored:
+
+1. A new, empty folder `/run/tresor/arbeit/signal-<rand>/` (inside the
+   vault). `signalbackup-tools <backup> --output <folder>/ --no-showprogress`,
+   the passphrase typed in by pty, writes `database.sqlite` and one
+   `Attachment_*.bin` per attachment there. The trailing slash and the
+   empty existing folder matter: given anything else, signalbackup-tools
+   writes an encrypted backup file and asks a second time, for that file's
+   passphrase (its `main.cc`, tag 20261014).
+2. `msgvault import-signal <folder> --phone <number>` (through the running
+   daemon), under msgvault's own Signal account. Its `\r` progress line
+   (`Processed: N | Added: M`) feeds the page while it runs; its summary
+   (`Messages: N processed, M added, …`) gives the number of new messages
+   for the page and the status.
+3. Attachments over 100 MiB (msgvault's limit for import-signal; it skips
+   them) move to `/run/tresor/grosse-anhaenge/signal-Attachment_….bin`,
+   the same name for the same attachment in every backup.
+4. The folder is removed on every path — success, failure, the vault
+   closing in the middle (a crash's leftovers go at the next opening).
+5. The backup moves to `/eingang/letzte/signal/` and the older one there
+   goes; an older backup that arrives late is deleted after its import.
+6. On failure the backup stays in the inbox, the page and the status say
+   why, and it is tried again in half an hour and at every opening. A wrong
+   passphrase („…IT IS LIKELY AN INCORRECT PASSPHRASE…“) becomes „Die
+   Signal-Passphrase passt nicht zu dieser Sicherung. Gib sie neu ein.“,
+   and no backup is tried with that key until a new one is entered. A
+   backup of another number than the stored one (msgvault refuses it) says
+   so, and the person checks the number.
+
+Each backup holds the whole history: msgvault keys a message by its
+author's Signal id and its sent time, so the daily backup adds only what
+is new and updates edits and reactions. While the vault stays closed, every
+night's backup waits in the inbox (each the size of the whole Signal
+history); after three days the status says so. Reading one needs its
+decrypted size free on `/data` (the work folder is inside the vault) for
+a few minutes.
+
+### The Briefkasten: what arrives while the vault is closed
+
+The Briefkasten runs every 20 s whether the vault is open or closed, as
+soon as the vault has been made once (it needs the public key). It writes
+the public key into the inbox for the Haus app, keeps WhatsApp's newest
+database in `letzte/` and encrypts WhatsApp's media there (below). Mail
+comes as packets (below). A packet is ONE file
+`/data/briefkasten/<UTC time>-<quelle>.age`, age-encrypted to the person's
+public key (written under a dot-name, moved into place when whole); the
+set of messages already packed is `/data/gesehen/<quelle>`, HMAC-SHA256 of
+each message's identity under the key `/data/gesehen/schluessel` — 32
+bytes per message, nothing readable. Signal packets made before 2026-11-02
+may still wait; they go in as before.
 
 When the vault is open, the **Postbote** takes the packets, oldest first:
 decrypts with the private key from the vault, unpacks the attachments into
@@ -125,21 +168,23 @@ decrypts with the private key from the vault, unpacks the attachments into
 `msgvault import-synctech-sms <xml> --owner-phone <number>` (through the
 running daemon), deletes the packet, empties the work folder (always, also
 on failure; a crash's leftovers go at the next opening). A packet that
-fails stays and is tried at the next opening.
+fails stays and is tried again.
 
 **Additive only.** msgvault upserts every message by a stable id; its
 `import-synctech-sms` has no flag that deletes or mirrors deletions (only
-`--sms/--mms/--calls/--attachments`), and nothing here runs another
-msgvault command. A message deleted on the phone is simply not in the next
-packet; what is in the archive stays. CI imports two XMLs into the real
-msgvault (the second lacking a message, then the first again: still 2,
-no duplicates), then a packet of the same messages: still no duplicates.
+`--sms/--mms/--calls/--attachments`), `import-signal` has none either
+(`--phone`, `--attachments-dir`, `--display-name`, `--limit`,
+`--no-default-identity`), and nothing here runs another msgvault command.
+A message deleted on the phone is simply not in the next backup; what is
+in the archive stays. CI imports two XMLs into the real msgvault (the
+second lacking a message, then the first again: still 2, no duplicates),
+then a packet of the same messages: still no duplicates.
 
 ### letzte/: the newest backup stays for a new phone
 
 | source | in `/eingang/letzte/` |
 |---|---|
-| Signal | the newest packed `signal-*.backup`, as the phone wrote it (encrypted by Signal) |
+| Signal | the newest imported `signal-*.backup`, as the phone wrote it (encrypted by Signal) |
 | WhatsApp | `whatsapp/Databases/msgstore.db.crypt15`: the newest database, as the phone wrote it (encrypted by WhatsApp; a hard link — the inbox copies wait for the WhatsApp import), and `whatsapp/Media/<path>.age`: **every** media file, age-encrypted to the person's key — on the phone they are plaintext, so the plaintext leaves the inbox as soon as it is encrypted |
 
 Haus serves the database files straight from its own mount of the inbox.
@@ -165,7 +210,7 @@ and at once when the access is entered anew:
    on the server changes, not even \Seen. A changed UIDVALIDITY starts the
    folder again.
 4. A message whose raw bytes were packed before (HMAC-SHA256 of their
-   SHA-256 in `/data/gesehen/mail`, as for Signal) is left out — also a
+   SHA-256 in `/data/gesehen/mail`, as above) is left out — also a
    copy in a second folder.
 5. The new messages become ONE packet `<UTC>-mail.age` (another one each
    256 MiB, so a first fetch of a big mailbox arrives in pieces). The
@@ -179,14 +224,11 @@ and at once when the access is entered anew:
 At the opening, the Postbote unpacks the packet's Maildir into the vault's
 work folder and runs `msgvault import-maildir <dir> --identifier <konto>`:
 folders become labels, a message is keyed by the hash of its raw bytes, a
-copy in another folder only gets the label. Additive as for Signal.
+copy in another folder only gets the label. Additive as above.
 `archiv paket-aus-mails -konto <adresse> <ordner>` packs a folder of
 `.eml` files the same way (an old export; CI uses it).
 
-**WhatsApp's messages and Discord** are not imported yet: WhatsApp needs the
-64-digit key (`wadecrypt`, then `msgvault import-whatsapp`) — a next step,
-which will write packets as Signal does. Discord's data package has no
-importer in msgvault.
+**Discord** is not imported: its data package has no importer in msgvault.
 `archiv paket-aus-xml -telefon <number> [-quelle sms] < backup.xml` packs
 any SMS Backup & Restore XML (an old Android SMS backup too).
 
@@ -206,7 +248,7 @@ and runs `msgvault import-synctech-sms` with the person's number
 of each message and call, so a file sent twice adds nothing. Imported,
 the file leaves the inbox; one that cannot be decrypted stays, and the
 page says so. Attachments over 25 MiB fail msgvault's SMS import here
-(the Signal path sets them aside, this one does not yet).
+(the packet path sets them aside, this one does not yet).
 
 Contacts take another way: Haus mirrors the phone's contacts into the
 person's Radicale address book `handy-kontakte`, outside the vault.
@@ -289,10 +331,13 @@ beginning with `.` and renames it into place when complete.
 `briefkasten.{wartend, aeltestes}` (packets waiting for the opening),
 `letztes_paket.<quelle>.{am, sicherung, paket, nachrichten, anhaenge}`,
 `letzter_import.<quelle>.{am, datei, zahlen{sms,mms,anrufe,anhaenge,mails}, anzahl}`,
-`letzter_fehler{am, quelle, datei, satz}`, `packt`, `liefert`. Findings
-(gelb): packets waiting more than three days while the archive is not open
-(„Dein Archiv ist seit … zu, X Pakete mit neuen Nachrichten warten.“), a
-backup waiting three days for an archive not set up, an error with its fix,
+`letzter_fehler{am, quelle, datei, satz}`, `packt`, `liefert`
+(`zahlen.signal`, `zahlen.whatsapp`: new messages of a direct import).
+Findings (gelb): packets waiting more than three days while the archive is
+not open („Dein Archiv ist seit … zu, X Pakete mit neuen Nachrichten
+warten.“), Signal backups waiting more than three days while it is closed
+(„Dein Archiv ist zu, X Signal-Sicherungen warten seit …“), a backup
+waiting three days for an archive not set up, an error with its fix,
 missing keys while backups wait, msgvault not starting. The record lives
 beside it in `/data/archiv-stand.json`.
 
@@ -317,7 +362,8 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | env | `ARCHIV_PERSON=<login>` (required), `PROXY_SECRET=!secret …` (the route's proxySecret, sent as `X-Archiv-Proxy`), `ARCHIV_HAUS_SECRET=!secret …` (shared with Haus, for `/intern/…`), `TZ`, optional `PUBLIC_URL` (used in the status' fix sentences), `LEERLAUF` (s, default 7200) |
 | mounts | `${DATA_DIR}/archiv/<person>:/data:z` (the cipher folder, the Briefkasten, the keys, the status file; backed up), `${DATA_DIR}/archiv-eingang/<person>:/eingang:z` (read, write **and delete**: the archive removes packed backups and writes `letzte/`) |
 | backup: false | `${DATA_DIR}/archiv-eingang/<person>/letzte` **must not** be in restic (`backup: false`): it is itself a backup of the phone, and a 2.7 GB Signal file that changes every night would add 2.7 GB to restic every night. (The rest of the inbox is transient and need not be backed up either.) |
-| tmpfs | `/dev/shm` as the container has it is enough: only a named pipe lives in `/dev/shm/archiv` (`KLARTEXT`); no plaintext file is ever written. |
+| tmpfs | none needed: plaintext is only ever written inside the vault (its work folder). |
+| disk | reading a Signal backup needs its decrypted size free on `/data` for a few minutes; Signal backups wait in the inbox while the vault is closed, one per night. |
 | Haus' way in | `/intern/…` is on the same port 8080; Haus must reach it (host side, as Gesundheit's MCP port) with `X-Archiv-Haus: <ARCHIV_HAUS_SECRET>`. |
 | FUSE | `AddDevice=/dev/fuse`, `AddCapability=SYS_ADMIN` (mount in the container's own user and mount namespace). On the runner Docker also needed `--security-opt apparmor=unconfined`; on Fedora CoreOS SELinux may need its own label option — unproven. |
 | user | the supervisor runs as the container's root (it mounts, and msgvault's key file must belong to the process user). Rootless podman maps that root to the service user; no `UserNS=keep-id`. The inbox folder is shared with Haus: the archiv container must be able to delete what Haus wrote there (write permission on the folders Haus makes, which it makes 0775). |
@@ -331,14 +377,18 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 
 - **Proven in CI** (rootful Docker, Ubuntu runner): gocryptfs init, mount,
   wrong password (exit 12), unmount; msgvault serving and importing from
-  inside the gocryptfs mount; the supervisor's whole cycle; packets made
+  inside the gocryptfs mount; the supervisor's whole cycle; a Signal backup
+  made by signalbackup-tools itself (its generated dummy, two messages
+  added) decrypted by the archive with the passphrase typed into a pty and
+  `--output <folder>/`, read by the real `import-signal` (2 new messages),
+  kept in `letzte/`, the work folder empty after; packets made
   while the vault is closed (`archiv paket-aus-xml`), counted in the status,
   taken into the real msgvault on opening — an SMS and an MMS with a picture
   arrive, and a packet of messages msgvault already has adds nothing; a mail
   packet through the real `import-maildir`; WhatsApp media encrypted into
   `letzte/` and given back to Haus only while open; a non-backup in
-  `signal/` fails with the sentence, stays, and leaves nothing in
-  `/dev/shm/archiv`, the vault's work folder or the Briefkasten.
+  `signal/` fails with the sentence, stays, and leaves nothing in the
+  vault's work folder or the Briefkasten.
 - **Proven on the box** (the Kraftwerk, 2026-11-02): rootless podman on
   Fedora CoreOS mounts the vault with `/dev/fuse` and `SYS_ADMIN`. The
   first real Signal backup went through: signalbackup-tools read it into a
@@ -350,14 +400,24 @@ passphrase, a refused mail login) stay yellow and say what to enter.
   files now go to `grosse-anhaenge/` in the vault, the message says where).
   The Gmail mailbox comes in over IMAP, oldest first, a few thousand mails
   per packet.
-- **Unproven**: SMS and calls from the Haus app (built, not yet on a
+- **Unproven**: a real phone's Signal backup through `import-signal` (CI's
+  backup is generated and tiny; the box's first one is the proof, with its
+  time, the RAM signalbackup-tools needs and the disk the decrypted folder
+  takes); SMS and calls from the Haus app (built, not yet on a
   phone); WhatsApp on a real backup (the decryption is proven on a
   generated one in `integration.sh`, msgvault's import of a real msgstore
   is not); how much RAM signalbackup-tools needs for a larger backup (it
   holds the backup's database in memory); WhatsApp (needs the 64-digit key;
   a passkey cannot be read out).
-- **What the Signal XML cannot carry**: messages of contacts without a
-  shared phone number are skipped by the XML export (Signal has made the
-  number optional); quotes, reactions and edits are lost (SMS XML cannot
-  hold them); groups with the same members merge. The first packet of a
-  person holds the whole history.
+- **What import-signal leaves out** (msgvault's own list): SMS, MMS and
+  calls Signal kept as the phone's SMS app (the phone's SMS come through
+  the Haus app instead), group and safety-number updates, timer changes,
+  payments and other events; stories and story replies; messages deleted
+  for everyone; scheduled messages not yet sent; earlier versions of an
+  edited message (the newest text stays, marked as edited); legacy groups
+  never migrated to new groups, and MMS groups. Signal Android database
+  version 185 and newer only.
+- **Signal twice, for now**: messages that came in by the old way (XML
+  packets, before 2026-11-02) are in msgvault's SMS account; the first
+  `import-signal` puts the same history in the Signal account again. They
+  stay untouched until a separate cleanup with the owner.

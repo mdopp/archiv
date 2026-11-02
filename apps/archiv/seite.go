@@ -54,7 +54,7 @@ const (
 	saysWAFormat        = "Der WhatsApp-Schlüssel hat 64 Zeichen, Ziffern und die Buchstaben a bis f. Leerzeichen dürfen dazwischen stehen."
 	saysAdminLiest      = "Solange dein Archiv offen ist, kann der Admin der Box es lesen. Abgeschlossen sieht niemand etwas, auch nicht in den Sicherungen der Box."
 	saysMailPreis       = "Dafür liegt das App-Passwort auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit deine Mails lesen. Du kannst das App-Passwort bei deinem Anbieter jederzeit widerrufen; dann holt das Archiv nichts mehr ab."
-	saysBriefkasten     = "Neue Sicherungen liest die Box auch, wenn dein Archiv zu ist: Sie legt die neuen Nachrichten verschlossen in deinen Briefkasten, und beim Öffnen kommen sie ins Archiv. Dafür liegt deine Signal-Passphrase auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit künftige Sicherungen entschlüsseln, sobald sie ankommen. Was schon in deinem Archiv ist, bleibt nur mit deinem Archiv-Passwort lesbar."
+	saysSignalHinweis   = "Signal-Sicherungen liest das Archiv, während es offen ist; bis dahin warten sie verschlüsselt im Eingang. Deine Signal-Passphrase liegt auf der Box, außerhalb des Tresors: Wer Root auf der Box hat, kann damit deine Signal-Sicherungen entschlüsseln. Was schon in deinem Archiv ist, bleibt nur mit deinem Archiv-Passwort lesbar."
 )
 
 var meldungen = map[string]string{
@@ -258,21 +258,29 @@ func (w *Web) stand(rw http.ResponseWriter, r *http.Request) {
 // lage is what the status and the page are made of.
 func (w *Web) lage(st Stand) Lage {
 	return Lage{Person: w.Person, Stand: st, Wartend: wartende(w.Eingang), Briefkasten: briefkastenStand(w.Briefkasten.Post), Protokoll: w.Protokoll,
-		Packt: w.packt(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.Briefkasten.FehlenSchluessel(), URL: w.PublicURL, Jetzt: time.Now()}
+		Packt: w.packt(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.fehlenSignalSchluessel(), URL: w.PublicURL, Jetzt: time.Now()}
 }
 
-// antwort ends a form: back to the page with the sentence.
-// packt names what becomes a packet now: a backup, or the mail.
-func (w *Web) packt() string {
-	if l := w.Briefkasten.Laeuft(); l != "" {
-		return l
+// fehlenSignalSchluessel: Signal backups wait, and the passphrase or the
+// number is not stored.
+func (w *Web) fehlenSignalSchluessel() bool {
+	if wartende(w.Eingang)["signal"].Wartend == 0 {
+		return false
 	}
+	_, p := w.Schluessel.Hinterlegt(SchluesselSignal)
+	_, t := w.Schluessel.Hinterlegt(SchluesselTelefon)
+	return !p || !t
+}
+
+// packt names what becomes a packet now: the mail.
+func (w *Web) packt() string {
 	if w.Mailholer != nil && w.Mailholer.Laeuft() {
 		return "neue Mails"
 	}
 	return ""
 }
 
+// antwort ends a form: back to the page with the sentence.
 func (w *Web) antwort(rw http.ResponseWriter, r *http.Request, code int, meldung, fehler string) {
 	w.tresorSeite(rw, r, code, meldung, fehler)
 }
@@ -383,7 +391,7 @@ func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 		w.antwort(rw, r, http.StatusInternalServerError, "", saysSpeichernFehler)
 		return
 	}
-	w.Briefkasten.NeuerSchluessel()
+	w.Postbote.NeuerSignalSchluessel()
 	if w.Geaendert != nil {
 		w.Geaendert()
 	}
@@ -615,9 +623,6 @@ func uhrzeit(t time.Time) string {
 // laeuftJetzt says what runs now, each with what is known of its progress.
 func (w *Web) laeuftJetzt(b *strings.Builder) bool {
 	var zeilen []string
-	if l, seit := w.Briefkasten.LaeuftSeit(); l != "" {
-		zeilen = append(zeilen, fmt.Sprintf(`<p><b>Signal-Sicherung lesen</b> <span class=k>seit %s</span><progress></progress><span class=k>Die Box entschlüsselt %s und verpackt die neuen Nachrichten für dein Archiv.</span></p>`, uhrzeit(seit), esc(l)))
-	}
 	if w.Mailholer != nil {
 		if g := w.Mailholer.Gang(); g.Was != "" {
 			fortschritt, text := "<progress></progress>", "Sie fragt dein Postfach, was neu ist."
@@ -648,8 +653,10 @@ func (w *Web) laeuftJetzt(b *strings.Builder) bool {
 			menge = tausender(g.Gesamt) + " "
 		}
 		stand := "Wie weit es ist, meldet das Archiv erst am Ende."
-		if g.Fertig > 0 && g.Gesamt == 0 { // WhatsApp counts as it goes, without knowing the whole
+		if g.Fertig > 0 && g.Gesamt == 0 { // WhatsApp and Signal count as they go, without knowing the whole
 			stand = fmt.Sprintf("Bisher %s durchgesehen, davon %s neu im Archiv.", tausender(g.Fertig), tausender(g.Neu))
+		} else if g.Quelle == "signal" {
+			stand = "Erst entschlüsselt die Box die Sicherung, das dauert ein paar Minuten; dann zählt sie hier mit."
 		}
 		zeilen = append(zeilen, fmt.Sprintf(`<p><b>%s%s ins Archiv übernehmen</b> <span class=k>seit %s</span><progress></progress><span class=k>%s Bitte nicht abschließen, solange das läuft.</span></p>`, menge, was, uhrzeit(g.Seit), esc(stand)))
 	}
@@ -724,7 +731,7 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 <form method=post action="/tresor/signal" class=feld>
 <label>Signal-Passphrase (30 Ziffern, aus Signal → Einstellungen → Chats → Chat-Sicherungen)<input name=passphrase inputmode=numeric autocomplete=off spellcheck=false></label>
 <label>Deine Handynummer<input name=telefon type=tel autocomplete=tel placeholder="z. B. +49 151 2345678"></label>
-%s</form><p class=hinweis>%s</p></details></section>`, offenWenn(!komplett), summary, knopf(map[bool]string{true: "Ersetzen", false: "Speichern"}[komplett], "Speichere …", ""), saysBriefkasten)
+%s</form><p class=hinweis>%s</p></details></section>`, offenWenn(!komplett), summary, knopf(map[bool]string{true: "Ersetzen", false: "Speichern"}[komplett], "Speichere …", ""), saysSignalHinweis)
 }
 
 func (w *Web) mailKarte(b *strings.Builder, offen bool) {
