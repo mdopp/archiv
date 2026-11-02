@@ -27,6 +27,7 @@ type fakeRadicale struct {
 
 	mu       sync.Mutex
 	sammlung map[string]fakeSammlung // name -> collection in /anna/
+	karten   map[string]string       // handy-kontakte: file name -> vCard
 	methoden []string
 	auth     []string // the user of each request
 }
@@ -38,7 +39,7 @@ type fakeSammlung struct {
 }
 
 func neuesRadicale(t *testing.T) *fakeRadicale {
-	f := &fakeRadicale{t: t, benutzer: "archiv-anna", passwort: "radicale-geheim-123", sammlung: map[string]fakeSammlung{}}
+	f := &fakeRadicale{t: t, benutzer: "archiv-anna", passwort: "radicale-geheim-123", sammlung: map[string]fakeSammlung{}, karten: map[string]string{"ben.vcf": vcard("u-ben", "Ben", "+4915199999999")}}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Close)
 	return f
@@ -106,15 +107,25 @@ func (f *fakeRadicale) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "text/calendar")
 		io.WriteString(w, s.ics)
-	case (r.Method == "PROPFIND" || r.Method == "REPORT") && strings.HasPrefix(r.URL.Path, "/anna/handy-kontakte"):
+	case r.Method == "REPORT" && r.URL.Path == "/anna/handy-kontakte/":
+		if _, ok := f.sammlung["handy-kontakte"]; !ok {
+			http.NotFound(w, r)
+			return
+		}
+		var b strings.Builder
+		b.WriteString(`<?xml version='1.0' encoding='utf-8'?>` + "\n" + `<multistatus xmlns="DAV:" xmlns:CR="urn:ietf:params:xml:ns:carddav">`)
+		namen := make([]string, 0, len(f.karten))
+		for n := range f.karten {
+			namen = append(namen, n)
+		}
+		sort.Strings(namen)
+		for _, n := range namen {
+			fmt.Fprintf(&b, `<response><href>/anna/handy-kontakte/%s</href><propstat><prop><getetag>"1"</getetag><CR:address-data>%s</CR:address-data></prop><status>HTTP/1.1 200 OK</status></propstat></response>`, n, xmlText(f.karten[n]))
+		}
+		b.WriteString(`</multistatus>`)
 		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 		w.WriteHeader(http.StatusMultiStatus)
-		io.WriteString(w, `<?xml version='1.0' encoding='utf-8'?>`+"\n"+`<multistatus xmlns="DAV:" xmlns:CR="urn:ietf:params:xml:ns:carddav"><response><href>/anna/handy-kontakte/ben.vcf</href><propstat><prop><getetag>"1"</getetag><CR:address-data>BEGIN:VCARD&#13;
-VERSION:3.0&#13;
-FN:Ben&#13;
-TEL:+4915199999999&#13;
-END:VCARD&#13;
-</CR:address-data></prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>`)
+		io.WriteString(w, b.String())
 	default:
 		http.Error(w, "nicht in diesem Fake", http.StatusForbidden)
 	}
@@ -133,6 +144,20 @@ func (f *fakeRadicale) radicale(t *testing.T) *Radicale {
 		t.Fatalf("RadicaleAusUmgebung: %v %v", r, err)
 	}
 	return r
+}
+
+func vcard(uid, name, tel string) string {
+	return "BEGIN:VCARD\r\nVERSION:3.0\r\nUID:" + uid + "\r\nFN:" + name + "\r\nTEL:" + tel + "\r\nEND:VCARD\r\n"
+}
+
+func (f *fakeRadicale) karte(name, daten string) {
+	f.mu.Lock()
+	if daten == "" {
+		delete(f.karten, name)
+	} else {
+		f.karten[name] = daten
+	}
+	f.mu.Unlock()
 }
 
 func ics(events ...string) string {

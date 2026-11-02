@@ -858,10 +858,28 @@ func (w *Web) kontakteKarte(b *strings.Builder, offen bool) {
 	case k.Leer:
 		fmt.Fprintf(b, `<p>%s</p>`, esc(saysAdressbuchLeer))
 	}
+	if k.Karten > 0 {
+		fmt.Fprintf(b, `<p>%s im Archiv.</p>`, esc(anzahl(k.Karten, "Kontakt", "Kontakte")))
+	}
+	if n := len(k.Weg); n > 0 {
+		fmt.Fprintf(b, `<p>%s auf dem Handy gelöscht; im Archiv bleiben sie, mit allen Nachrichten:</p><ul class=kalender>`, esc(anzahl(n, "Kontakt ist", "Kontakte sind")))
+		for i, g := range k.Weg {
+			if i == 10 {
+				fmt.Fprintf(b, `<li class=k>und %d weitere</li>`, n-10)
+				break
+			}
+			name := g.Name
+			if name == "" {
+				name = "ohne Namen"
+			}
+			fmt.Fprintf(b, `<li>%s <span class=k>(auf dem Handy gelöscht am %s)</span></li>`, esc(name), g.Am.Local().Format("02.01.2006"))
+		}
+		b.WriteString(`</ul>`)
+	}
 	if !k.Am.IsZero() {
 		was := fmt.Sprintf("Kontakte zuletzt abgeglichen um %s", uhrzeit(k.Am))
-		if k.Neu+k.Geaendert+k.Entfernt > 0 {
-			was += fmt.Sprintf(" (%d neu, %d geändert, %d auf dem Handy gelöscht)", k.Neu, k.Geaendert, k.Entfernt)
+		if k.Neu+k.Geaendert > 0 {
+			was += fmt.Sprintf(" (%d neu, %d geändert)", k.Neu, k.Geaendert)
 		}
 		if st.Personen > 0 {
 			was += "; " + anzahl(st.Personen, "Person", "Personen") + " im Archiv"

@@ -357,14 +357,35 @@ opening, then every `KONTAKTE_TAKT` seconds (default 3 hours), and on
 „Jetzt abgleichen“. Closed, nothing is read. The archive logs into
 Radicale with its own account (`RADICALE_USER`, `archiv-<person>`), which
 Radicale lets read exactly these collections of exactly this person and
-write nothing (the rights below); the client sends only PROPFIND and GET.
+write nothing (the rights below); the client sends only PROPFIND, REPORT
+and GET.
 
 **Contacts → msgvault persons.** msgvault 0.22.0 is a CardDAV client: its
 `add-carddav` connects an address book, `sync-carddav` pulls changes, and
 a *subscribed* book's cards become msgvault persons whose numbers and
 addresses resolve the senders of WhatsApp, Signal, SMS and mail to names
-(a *lookup source* keeps the cards for that matching). msgvault cannot
-reach Radicale directly, for three reasons in its own code: with a
+(a *lookup source* keeps the cards for that matching). msgvault never
+reads Radicale itself. Its sync mirrors the book it reads: a card gone
+from it takes its person away. The owner, 2026-11-02: „Warum sollte der
+Kontakt auch gelöscht werden? Warum nicht nur mit gelöscht im Archiv
+lassen?“ So the archive keeps its own **contact store** (`kontakte.go`),
+inside the vault, `/run/tresor/kontakte/handy-kontakte.json` (format
+`archiv-kontakte`, version 1): each round reads the whole book from
+Radicale (one REPORT addressbook-query) and merges it in, like the
+calendars below —
+
+- a card is keyed by its UID (without one, by its file name) and keeps
+  the file name it was first seen under;
+- while it exists at the source its newest version wins; earlier
+  versions are kept (up to 20; a new REV or PRODID alone is no change);
+- a card gone at the source **stays**, marked
+  `auf_dem_handy_geloescht_am`; if it comes back (even under another file
+  name), the mark goes;
+- the whole book gone from Radicale: every card stays as it was, the
+  store marked `quelle_weg_seit`.
+
+msgvault reads this store, not Radicale's book. It could not reach
+Radicale anyway, for three reasons in its own code: with a
 password it speaks only HTTPS; it dials only public addresses, or a
 private one pinned in its `config.toml` (`[carddav] trusted_origin`,
 `trusted_addresses`; never loopback, never link-local, and
@@ -384,17 +405,24 @@ supervisor runs a **relay** (`relais.go`) for msgvault, only while open:
   `config.toml` (only those two keys of `[carddav]`; msgvault writes the
   rest itself).
 - It answers the discovery itself (principal and address-book home
-  `/<person>/`, one book `handy-kontakte` in it, while Radicale has it,
+  `/<person>/`, one book `handy-kontakte` in it once the store has cards,
   with the privilege `read` only, so msgvault never picks it as the place
-  to publish) and passes each request on that book to Radicale with the
-  archive's Radicale login. msgvault never sees the Radicale password; it
-  logs into the relay as `msgvault` with the relay's own password, made
+  to publish) and serves that book **from the contact store**: PROPFIND
+  lists every card with its ETag, REPORT addressbook-query gives every
+  card with its data, addressbook-multiget the ones asked for, GET one
+  card. sync-collection is not offered (501): msgvault then reads a whole
+  snapshot each sync, and a snapshot of the store never loses a card. A
+  card deleted on the phone is served with one more line,
+  `CATEGORIES:Auf dem Handy gelöscht am <TT.MM.JJJJ>`, which msgvault keeps
+  as a category of the person (its ETag changes with the mark).
+- The relay talks to nobody. msgvault never sees the Radicale password;
+  it logs into the relay as `msgvault` with the relay's own password, made
   once and kept in the vault (`kontakte-relais`), given to `add-carddav` on
   stdin.
-- **Only reading passes:** PROPFIND, REPORT, GET, HEAD, OPTIONS. PUT,
-  DELETE, PROPPATCH, MKCOL, MOVE … get 403 at the relay and never reach
-  Radicale; so does any path outside `/<person>/handy-kontakte/`. msgvault
-  cannot publish to the person's address book whatever its roles say.
+- **Only reading is answered:** PROPFIND, REPORT, GET, HEAD, OPTIONS. PUT,
+  DELETE, PROPPATCH, MKCOL, MOVE … get 403; any path outside
+  `/<person>/handy-kontakte/` is 404. msgvault cannot publish to the
+  person's address book whatever its roles say.
 
 The commands (all through the running daemon, built in `befehl.go`): once,
 `msgvault add-carddav https://kontakte.archiv.invalid:18443/ msgvault`
@@ -403,14 +431,17 @@ every round, if the book's roles are not exactly these,
 `msgvault carddav books set-role <id> --subscribed --lookup-source`
 (`set-role` replaces all three roles, so it is never the write target);
 then `msgvault sync-carddav`. The book's roles are read from msgvault's API
-(`GET /api/v1/carddav/books`). The page says when the last sync went
-through, with how many cards were new, changed or deleted on the phone, and
-how many persons msgvault has.
+(`GET /api/v1/carddav/books`). The page says how many contacts the archive
+holds, which of them are deleted on the phone („Ben (auf dem Handy
+gelöscht am 02.11.2026)“, the newest ten), when the last sync went through
+and how many persons msgvault has; the merge preview and its lists mark a
+person whose card is deleted on the phone (by the card's UID: msgvault's
+`carddav_bindings[].remote_uid` or `vcard_uid`).
 
 What a sync does in msgvault: a new or changed card updates its person; a
-card deleted on the phone takes its person away again unless the person
-did something with it in msgvault (a merge, a note). **Messages are never
-touched** — they stay, with their numbers.
+card deleted on the phone stays in the store, so its person **stays**,
+with the category „Auf dem Handy gelöscht am …“; back on the phone, the
+category goes. **Messages are never touched.**
 
 **Calendars → the vault.** msgvault 0.22.0 cannot import CalDAV (its
 calendar support is Google's API only), so the archive keeps them itself:
@@ -471,7 +502,7 @@ Where it lives:
 
 | what | where | read-only? |
 |---|---|---|
-| contacts | Radicale `<person>/handy-kontakte/` (outside the vault, the admin can read it) → msgvault's persons in the vault | Radicale: read only (rights and relay); msgvault: its own persons |
+| contacts | Radicale `<person>/handy-kontakte/` (outside the vault, the admin can read it) → `/run/tresor/kontakte/handy-kontakte.json` → (relay) → msgvault's persons in the vault | Radicale: read only; the store only grows; msgvault reads the store |
 | calendars | Radicale `<person>/google-*`, `privat-*` → `/run/tresor/kalender/*.json` | Radicale: read only; the vault's store only grows |
 | Radicale login | `RADICALE_PASSWORD_FILE` (a podman secret, mounted), never an environment variable, argv or log | — |
 | relay's password, its CA bundle | `/run/tresor/kontakte-relais`, `/run/tresor/msgvault/kontakte-ca.pem` (inside) | — |
@@ -569,7 +600,9 @@ passphrase, a refused mail login) stay yellow and say what to enter.
   msgvault connects through the relay (`add-carddav`, `set-role`,
   `sync-carddav`), the two cards become two persons, the book is subscribed
   and a lookup source but not the write target; the relay refuses PUT,
-  DELETE and PROPPATCH; the calendars are counted on the page, an event
+  DELETE and PROPPATCH; a card deleted in Radicale leaves its person in
+  msgvault with the category „Auf dem Handy gelöscht am …“, and back in
+  Radicale the category goes, still one person; the calendars are counted on the page, an event
   deleted at the source stays, marked; two persons merged through the
   page's preview; Radicale's files unchanged by the archive. **Unproven:**
   the relay on the box (rootless podman: the container's private address,

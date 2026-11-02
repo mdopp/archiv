@@ -12,14 +12,15 @@ import (
 	"crypto/x509/pkix"
 	"encoding/hex"
 	"encoding/pem"
+	"encoding/xml"
 	"errors"
 	"fmt"
-	"log"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
-	"net/http/httputil"
 	"net/netip"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -27,27 +28,27 @@ import (
 	"time"
 )
 
-// The relay between msgvault and Radicale (relais = relay). msgvault's
-// CardDAV client (0.22.0) reads an address book only
+// The relay between msgvault and the archive's contact store (relais =
+// relay). msgvault's CardDAV client (0.22.0) reads an address book only
 //   - over HTTPS (with a password it refuses plain HTTP),
 //   - at a public address, or at a private one pinned in its config.toml
 //     (trusted_origin + trusted_addresses; never loopback, never
 //     link-local — host.containers.internal is link-local under podman),
-//   - found by RFC 6764 discovery from the login's principal: Radicale
-//     answers the archive's own account (archiv-<person>) with that
-//     account's home, which holds nothing; the person's book is in /<person>/.
-// So the supervisor serves msgvault one address book itself: TLS on a
-// private address of the container, a name that resolves nowhere
-// (kontakte.archiv.invalid, pinned in msgvault's config), a certificate
-// from a CA made at every opening that may sign only that name, the
-// discovery answered here (principal and home /<person>/, one book in
-// it), and every request on the book passed to Radicale with the archive's
-// Radicale login. Only reading passes: PROPFIND, REPORT, GET, HEAD,
-// OPTIONS. A PUT, DELETE, PROPPATCH, MKCOL, MOVE … gets 403 here and never
-// reaches Radicale — msgvault cannot publish to the person's address
-// book, whatever its book roles say. The Radicale password stays in the
-// supervisor; msgvault knows only the relay's own password, made once and
-// kept in the vault.
+//   - found by RFC 6764 discovery from the login's principal.
+// And its sync mirrors the book: a card gone from it takes its person
+// away. So msgvault never reads Radicale. The supervisor serves it one
+// address book itself: TLS on a private address of the container, a name
+// that resolves nowhere (kontakte.archiv.invalid, pinned in msgvault's
+// config), a certificate from a CA made at every opening that may sign
+// only that name, the discovery answered here (principal and home
+// /<person>/, one book handy-kontakte in it), and the book's contents
+// from the archive's contact store in the vault (kontakte.go): every card
+// ever seen, a card deleted on the phone still there, marked. Only
+// reading is answered: PROPFIND, REPORT (addressbook-query and -multiget),
+// GET, HEAD, OPTIONS; PUT, DELETE, PROPPATCH, MKCOL … get 403. The relay
+// itself talks to nobody: Radicale is read by the Abgleich alone, with
+// the archive's own login, which msgvault never sees; msgvault logs into
+// the relay with the relay's own password, made once and kept in the vault.
 
 const (
 	relaisHost     = "kontakte.archiv.invalid" // RFC 2606: resolves nowhere, msgvault dials the pinned address
@@ -57,12 +58,13 @@ const (
 )
 
 type Relais struct {
-	Radicale  *Radicale
+	Person    string                       // the home the relay serves, /<person>/
 	Port      int                          // KONTAKTE_RELAIS_PORT, in the container's own network namespace
 	Adressen  func() ([]netip.Addr, error) // the container's addresses; nil: its interfaces
 	SystemCAs string                       // the bundle msgvault trusts besides the relay's CA
 
 	mu       sync.Mutex
+	innen    Innen // where the contact store is
 	adresse  netip.Addr
 	cert     *tls.Certificate
 	passwort []byte
@@ -114,7 +116,7 @@ func (r *Relais) Vorbereiten(innen Innen) error {
 		return fmt.Errorf("msgvault-Konfiguration: %w", err)
 	}
 	r.mu.Lock()
-	r.adresse, r.cert, r.passwort = addr, &cert, pw
+	r.adresse, r.cert, r.passwort, r.innen = addr, &cert, pw, innen
 	r.mu.Unlock()
 	return nil
 }
@@ -343,7 +345,7 @@ func (r *Relais) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 		http.Error(w, "Das Archiv liest das Adressbuch nur; schreiben kann msgvault hier nicht.", http.StatusForbidden)
 		return
 	}
-	home := r.Radicale.Home()
+	home := "/" + url.PathEscape(r.Person) + "/"
 	buch := home + adressbuchName + "/"
 	p := q.URL.Path
 	switch {
@@ -358,30 +360,32 @@ func (r *Relais) ServeHTTP(w http.ResponseWriter, q *http.Request) {
 			http.NotFound(w, q)
 			return
 		}
-		antworten := davAntwort(home, "<D:resourcetype><D:collection/></D:resourcetype><D:displayname>"+xmlText(r.Radicale.Person)+"</D:displayname>"+r.prinzipal(home))
+		antworten := davAntwort(home, "<D:resourcetype><D:collection/></D:resourcetype><D:displayname>"+xmlText(r.Person)+"</D:displayname>"+r.prinzipal(home))
 		if q.Header.Get("Depth") == "1" {
-			da, err := r.buchDa(q.Context())
-			if err != nil {
-				log.Printf("archiv: Relais: Radicale fragen: %v", err)
-				http.Error(w, "Radicale antwortet nicht", http.StatusBadGateway)
-				return
-			}
-			if da {
-				antworten += davAntwort(buch, `<D:resourcetype><D:collection/><C:addressbook/></D:resourcetype>`+
-					`<D:displayname>Handy-Kontakte</D:displayname>`+
-					`<D:supported-report-set><D:supported-report><D:report><D:sync-collection/></D:report></D:supported-report>`+
-					`<D:supported-report><D:report><C:addressbook-multiget/></D:report></D:supported-report></D:supported-report-set>`+
-					`<D:current-user-privilege-set><D:privilege><D:read/></D:privilege></D:current-user-privilege-set>`+
-					`<C:supported-address-data><C:address-data-type content-type="text/vcard" version="3.0"/><C:address-data-type content-type="text/vcard" version="4.0"/></C:supported-address-data>`)
+			if _, err := r.ablage(); err == nil {
+				antworten += davAntwort(buch, buchEigenschaften)
 			}
 		}
 		multistatus(w, antworten)
-	case strings.HasPrefix(p, buch) || p+"/" == buch:
-		r.weiter(w, q)
+	case p == buch || p+"/" == buch:
+		r.buch(w, q, buch)
+	case strings.HasPrefix(p, buch) && !strings.Contains(strings.TrimPrefix(p, buch), "/"):
+		r.karte(w, q, strings.TrimPrefix(p, buch))
 	default:
 		http.NotFound(w, q)
 	}
 }
+
+// buchEigenschaften: an address book that can be read and nothing more
+// (msgvault picks a book with bind/write/unbind as its place to publish),
+// queried whole or by multiget; no sync-collection, so msgvault reads a
+// snapshot each time, and a snapshot of this store never loses a card.
+const buchEigenschaften = `<D:resourcetype><D:collection/><C:addressbook/></D:resourcetype>` +
+	`<D:displayname>Handy-Kontakte</D:displayname>` +
+	`<D:supported-report-set><D:supported-report><D:report><C:addressbook-multiget/></D:report></D:supported-report>` +
+	`<D:supported-report><D:report><C:addressbook-query/></D:report></D:supported-report></D:supported-report-set>` +
+	`<D:current-user-privilege-set><D:privilege><D:read/></D:privilege></D:current-user-privilege-set>` +
+	`<C:supported-address-data><C:address-data-type content-type="text/vcard" version="3.0"/><C:address-data-type content-type="text/vcard" version="4.0"/></C:supported-address-data>`
 
 func (r *Relais) prinzipal(home string) string {
 	return "<D:current-user-principal><D:href>" + xmlText(home) + "</D:href></D:current-user-principal>" +
@@ -389,48 +393,106 @@ func (r *Relais) prinzipal(home string) string {
 		"<D:current-user-privilege-set><D:privilege><D:read/></D:privilege></D:current-user-privilege-set>"
 }
 
-func (r *Relais) buchDa(ctx context.Context) (bool, error) {
-	samml, err := r.Radicale.Sammlungen(ctx)
+// ablage reads the contact store; an error when there is none yet.
+func (r *Relais) ablage() (*Kontaktablage, error) {
+	r.mu.Lock()
+	innen := r.innen
+	r.mu.Unlock()
+	if innen.Wurzel == "" {
+		return nil, errKeineKontakte
+	}
+	k, err := kontakteLaden(kontakteDatei(innen))
 	if err != nil {
-		return false, err
+		return nil, errKeineKontakte
 	}
-	for _, s := range samml {
-		if s.Name == adressbuchName && s.Adressbuch {
-			return true, nil
-		}
-	}
-	return false, nil
+	return k, nil
 }
 
-// weiter passes a read on the book to Radicale, with the archive's login
-// instead of msgvault's; the paths are Radicale's own (the relay mirrors
-// them), so its answer needs no rewriting.
-func (r *Relais) weiter(w http.ResponseWriter, q *http.Request) {
-	pw, err := r.Radicale.passwort()
+func kartenAntwort(href string, c *Karte, mitDaten bool) string {
+	props := "<D:getetag>" + xmlText(c.ETag()) + "</D:getetag><D:resourcetype/>"
+	if mitDaten {
+		props += "<C:address-data>" + xmlText(c.Ausgabe()) + "</C:address-data>"
+	}
+	return davAntwort(href, props)
+}
+
+// buch: PROPFIND (Depth 0: the book, 1: and its cards with their ETags) and
+// REPORT (addressbook-query: every card with its data; multiget: those
+// asked for; sync-collection: 501, msgvault then reads a snapshot).
+func (r *Relais) buch(w http.ResponseWriter, q *http.Request, buch string) {
+	k, err := r.ablage()
 	if err != nil {
-		log.Printf("archiv: Relais: %v", err)
-		http.Error(w, "Radicale-Zugang fehlt", http.StatusBadGateway)
+		http.NotFound(w, q)
 		return
 	}
-	defer nullen(pw)
-	ziel := *r.Radicale.Basis
-	proxy := &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(&ziel)
-			pr.Out.URL.Path, pr.Out.URL.RawPath = q.URL.Path, q.URL.RawPath
-			pr.Out.Host = ziel.Host
-			for _, h := range []string{"Authorization", "Cookie", "X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded"} {
-				pr.Out.Header.Del(h)
+	switch q.Method {
+	case "PROPFIND":
+		antworten := davAntwort(buch, buchEigenschaften)
+		if q.Header.Get("Depth") == "1" {
+			for _, c := range k.Sortiert() {
+				antworten += kartenAntwort(buch+c.Href, c, false)
 			}
-			pr.Out.SetBasicAuth(r.Radicale.Benutzer, string(pw))
-		},
-		Transport: r.Radicale.Client.Transport,
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			log.Printf("archiv: Relais: Radicale: %v", err)
-			http.Error(w, "Radicale antwortet nicht", http.StatusBadGateway)
-		},
+		}
+		multistatus(w, antworten)
+	case "REPORT":
+		var bericht struct {
+			XMLName xml.Name
+			Hrefs   []string `xml:"DAV: href"`
+		}
+		if err := xml.NewDecoder(io.LimitReader(q.Body, 4<<20)).Decode(&bericht); err != nil {
+			http.Error(w, "unlesbarer Bericht", http.StatusBadRequest)
+			return
+		}
+		var antworten strings.Builder
+		switch bericht.XMLName.Local {
+		case "addressbook-query":
+			for _, c := range k.Sortiert() {
+				antworten.WriteString(kartenAntwort(buch+c.Href, c, true))
+			}
+		case "addressbook-multiget":
+			nach := map[string]*Karte{}
+			for _, c := range k.Karten {
+				nach[buch+c.Href] = c
+			}
+			for _, h := range bericht.Hrefs {
+				h = strings.TrimSpace(h)
+				if u, err := url.Parse(h); err == nil {
+					h = u.Path
+				}
+				if c, ok := nach[h]; ok {
+					antworten.WriteString(kartenAntwort(h, c, true))
+				} else {
+					antworten.WriteString("<D:response><D:href>" + xmlText(h) + "</D:href><D:status>HTTP/1.1 404 Not Found</D:status></D:response>")
+				}
+			}
+		default:
+			http.Error(w, "Dieser Bericht wird nicht unterstützt.", http.StatusNotImplemented)
+			return
+		}
+		multistatus(w, antworten.String())
+	default:
+		http.NotFound(w, q)
 	}
-	proxy.ServeHTTP(w, q)
+}
+
+// karte: GET (or HEAD) of one card.
+func (r *Relais) karte(w http.ResponseWriter, q *http.Request, name string) {
+	k, err := r.ablage()
+	if err != nil || (q.Method != http.MethodGet && q.Method != http.MethodHead) {
+		http.NotFound(w, q)
+		return
+	}
+	for _, c := range k.Karten {
+		if c.Href == name {
+			w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
+			w.Header().Set("ETag", c.ETag())
+			if q.Method == http.MethodGet {
+				io.WriteString(w, c.Ausgabe())
+			}
+			return
+		}
+	}
+	http.NotFound(w, q)
 }
 
 func davAntwort(href, props string) string {
@@ -448,6 +510,8 @@ func xmlText(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		switch r {
+		case '\r':
+			b.WriteString("&#13;")
 		case '&':
 			b.WriteString("&amp;")
 		case '<':

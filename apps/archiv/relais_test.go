@@ -105,13 +105,18 @@ func neuesRelais(t *testing.T) *relaisTest {
 	rt := &relaisTest{rad: neuesRadicale(t), innen: Innen{Wurzel: t.TempDir()}}
 	os.MkdirAll(rt.innen.Home(), 0o700)
 	os.WriteFile(rt.innen.Home()+"/config.toml", []byte(msgvaultConfig(8090)), 0o600)
-	rt.r = &Relais{Radicale: rt.rad.radicale(t), Port: 18443, SystemCAs: "/nicht/da",
+	rt.r = &Relais{Person: "anna", Port: 18443, SystemCAs: "/nicht/da",
 		Adressen: func() ([]netip.Addr, error) { return []netip.Addr{netip.MustParseAddr("192.168.1.9")}, nil }}
 	if err := rt.r.Vorbereiten(rt.innen); err != nil {
 		t.Fatal(err)
 	}
 	rt.pw = string(rt.r.Passwort())
-	rt.rad.setzen("handy-kontakte", fakeSammlung{art: "adressbuch"})
+	k := neueKontaktablage()
+	k.Einmischen([]QuellKarte{{Href: "ben.vcf", Daten: vcard("u-ben", "Ben", "+4915199999999")}, {Href: "carla.vcf", Daten: vcard("u-carla", "Carla", "+4917011111111")}}, t0)
+	k.Einmischen([]QuellKarte{{Href: "carla.vcf", Daten: vcard("u-carla", "Carla", "+4917011111111")}}, t0.Add(time.Hour)) // Ben deleted on the phone
+	if err := k.speichern(kontakteDatei(rt.innen)); err != nil {
+		t.Fatal(err)
+	}
 	return rt
 }
 
@@ -200,41 +205,64 @@ func TestTheRelayAnswersMsgvaultsDiscovery(t *testing.T) {
 	if len(buch.Berichte) != 2 {
 		t.Fatalf("reports: %+v", buch.Berichte)
 	}
-	// no book in Radicale yet: none offered
-	rt.rad.weg("handy-kontakte")
+	// no card in the archive yet: no book offered
+	os.Remove(kontakteDatei(rt.innen))
 	if e := lesen(t, rt.rufe("PROPFIND", "/anna/", "1", true)); len(e.Responses) != 1 {
 		t.Fatalf("a missing book was offered: %+v", e)
 	}
 }
 
-// Reads on the book reach Radicale with the archive's login; a write
-// never leaves the relay, and nothing beside the book is reachable.
-func TestTheRelayPassesOnlyReadsOfTheBook(t *testing.T) {
+// The book msgvault reads is the archive's store: every card, the one
+// deleted on the phone marked; nothing is written, Radicale never asked.
+func TestTheRelayServesTheStoreAndOnlyReads(t *testing.T) {
 	rt := neuesRelais(t)
-	for _, m := range []string{"PROPFIND", "REPORT"} {
-		rec := rt.rufe(m, "/anna/handy-kontakte/", "1", true)
-		if rec.Code != http.StatusMultiStatus || !strings.Contains(rec.Body.String(), "FN:Ben") {
-			t.Fatalf("%s: %d %s", m, rec.Code, rec.Body)
+	q := func(method, pfad, body, depth string) *httptest.ResponseRecorder {
+		r := httptest.NewRequest(method, pfad, strings.NewReader(body))
+		r.SetBasicAuth(relaisBenutzer, rt.pw)
+		if depth != "" {
+			r.Header.Set("Depth", depth)
 		}
+		rec := httptest.NewRecorder()
+		rt.r.ServeHTTP(rec, r)
+		return rec
+	}
+	query := `<C:addressbook-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:prop><D:getetag/><C:address-data/></D:prop><C:filter/></C:addressbook-query>`
+	rec := q("REPORT", "/anna/handy-kontakte/", query, "1")
+	body := rec.Body.String()
+	if rec.Code != http.StatusMultiStatus || !strings.Contains(body, "FN:Ben") || !strings.Contains(body, "FN:Carla") ||
+		!strings.Contains(body, "CATEGORIES:Auf dem Handy gelöscht am ") || !strings.Contains(body, "&#13;") {
+		t.Fatalf("query: %d %s", rec.Code, body)
+	}
+	if strings.Count(body, "gelöscht") != 1 {
+		t.Fatal("only Ben is deleted")
+	}
+	multi := `<C:addressbook-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:carddav"><D:prop><D:getetag/><C:address-data/></D:prop><D:href>/anna/handy-kontakte/carla.vcf</D:href><D:href>/anna/handy-kontakte/weg.vcf</D:href></C:addressbook-multiget>`
+	body = q("REPORT", "/anna/handy-kontakte/", multi, "").Body.String()
+	if !strings.Contains(body, "FN:Carla") || strings.Contains(body, "FN:Ben") || !strings.Contains(body, "404") {
+		t.Fatalf("multiget: %s", body)
+	}
+	if rec := q("REPORT", "/anna/handy-kontakte/", `<D:sync-collection xmlns:D="DAV:"><D:sync-token/></D:sync-collection>`, ""); rec.Code != http.StatusNotImplemented {
+		t.Fatalf("sync-collection: %d (msgvault falls back to a snapshot on 501)", rec.Code)
+	}
+	if body := q("PROPFIND", "/anna/handy-kontakte/", "", "1").Body.String(); strings.Count(body, "<D:getetag>") != 2 {
+		t.Fatalf("listing: %s", body)
+	}
+	rec = q("GET", "/anna/handy-kontakte/ben.vcf", "", "")
+	if rec.Code != 200 || rec.Header().Get("ETag") == "" || !strings.Contains(rec.Body.String(), "gelöscht") {
+		t.Fatalf("GET: %d %s", rec.Code, rec.Body)
 	}
 	for _, m := range []string{"PUT", "DELETE", "PROPPATCH", "MKCOL", "MOVE", "COPY", "POST", "LOCK"} {
-		if rec := rt.rufe(m, "/anna/handy-kontakte/neu.vcf", "", true); rec.Code != http.StatusForbidden {
+		if rec := q(m, "/anna/handy-kontakte/neu.vcf", "x", ""); rec.Code != http.StatusForbidden {
 			t.Errorf("%s: %d", m, rec.Code)
 		}
 	}
-	for _, p := range []string{"/anna/privat-sport/", "/bob/handy-kontakte/", "/anna/handy-kontakte-alt/", "/anna/google-arbeit/"} {
-		if rec := rt.rufe("PROPFIND", p, "1", true); rec.Code != http.StatusNotFound {
+	for _, p := range []string{"/anna/privat-sport/", "/bob/handy-kontakte/", "/anna/handy-kontakte-alt/", "/anna/handy-kontakte/x/y.vcf"} {
+		if rec := q("PROPFIND", p, "", "1"); rec.Code != http.StatusNotFound {
 			t.Errorf("%s: %d", p, rec.Code)
 		}
 	}
-	methoden, wer := rt.rad.gesehen()
-	for i, m := range methoden {
-		if !strings.HasPrefix(m, "PROPFIND ") && !strings.HasPrefix(m, "REPORT ") {
-			t.Errorf("Radicale got %s", m)
-		}
-		if wer[i] != "archiv-anna" {
-			t.Errorf("%s as %q, not the archive's login", m, wer[i])
-		}
+	if m, _ := rt.rad.gesehen(); len(m) != 0 {
+		t.Fatalf("the relay asked Radicale: %v", m)
 	}
 }
 
