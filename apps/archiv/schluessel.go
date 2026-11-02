@@ -35,6 +35,27 @@ const (
 var errFormat = errors.New("format")
 
 // signalPassphrase keeps only the digits; 30 of them or the sentence.
+// whatsappSchluessel reads the 64-digit key of a WhatsApp backup as
+// WhatsApp shows it: 64 hex digits in groups of four, any case.
+func whatsappSchluessel(s string) ([]byte, error) {
+	var b []byte
+	for _, r := range s {
+		switch {
+		case r >= '0' && r <= '9', r >= 'a' && r <= 'f':
+			b = append(b, byte(r))
+		case r >= 'A' && r <= 'F':
+			b = append(b, byte(r-'A'+'a'))
+		case r == ' ' || r == '-' || r == '\t' || r == '\n' || r == '\r':
+		default:
+			return nil, errFormat
+		}
+	}
+	if len(b) != 64 {
+		return nil, errFormat
+	}
+	return b, nil
+}
+
 func signalPassphrase(s string) ([]byte, error) {
 	var b []byte
 	for _, r := range s {

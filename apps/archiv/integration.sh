@@ -32,6 +32,19 @@ docker run --rm --entrypoint gocryptfs "$IMG" -version
 docker run --rm --entrypoint wadecrypt "$IMG" --help >/dev/null
 ende
 
+gruppe "WhatsApp: a crypt15 round trip with the 64-digit key as the archive calls wadecrypt"
+docker run --rm --entrypoint sh "$IMG" -c '
+set -e
+cd /tmp
+python3 -c "import sqlite3;c=sqlite3.connect(\"in.db\");c.execute(\"create table t(x)\");c.execute(\"insert into t values(1)\");c.commit()"
+K=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+/opt/wa-crypt-tools/bin/wacreatekey --hex $K -y >/dev/null 2>&1
+/opt/wa-crypt-tools/bin/waencrypt encrypted_backup.key in.db msgstore.db.crypt15 >/dev/null 2>&1
+wadecrypt $K msgstore.db.crypt15 out.db >/dev/null 2>&1
+cmp in.db out.db
+' || fail "wadecrypt with the hex key did not give the database back"
+ende
+
 gruppe "gocryptfs: init, mount, unmount, wrong password (exit 12)"
 docker run --rm "${FUSE[@]}" --entrypoint sh "$IMG" -c '
 set -e

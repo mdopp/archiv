@@ -52,11 +52,13 @@ type Dienst interface {
 // Innen are the paths inside the open vault.
 type Innen struct{ Wurzel string }
 
-func (i Innen) Home() string           { return filepath.Join(i.Wurzel, "msgvault") }
-func (i Innen) Identitaet() string     { return filepath.Join(i.Wurzel, "age-identitaet") }  // the private key of the Briefkasten
-func (i Innen) Arbeit() string         { return filepath.Join(i.Wurzel, "arbeit") }          // plaintext exports while an import runs, emptied after each
-func (i Innen) GrosseAnhaenge() string { return filepath.Join(i.Wurzel, "grosse-anhaenge") } // attachments msgvault refuses (MaxAnhang), kept beside it
-func (i Innen) APIKey() string         { return filepath.Join(i.Home(), "api-key") }
+func (i Innen) Home() string               { return filepath.Join(i.Wurzel, "msgvault") }
+func (i Innen) Identitaet() string         { return filepath.Join(i.Wurzel, "age-identitaet") }      // the private key of the Briefkasten
+func (i Innen) Arbeit() string             { return filepath.Join(i.Wurzel, "arbeit") }              // plaintext exports while an import runs, emptied after each
+func (i Innen) WhatsAppSchluessel() string { return filepath.Join(i.Wurzel, "whatsapp-schluessel") } // the 64-digit key, only inside: WhatsApp is read only while open
+func (i Innen) WhatsAppStand() string      { return filepath.Join(i.Wurzel, "whatsapp-stand") }      // which database was imported last
+func (i Innen) GrosseAnhaenge() string     { return filepath.Join(i.Wurzel, "grosse-anhaenge") }     // attachments msgvault refuses (MaxAnhang), kept beside it
+func (i Innen) APIKey() string             { return filepath.Join(i.Home(), "api-key") }
 
 // Tresor is the state machine. All transitions hold mu.
 type Tresor struct {
