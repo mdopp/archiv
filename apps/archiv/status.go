@@ -132,6 +132,12 @@ func statusBauen(l Lage) statusDatei {
 	if e, ok := ein["signal"]; ok {
 		teile = append(teile, fmt.Sprintf("Signal zuletzt am %s ins Archiv übernommen (%d Nachrichten)", datum(e.Am), e.Zahlen.Nachrichten()))
 	}
+	if n := l.Wartend["sms"].Wartend; n > 0 {
+		teile = append(teile, anzahl(n, "SMS-Datei wartet", "SMS-Dateien warten")+" im Eingang")
+	}
+	if e, ok := ein["sms"]; ok {
+		teile = append(teile, fmt.Sprintf("SMS zuletzt am %s ins Archiv übernommen (%d Nachrichten, %d Anrufe)", datum(e.Am), e.Zahlen.SMS+e.Zahlen.MMS, e.Zahlen.Anrufe))
+	}
 	if e, ok := ein["mail"]; ok {
 		teile = append(teile, fmt.Sprintf("Mail zuletzt am %s ins Archiv übernommen (%d Mails)", datum(e.Am), e.Zahlen.Mails))
 	}

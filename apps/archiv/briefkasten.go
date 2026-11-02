@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -224,9 +225,31 @@ func (b *Briefkasten) Runde(ctx context.Context) {
 	if err != nil {
 		return // no vault made yet: nobody to write to
 	}
+	b.aushaengen(empf)
 	b.signal(ctx, empf)
 	if ctx.Err() == nil {
 		b.whatsapp(ctx, empf)
+	}
+}
+
+// aushaengen puts the Briefkasten's public key into the inbox as
+// .briefkasten.pub (a dot-file: never a backup), where Haus hands it to
+// the person's phone: the Haus app encrypts SMS and calls to it before
+// they leave the phone (ADR 0029 §9).
+func (b *Briefkasten) aushaengen(empf *age.X25519Recipient) {
+	ziel := filepath.Join(b.Eingang.Dir, ".briefkasten.pub")
+	inhalt := []byte(empf.String() + "\n")
+	if alt, err := os.ReadFile(ziel); err == nil && bytes.Equal(alt, inhalt) {
+		return
+	}
+	tmp := ziel + ".neu-" + zufall()
+	err := os.WriteFile(tmp, inhalt, 0o644)
+	if err == nil {
+		err = os.Rename(tmp, ziel)
+	}
+	if err != nil {
+		os.Remove(tmp)
+		log.Printf("archiv: Briefkasten-Schlüssel in den Eingang legen: %v", err)
 	}
 }
 

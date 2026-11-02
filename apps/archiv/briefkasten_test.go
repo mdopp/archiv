@@ -632,3 +632,71 @@ func TestAnAttachmentTooBigForMsgvaultIsKeptInTheVaultAndNamedInTheMessage(t *te
 	}
 	leer(t, innen.Arbeit(), "the vault's work folder")
 }
+
+// smsVomHandy is what the Haus app uploads: an SMS Backup & Restore XML,
+// encrypted on the phone to the Briefkasten's public key.
+func smsVomHandy(t *testing.T, dir, name string, an age.Recipient, xml string) string {
+	t.Helper()
+	os.MkdirAll(filepath.Join(dir, "sms"), 0o700)
+	p := filepath.Join(dir, "sms", name)
+	f, _ := os.Create(p)
+	w, err := age.Encrypt(f, an)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.WriteString(w, xml)
+	w.Close()
+	f.Close()
+	return p
+}
+
+func TestThePhonesSMSAndCallsComeInEncryptedAndAreImportedWhenOpen(t *testing.T) {
+	bt := neuerBriefkasten(t)
+	bt.runde()
+	pub, err := os.ReadFile(filepath.Join(bt.inbox, ".briefkasten.pub"))
+	if err != nil || strings.TrimSpace(string(pub)) != bt.id.Recipient().String() {
+		t.Fatalf("the public key is not in the inbox for the Haus app: %q %v", pub, err)
+	}
+	smsDatei := smsVomHandy(t, bt.inbox, "sms-20261102T120000Z.xml.age", bt.id.Recipient(), signalXML(sms(1700000000000, 1, "+4917011111111", "vom Handy")))
+	anrufe := smsVomHandy(t, bt.inbox, "anrufe-20261102T120000Z.xml.age", bt.id.Recipient(), `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><calls count="1"><call number="+4917011111111" duration="61" date="1700000000000" type="1" presentation="1" contact_name="Ben" /></calls>`)
+	fremd, _ := age.GenerateX25519Identity()
+	kaputt := smsVomHandy(t, bt.inbox, "sms-alt.xml.age", fremd.Recipient(), signalXML())
+	if roh, _ := os.ReadFile(smsDatei); bytes.Contains(roh, []byte("vom Handy")) {
+		t.Fatal("test setup: the file is not encrypted")
+	}
+
+	bt.b.Eingang.Ruhe = 0
+	bt.b.Eingang.Stabil("sms")
+	innen := Innen{Wurzel: t.TempDir()}
+	os.MkdirAll(innen.Arbeit(), 0o700)
+	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
+	mv := &fakeMsgvault{}
+	pb := &Postbote{Post: bt.b.Post, Eingang: bt.b.Eingang, Schluessel: bt.b.Schluessel, Protokoll: bt.b.Protokoll, Run: mv, Msgvault: "msgvault"}
+	pb.Runde(context.Background(), innen)
+
+	alle := strings.Join(mv.xml, "\n")
+	if len(mv.xml) != 2 || !strings.Contains(alle, `body="vom Handy"`) || !strings.Contains(alle, `<call number="+4917011111111"`) {
+		t.Fatalf("msgvault got: %q", mv.xml)
+	}
+	for _, b := range mv.befehle {
+		if b.Args[0] != "import-synctech-sms" || b.Args[3] != annaTel || !strings.HasPrefix(b.Args[1], innen.Arbeit()) {
+			t.Fatalf("%q", b.Args)
+		}
+	}
+	for _, p := range []string{smsDatei, anrufe} {
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("%s stayed in the inbox after the import", p)
+		}
+	}
+	if _, err := os.Stat(kaputt); err != nil {
+		t.Fatal("a file that cannot be decrypted must stay")
+	}
+	if _, f, _ := bt.b.Protokoll.Kopie(); f == nil || f.Quelle != "sms" || !strings.Contains(f.Satz, "sms-alt.xml.age") {
+		t.Fatalf("the person is not told about the unreadable file: %+v", f)
+	}
+	leer(t, innen.Arbeit(), "the vault's work folder")
+	ein, _, _ := bt.b.Protokoll.Kopie()
+	if _, ok := ein["sms"]; !ok {
+		t.Fatal("the import is not recorded")
+	}
+}
