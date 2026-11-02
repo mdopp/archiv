@@ -580,8 +580,8 @@ func (w *Web) schluesselFormulare(b *strings.Builder) {
 <p><b>E-Mail (IMAP)</b>: %s</p>
 <p class=k>Mit einem App-Passwort deines Mail-Anbieters, nicht deinem normalen Passwort (Gmail: Google-Konto → Sicherheit → App-Passwörter; dafür muss die Bestätigung in zwei Schritten an sein). Das Archiv holt jede Stunde die neuen Mails ab, auch wenn es zu ist, und ändert auf dem Server nichts, nicht einmal „gelesen“. Bei Gmail liest es „Alle Nachrichten“ (ohne Spam und Papierkorb); deine Gmail-Labels kommen nicht mit.</p>
 <p class=hinweis>%s</p>
-<label>Server<input name=host autocomplete=off placeholder="imap.gmail.com"></label>
-<label>Benutzername<input name=benutzer autocomplete=off></label>
+<label>Server (für Gmail so lassen)<input name=host autocomplete=off value="imap.gmail.com"></label>
+<label>Benutzername, meist deine Mail-Adresse<input name=benutzer type=email autocomplete=off placeholder="z. B. name@gmail.com"></label>
 <label>App-Passwort<input name=passwort type=password autocomplete=new-password></label>
 %s</form></section>`, hinterlegt(SchluesselIMAP), saysMailPreis, knopf("Speichern", "Speichere …", ""))
 }
@@ -599,7 +599,7 @@ func seite(rw http.ResponseWriter, code int, titel, body, extra string) {
 // marked data-auffrischen reloads itself while nobody types.
 const skript = `<script>
 document.addEventListener('submit',function(e){var b=e.submitter||e.target.querySelector('button');if(!b||!b.dataset.laeuft)return;setTimeout(function(){b.textContent=b.dataset.laeuft;b.disabled=true;b.setAttribute('aria-busy','true')},0)});
-document.addEventListener('DOMContentLoaded',function(){var m=document.querySelector('[data-auffrischen]');if(!m)return;setInterval(function(){var a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='BUTTON'))return;var voll=[].some.call(document.querySelectorAll('input:not([hidden])'),function(i){return i.value});if(!voll)location.reload()},(+m.dataset.auffrischen||5)*1000)});
+document.addEventListener('DOMContentLoaded',function(){var m=document.querySelector('[data-auffrischen]');if(!m)return;setInterval(function(){var a=document.activeElement;if(a&&(a.tagName==='INPUT'||a.tagName==='BUTTON'))return;var voll=[].some.call(document.querySelectorAll('input:not([hidden])'),function(i){return i.value&&i.value!==i.defaultValue});if(!voll)location.reload()},(+m.dataset.auffrischen||5)*1000)});
 </script>`
 
 const css = `
