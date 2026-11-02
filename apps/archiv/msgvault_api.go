@@ -17,7 +17,7 @@ import (
 // of msgvault 0.22.0 (api/openapi.yaml at tag v0.22.0):
 //
 //	GET  /api/v1/carddav/books                                 the address books and their roles
-//	GET  /api/v1/identity/match-candidates?state=…             suggestions, with their review token
+//	GET  /api/v1/identity/match-candidates?state=candidate|conflict  suggestions, with their review token
 //	GET  /api/v1/identity/match-candidates/{id}                one, with a fresh token
 //	POST /api/v1/identity/match-candidates/{id}/review/accept  {"review_token": …}
 //	POST /api/v1/identity/match-candidates/{id}/review/reject  {"review_token": …}
@@ -154,12 +154,21 @@ func (v Vorschlag) Token() string {
 // Offen: not decided yet (msgvault keeps conflicts in their own state).
 func (v Vorschlag) Offen() bool { return v.State == "candidate" || v.State == "conflict" }
 
+// Vorschlaege lists the open suggestions: msgvault's API (unlike its
+// CLI) takes one state per request, so candidate and conflict are asked
+// for apart.
 func (m *MsgvaultAPI) Vorschlaege(ctx context.Context, limit int) ([]Vorschlag, error) {
-	var r struct {
-		Candidates []Vorschlag `json:"candidates"`
+	var alle []Vorschlag
+	for _, state := range []string{"candidate", "conflict"} {
+		var r struct {
+			Candidates []Vorschlag `json:"candidates"`
+		}
+		if err := m.rufe(ctx, http.MethodGet, "/api/v1/identity/match-candidates?state="+state+"&limit="+strconv.Itoa(limit), nil, nil, &r); err != nil {
+			return nil, err
+		}
+		alle = append(alle, r.Candidates...)
 	}
-	err := m.rufe(ctx, http.MethodGet, "/api/v1/identity/match-candidates?state=all&limit="+strconv.Itoa(limit), nil, nil, &r)
-	return r.Candidates, err
+	return alle, nil
 }
 
 func (m *MsgvaultAPI) Vorschlag(ctx context.Context, id int64) (Vorschlag, error) {

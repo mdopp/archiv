@@ -439,8 +439,8 @@ kept, counted and readable as files in the open vault.
 
 **„Ist das dieselbe Person?“** On the open page (`personen.go`), msgvault's
 identity suggestions that are still open (`GET
-/api/v1/identity/match-candidates?state=all`; states `candidate` and
-`conflict`) are put to the person in plain German: who the two are (a
+/api/v1/identity/match-candidates?state=candidate`, then `state=conflict`;
+the API takes one state per request, its CLI's `all` it refuses) are put to the person in plain German: who the two are (a
 participant's name and address, `GET /api/v1/participants/{id}`; a saved
 person's name; „ein Kontakt aus deinem Handy-Adressbuch“), why
 („Beide haben die Telefonnummer +49 …“, „Beide heißen …“ with a warning,

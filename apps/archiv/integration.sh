@@ -255,7 +255,9 @@ code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passwo
 warte 180 '.zustand == "offen" and .bereit == true'
 if sudo test -e "$D/data/schluessel/signal"; then fail "the old outside passphrase stayed after opening"; fi
 docker exec archiv test -s /run/tresor/signal-passphrase || fail "no passphrase inside after the move"
-docker logs archiv 2>&1 | grep -q "alte Signal-Passphrase außerhalb des Tresors gelöscht" || fail "the move was not logged"
+# the whole log first: grep -q ends early, and with pipefail docker's SIGPIPE fails the pipe
+log=$(docker logs archiv 2>&1)
+grep -q "alte Signal-Passphrase außerhalb des Tresors gelöscht" <<<"$log" || fail "the move was not logged"
 warte 120 '.briefkasten.wartend == 0 and .letzter_import.signal.anzahl == 3 and .letzter_import.mail.zahlen.mails == 2'
 curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_import, .letztes_paket'
 [ -z "$(docker exec archiv ls -A /run/tresor/arbeit)" ] || fail "plaintext left in the vault's work folder after delivery"

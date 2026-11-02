@@ -102,10 +102,21 @@ func (f *fakeAPI) serve(w http.ResponseWriter, r *http.Request) {
 		f.personen[id] = a
 		jsonAus(w, 200, map[string]any{"person": a})
 	case r.URL.Path == "/api/v1/identity/match-candidates":
+		state := r.URL.Query().Get("state")
+		switch state {
+		case "candidate", "accepted", "rejected", "conflict":
+		default: // 0.22.0's API takes no "all" (its CLI does)
+			jsonAus(w, 400, map[string]string{"error": "invalid_state"})
+			return
+		}
+		var l []map[string]any
 		for _, v := range f.vorschlaege {
 			v["review_token"] = fmt.Sprintf("token-%d-%d", int(v["id"].(float64)), f.token)
+			if v["state"] == state {
+				l = append(l, v)
+			}
 		}
-		jsonAus(w, 200, map[string]any{"candidates": f.vorschlaege, "limit": 200, "offset": 0})
+		jsonAus(w, 200, map[string]any{"candidates": l, "limit": 200, "offset": 0})
 	case len(teile) == 7 && teile[2] == "identity" && teile[5] == "review":
 		var rein struct {
 			Token string `json:"review_token"`
