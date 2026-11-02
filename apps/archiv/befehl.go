@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -57,8 +58,19 @@ func grundumgebung(home string) []string {
 
 // msgvaultUmgebung adds what msgvault needs: its home inside the vault,
 // telemetry off by every switch it honours (laib ADR 0029: it is on by default).
+// When the relay to Radicale is set up (relais.go), msgvault trusts its
+// certificate through SSL_CERT_FILE: the system's CAs and the relay's.
 func msgvaultUmgebung(home string) []string {
-	return append(grundumgebung(home), "MSGVAULT_HOME="+home, "MSGVAULT_TELEMETRY_ENABLED=0", "TELEMETRY_ENABLED=0", "DO_NOT_TRACK=1")
+	env := append(grundumgebung(home), "MSGVAULT_HOME="+home, "MSGVAULT_TELEMETRY_ENABLED=0", "TELEMETRY_ENABLED=0", "DO_NOT_TRACK=1")
+	if ca := filepath.Join(home, kontakteCAName); dateiDa(ca) {
+		env = append(env, "SSL_CERT_FILE="+ca)
+	}
+	return env
+}
+
+func dateiDa(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && fi.Mode().IsRegular()
 }
 
 func zeile(geheim []byte) []byte {
@@ -147,6 +159,28 @@ func msgvaultImportMaildir(bin, home, maildir, konto string) Befehl {
 	// msgvault refuses every later packet (2026-11-02). A packet is whole
 	// and msgvault keeps one of each message, so starting fresh is safe.
 	return Befehl{Pfad: bin, Args: []string{"import-maildir", maildir, "--identifier", konto, "--no-resume"}, Env: msgvaultUmgebung(home)}
+}
+
+// msgvaultAddCardDAV connects msgvault to the person's address book
+// through the relay (relais.go): the relay's URL and user on argv, its
+// password on stdin (add-carddav reads a piped password there), never
+// Radicale's. No --schedule: the supervisor syncs while open.
+func msgvaultAddCardDAV(bin, home, basis, benutzer string, pw []byte) Befehl {
+	return Befehl{Pfad: bin, Args: []string{"add-carddav", basis, benutzer}, Env: msgvaultUmgebung(home), Eingabe: zeile(pw)}
+}
+
+// msgvaultBuchRollen gives the address book its roles: subscribed (its
+// cards become persons) and lookup source (they resolve numbers and
+// addresses to names) — never --write-target: msgvault publishes nothing
+// to the person's address book (and the relay refuses any write anyway).
+// set-role replaces all three roles, so the omitted one is false.
+func msgvaultBuchRollen(bin, home string, buch int64) Befehl {
+	return Befehl{Pfad: bin, Args: []string{"carddav", "books", "set-role", fmt.Sprint(buch), "--subscribed", "--lookup-source"}, Env: msgvaultUmgebung(home)}
+}
+
+// msgvaultSyncCardDAV pulls the address book's changes into msgvault.
+func msgvaultSyncCardDAV(bin, home string) Befehl {
+	return Befehl{Pfad: bin, Args: []string{"sync-carddav"}, Env: msgvaultUmgebung(home)}
 }
 
 // Ausgabe is what a finished program said: the tail of its output.

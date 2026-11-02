@@ -2,7 +2,8 @@
 
 Für die Familie in einem Satz: Dein Nachrichten-Archiv — Signal, SMS,
 Anrufe und E-Mail (später WhatsApp und Discord) durchsuchbar auf der Box, in
-einem Tresor, den nur dein Archiv-Passwort öffnet.
+einem Tresor, den nur dein Archiv-Passwort öffnet; mit den Namen aus deinen
+Handy-Kontakten und jedem Termin aus deinen Kalendern.
 
 One container per person ([laib ADR 0029](https://github.com/mdopp/laib/blob/main/docs/adr/0029-one-message-archive-per-person.md),
 laib#985, laib#986). Inside: a small Go supervisor (`archiv`, this folder),
@@ -267,7 +268,8 @@ page says so. Attachments over 25 MiB fail msgvault's SMS import here
 (the packet path sets them aside, this one does not yet).
 
 Contacts take another way: Haus mirrors the phone's contacts into the
-person's Radicale address book `handy-kontakte`, outside the vault.
+person's Radicale address book `handy-kontakte`, outside the vault; the
+archive reads them from there (below, "Contacts and calendars").
 
 ### WhatsApp: only while open, the key inside the vault
 
@@ -339,6 +341,146 @@ beginning with `.` and renames it into place when complete.
   137 = sender and 151 = recipients including the person), attachments as
   base64 `part`s, `m_id` = `quell_id`.
 
+## Contacts and calendars (from Radicale, read only)
+
+Owner, 2026-11-02: contacts and calendars go from the phone into the
+archive. Both already live in the box's Radicale, outside the vault:
+
+| what | where in Radicale | who writes it there |
+|---|---|---|
+| the phone's contacts | `<person>/handy-kontakte/` | Haus (the Haus app mirrors the phone's address book daily) |
+| the person's Google calendars | `<person>/google-<name>/` (not `google-kontakte`, a Takeout's address book) | laib's `kalender` service, every 15 minutes |
+| calendars made in Haus „nur für mich“ | `<person>/privat-<name>/` | Haus |
+
+While the vault is open the **Abgleich** (`abgleich.go`) reads them: at the
+opening, then every `KONTAKTE_TAKT` seconds (default 3 hours), and on
+„Jetzt abgleichen“. Closed, nothing is read. The archive logs into
+Radicale with its own account (`RADICALE_USER`, `archiv-<person>`), which
+Radicale lets read exactly these collections of exactly this person and
+write nothing (the rights below); the client sends only PROPFIND and GET.
+
+**Contacts → msgvault persons.** msgvault 0.22.0 is a CardDAV client: its
+`add-carddav` connects an address book, `sync-carddav` pulls changes, and
+a *subscribed* book's cards become msgvault persons whose numbers and
+addresses resolve the senders of WhatsApp, Signal, SMS and mail to names
+(a *lookup source* keeps the cards for that matching). msgvault cannot
+reach Radicale directly, for three reasons in its own code: with a
+password it speaks only HTTPS; it dials only public addresses, or a
+private one pinned in its `config.toml` (`[carddav] trusted_origin`,
+`trusted_addresses`; never loopback, never link-local, and
+`host.containers.internal` is link-local under podman); and it finds the
+books by RFC 6764 discovery from the login's principal, which for the
+archive's account is `/archiv-<person>/`, an empty home. So the
+supervisor runs a **relay** (`relais.go`) for msgvault, only while open:
+
+- HTTPS on a private address of the container (port `KONTAKTE_RELAIS_PORT`,
+  default 18443, inside the container's own network namespace; nothing is
+  published), under the name `kontakte.archiv.invalid` (RFC 2606: it
+  resolves nowhere). At every opening, before msgvault starts, the
+  supervisor makes a CA that may sign only that name (an X.509 name
+  constraint) and the relay's certificate, writes the system's CAs plus
+  that CA to `msgvault/kontakte-ca.pem` (msgvault gets it as
+  `SSL_CERT_FILE`) and pins the name to today's address in msgvault's
+  `config.toml` (only those two keys of `[carddav]`; msgvault writes the
+  rest itself).
+- It answers the discovery itself (principal and address-book home
+  `/<person>/`, one book `handy-kontakte` in it, while Radicale has it,
+  with the privilege `read` only, so msgvault never picks it as the place
+  to publish) and passes each request on that book to Radicale with the
+  archive's Radicale login. msgvault never sees the Radicale password; it
+  logs into the relay as `msgvault` with the relay's own password, made
+  once and kept in the vault (`kontakte-relais`), given to `add-carddav` on
+  stdin.
+- **Only reading passes:** PROPFIND, REPORT, GET, HEAD, OPTIONS. PUT,
+  DELETE, PROPPATCH, MKCOL, MOVE … get 403 at the relay and never reach
+  Radicale; so does any path outside `/<person>/handy-kontakte/`. msgvault
+  cannot publish to the person's address book whatever its roles say.
+
+The commands (all through the running daemon, built in `befehl.go`): once,
+`msgvault add-carddav https://kontakte.archiv.invalid:18443/ msgvault`
+(the relay's password on stdin; no `--schedule`: the supervisor syncs);
+every round, if the book's roles are not exactly these,
+`msgvault carddav books set-role <id> --subscribed --lookup-source`
+(`set-role` replaces all three roles, so it is never the write target);
+then `msgvault sync-carddav`. The book's roles are read from msgvault's API
+(`GET /api/v1/carddav/books`). The page says when the last sync went
+through, with how many cards were new, changed or deleted on the phone, and
+how many persons msgvault has.
+
+What a sync does in msgvault: a new or changed card updates its person; a
+card deleted on the phone takes its person away again unless the person
+did something with it in msgvault (a merge, a note). **Messages are never
+touched** — they stay, with their numbers.
+
+**Calendars → the vault.** msgvault 0.22.0 cannot import CalDAV (its
+calendar support is Google's API only), so the archive keeps them itself:
+one file per calendar, `/run/tresor/kalender/<collection>.json` (format
+`archiv-kalender`, version 1), inside the vault. Each round fetches every
+`google-*` and `privat-*` calendar whole (a GET on the collection) and
+merges it in:
+
+- an event is keyed by its UID and RECURRENCE-ID (with its TZID), so each
+  changed occurrence of a series is its own entry; an event without UID
+  by a hash of its content;
+- what is stored is the whole VEVENT as the source last had it (with its
+  VALARMs, lines unfolded), the time zones it uses, title and start, when
+  it was first and last seen;
+- a changed event keeps its earlier versions (up to 20); a new DTSTAMP
+  alone is no change (Google stamps every export anew);
+- an event gone at the source **stays**, marked
+  `an_der_quelle_geloescht_am`; if it comes back, the mark goes;
+- a calendar gone from Radicale stays with all its events, marked
+  `quelle_weg_seit`.
+
+Nothing is ever removed from that store. The page shows per calendar how
+many events the archive holds and how many of them are gone at the
+source. **Searching events is a later step** (not built): today they are
+kept, counted and readable as files in the open vault.
+
+**„Ist das dieselbe Person?“** On the open page (`personen.go`), msgvault's
+identity suggestions that are still open (`GET
+/api/v1/identity/match-candidates?state=candidate`, then `state=conflict`;
+the API takes one state per request, its CLI's `all` it refuses) are put to the person in plain German: who the two are (a
+participant's name and address, `GET /api/v1/participants/{id}`; a saved
+person's name; „ein Kontakt aus deinem Handy-Adressbuch“), why
+(„Beide haben die Telefonnummer +49 …“, „Beide heißen …“ with a warning,
+the same e-mail address, account or user name), and where it was found
+(in the address book or in the messages). Ja and Nein post the review
+token the page showed to `…/{id}/review/accept` or `…/review/reject`. If
+msgvault answers `identity_match_review_stale` (the evidence changed), the
+page fetches the suggestions again and says „Der Vorschlag hat sich
+inzwischen geändert …“, with the new token in the form. A suggestion
+between two persons that are both saved already cannot be accepted
+(msgvault: `person_merge_required`); it shows „Zusammenführen ansehen“
+instead. Suggestions msgvault itself marks as not decidable here are
+counted, not shown. At most 10 at a time; the list is fetched again at
+most every 30 s and after every decision.
+
+**Two persons by hand.** „Zwei Personen von Hand zusammenführen“: two
+lists of the saved persons, then a **preview** (the archive's own:
+msgvault 0.22.0 has no merge preview) with both names and every number and
+address msgvault knows for each (`GET /api/v1/people/{id}/identities`),
+who stays and who goes in, and „Andersherum“. „Ja, zusammenführen“ posts
+`POST /api/v1/people/{survivor}/merge` with `If-Match` carrying the two
+revisions the preview showed and an `Idempotency-Key`: if either person
+changed since, msgvault refuses (`person_merge_revision_conflict`) and the
+page shows the preview again with the current state. msgvault records the
+merge and can split it again (`msgvault person split`).
+
+Where it lives:
+
+| what | where | read-only? |
+|---|---|---|
+| contacts | Radicale `<person>/handy-kontakte/` (outside the vault, the admin can read it) → msgvault's persons in the vault | Radicale: read only (rights and relay); msgvault: its own persons |
+| calendars | Radicale `<person>/google-*`, `privat-*` → `/run/tresor/kalender/*.json` | Radicale: read only; the vault's store only grows |
+| Radicale login | `RADICALE_PASSWORD_FILE` (a podman secret, mounted), never an environment variable, argv or log | — |
+| relay's password, its CA bundle | `/run/tresor/kontakte-relais`, `/run/tresor/msgvault/kontakte-ca.pem` (inside) | — |
+| msgvault's CardDAV credential (the relay's password) | `/run/tresor/msgvault/tokens/carddav.json` (inside) | — |
+
+The status file gets `abgleich.{eingerichtet, kontakte_am, kalender_am,
+fehler}` (times and a sentence, no names, no counts); a refused Radicale
+login is a yellow finding.
+
 ## Status for laib
 
 `/data/laib-status.json` (outside the vault, nothing secret): `at`,
@@ -387,6 +529,8 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | health | `http://127.0.0.1:<port>/healthz` (answers in every state) |
 | status | `status: file: ${DATA_DIR}/archiv/<person>/laib-status.json` |
 | stop | `TimeoutStopSec` ≥ 90: closing stops msgvault (≤ 30 s) and unmounts |
+| Radicale (contacts, calendars) | `RADICALE_URL=http://host.containers.internal:5232` (Radicale's root, no path), `RADICALE_USER=archiv-<person>`, and that account's password as a file: `Secret=<the instance's ARCHIV_RADICALE_PASSWORD>,type=mount,target=radicale-password` (read from `RADICALE_PASSWORD_FILE`, default `/run/secrets/radicale-password`; never an environment variable). Without `RADICALE_URL` and `RADICALE_USER` the page says the box has not set it up. Optional: `KONTAKTE_TAKT` (s, default 10800), `KONTAKTE_RELAIS_PORT` (default 18443, inside the container only). |
+| Radicale account and rights | an LLDAP account `archiv-<person>` per instance (seeded like `kalender`, its password the instance's generated secret), and in `templates/radicale/pre-start`'s rights, **right after `[root]`** (before every `user: .+`/`(.+)` section): `[archiv-home]` user `archiv-(.+)`, collection `{0}`, permissions `R`; `[archiv-lesen]` user `archiv-(.+)`, collection `{0}/(handy-kontakte\|google-(?!kontakte(/\|$))[^/]+\|privat-[^/]+)(/.*)?`, permissions `r`; `[archiv-sonst-nichts]` user `archiv-.+`, collection `.*`, permissions empty. `integration.sh` runs these rights in a real Radicale. |
 | backup | do not quiesce by stopping the unit (that locks the vault); while open, a snapshot catches a live SQLite in ciphertext — the restore is only as good as that moment. |
 
 ## Limits, honestly
@@ -418,6 +562,21 @@ passphrase, a refused mail login) stay yellow and say what to enter.
   files now go to `grosse-anhaenge/` in the vault, the message says where).
   The Gmail mailbox comes in over IMAP, oldest first, a few thousand mails
   per packet.
+- **Contacts and calendars, proven in CI** against a real Radicale 3 (from
+  PyPI, htpasswd instead of LLDAP) with the rights above: `archiv-anna`
+  sees anna's `handy-kontakte`, `google-arbeit` and `privat-sport`, not
+  another of her calendars nor bob's, and every write is 403; the real
+  msgvault connects through the relay (`add-carddav`, `set-role`,
+  `sync-carddav`), the two cards become two persons, the book is subscribed
+  and a lookup source but not the write target; the relay refuses PUT,
+  DELETE and PROPPATCH; the calendars are counted on the page, an event
+  deleted at the source stays, marked; two persons merged through the
+  page's preview; Radicale's files unchanged by the archive. **Unproven:**
+  the relay on the box (rootless podman: the container's private address,
+  pasta or a bridge), a real phone's address book of hundreds of cards, and
+  whether msgvault makes identity suggestions from them (CI's two cards
+  produce none, so Ja/Nein are proven against a fake of msgvault's API
+  only, with its routes and error codes from 0.22.0's OpenAPI).
 - **Unproven**: a real phone's Signal backup through `import-signal` (CI's
   backup is generated and tiny; the box's first one is the proof, with its
   time, the RAM signalbackup-tools needs and the disk the decrypted folder

@@ -21,6 +21,13 @@ Outside the Werkstatt, the same guide is `werkstatt/guide/` in github.com/mdopp/
   in the vault's work folder while it is open, emptied on every path (so
   Signal backups, which msgvault's import-signal reads as a decrypted
   folder, are read only while open). The Briefkasten never touches the vault.
+- Radicale is only read (owner, 2026-11-02): the archive's own client sends
+  PROPFIND/GET, and msgvault reaches the address book only through the
+  relay (`relais.go`), which passes reads and refuses every write. Never
+  give the book `--write-target`, never publish. `sync-carddav` mirrors the
+  address book into msgvault's persons (a card deleted on the phone takes
+  its untouched person away); messages are never touched. The calendar
+  store in the vault (`kalender.go`) only grows.
 - The packet format (`paket.go`, README "Paket format") is a contract with
   the phone: a change readers must understand is a new version.
 - `go test` cannot mount FUSE or run signalbackup-tools; `integration.sh`

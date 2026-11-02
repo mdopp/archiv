@@ -73,9 +73,21 @@ func main() {
 		Takt: sekunden("MAIL_TAKT", time.Hour)}
 	pb := &Postbote{Post: bk.Post, Eingang: eingang, Letzte: bk.Letzte, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
 		SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"), Takt: takt, Arbeit: tresor.Arbeit}
+	rad, radErr := RadicaleAusUmgebung(person)
+	if radErr != nil {
+		log.Printf("archiv: Kontakte und Kalender aus: %v", radErr)
+	}
+	api := &MsgvaultAPI{Port: port, Key: tresor.APIKey}
+	ab := &Abgleich{Radicale: rad, Konfig: radErr, API: api, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
+		Takt: sekunden("KONTAKTE_TAKT", 3*time.Hour), Arbeit: tresor.Arbeit}
+	if rad != nil {
+		relaisPort, _ := strconv.Atoi(env("KONTAKTE_RELAIS_PORT", "18443"))
+		ab.Relais = &Relais{Radicale: rad, Port: relaisPort}
+	}
+	tresor.Vorbereiten = ab.Vorbereiten
 	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
-		Letzte: bk.Letzte, Archiv: archivProxy(port)}
+		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}}
 
 	status := func() {
 		st := tresor.Stand()
@@ -87,8 +99,13 @@ func main() {
 		statusSchreiben(statusDatei, statusBauen(web.lage(st)))
 		web.Puls.Senden()
 	}
-	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert = status, status, status, status, status
-	tresor.Lauf = pb.Lauf
+	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert, ab.Geaendert = status, status, status, status, status, status
+	tresor.Lauf = func(ctx context.Context, innen Innen) { // the import and the Abgleich, side by side, both ending with the vault
+		fertig := make(chan struct{})
+		go func() { defer close(fertig); ab.Lauf(ctx, innen) }()
+		pb.Lauf(ctx, innen)
+		<-fertig
+	}
 	tresor.Erkennen()
 	if _, _, zu := prot.Kopie(); zu == nil && tresor.Stand().Zustand == Verschlossen {
 		prot.Zu(time.Now()) // closed since at least now: a restart closes it
