@@ -88,11 +88,14 @@ func (wt *webTest) oeffnen(t *testing.T) {
 // redirect to one, never a 404/405, an empty body or a raw error.
 func TestEveryPostRouteAnswers(t *testing.T) {
 	routen := map[string]url.Values{
-		"/tresor/anlegen":      {"passwort": {"kurz"}, "wiederholung": {"kurz"}},
-		"/tresor/oeffnen":      {"passwort": {"falsch-falsch-falsch"}},
-		"/tresor/abschliessen": {},
-		"/tresor/signal":       {"passphrase": {"12"}},
-		"/tresor/imap":         {"host": {""}},
+		"/tresor/anlegen":              {"passwort": {"kurz"}, "wiederholung": {"kurz"}},
+		"/tresor/oeffnen":              {"passwort": {"falsch-falsch-falsch"}},
+		"/tresor/abschliessen":         {},
+		"/tresor/signal":               {"passphrase": {"12"}},
+		"/tresor/imap":                 {"host": {""}},
+		"/tresor/abgleich":             {},
+		"/tresor/personen/entscheiden": {"id": {"7"}, "token": {"t"}, "antwort": {"ja"}},
+		"/tresor/personen/zusammen":    {"a": {"1"}, "b": {"2"}},
 	}
 	for _, zustand := range []string{"uneingerichtet", "offen", "verschlossen"} {
 		wt := neuesWeb(t)

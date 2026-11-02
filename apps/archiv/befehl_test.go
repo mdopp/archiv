@@ -243,3 +243,33 @@ func TestARunningProgramsLastLineIsHandedOn(t *testing.T) {
 		}
 	}
 }
+
+// The address book: the relay's password reaches add-carddav on stdin
+// only; the book gets subscribed and lookup source, never write target
+// (set-role replaces all three roles, so the omitted one is off).
+func TestCardDAVCommands(t *testing.T) {
+	pw := []byte("relais-passwort-0123456789abcdef0123456789")
+	b := msgvaultAddCardDAV("msgvault", "/run/tresor/msgvault", "https://kontakte.archiv.invalid:18443/", "msgvault", pw)
+	if strings.Join(b.Args, " ") != "add-carddav https://kontakte.archiv.invalid:18443/ msgvault" || string(b.Eingabe) != string(pw)+"\n" || b.Terminal != nil {
+		t.Fatalf("add-carddav: %q %q", b.Args, b.Eingabe)
+	}
+	if strings.Contains(strings.Join(append(b.Args, b.Env...), " "), string(pw)) {
+		t.Fatal("the password in argv or env")
+	}
+	r := msgvaultBuchRollen("msgvault", "/h", 3)
+	if strings.Join(r.Args, " ") != "carddav books set-role 3 --subscribed --lookup-source" {
+		t.Fatalf("set-role: %q", r.Args)
+	}
+	for _, x := range [][]string{b.Args, r.Args, msgvaultSyncCardDAV("msgvault", "/h").Args} {
+		for _, a := range x {
+			if a == "--write-target" || a == "--schedule" || strings.Contains(a, "publish") {
+				t.Fatalf("%q: msgvault must never write to the person's address book", x)
+			}
+		}
+	}
+	for _, c := range []Befehl{b, r, msgvaultSyncCardDAV("msgvault", "/run/tresor/msgvault")} {
+		if !strings.Contains(strings.Join(c.Env, " "), "MSGVAULT_TELEMETRY_ENABLED=0") {
+			t.Fatalf("%q without msgvault's environment", c.Args)
+		}
+	}
+}

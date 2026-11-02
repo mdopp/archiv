@@ -60,6 +60,10 @@ func (i Innen) SignalPassphrase() string   { return filepath.Join(i.Wurzel, "sig
 func (i Innen) WhatsAppStand() string      { return filepath.Join(i.Wurzel, "whatsapp-stand") }      // which database was imported last
 func (i Innen) GrosseAnhaenge() string     { return filepath.Join(i.Wurzel, "grosse-anhaenge") }     // attachments msgvault refuses (MaxAnhang), kept beside it
 func (i Innen) APIKey() string             { return filepath.Join(i.Home(), "api-key") }
+func (i Innen) Kalender() string           { return filepath.Join(i.Wurzel, "kalender") }           // one file per calendar, every event ever seen
+func (i Innen) KontakteRelais() string     { return filepath.Join(i.Wurzel, "kontakte-relais") }    // the password msgvault logs into the relay with
+func (i Innen) KontakteVerbunden() string  { return filepath.Join(i.Wurzel, "kontakte-verbunden") } // the relay's URL once msgvault is connected to it
+func (i Innen) KontakteCA() string         { return filepath.Join(i.Home(), kontakteCAName) }       // the system's CAs and the relay's, for msgvault
 
 // Tresor is the state machine. All transitions hold mu.
 type Tresor struct {
@@ -77,6 +81,10 @@ type Tresor struct {
 	// it moves a key left outside into the vault (SignalEinziehen). An
 	// error is logged and the vault opens anyway; the next opening tries again.
 	Einziehen func(innen Innen) error
+	// Vorbereiten runs on every opening after Einziehen and before
+	// msgvault starts (the relay to Radicale writes msgvault's trust in
+	// it, relais.go). An error is logged and the vault opens anyway.
+	Vorbereiten func(innen Innen) error
 	// Geaendert is called after every transition (the status file).
 	Geaendert func()
 	Now       func() time.Time
@@ -230,6 +238,11 @@ func (t *Tresor) oeffnen(ctx context.Context, pw []byte) error {
 	if t.Einziehen != nil {
 		if err := t.Einziehen(innen); err != nil {
 			log.Printf("archiv: Signal-Passphrase in den Tresor übernehmen: %v (bleibt außen, nächstes Öffnen versucht es wieder)", err)
+		}
+	}
+	if t.Vorbereiten != nil {
+		if err := t.Vorbereiten(innen); err != nil {
+			log.Printf("archiv: Kontakte vorbereiten: %v (das Archiv öffnet trotzdem, ohne Kontakte)", err)
 		}
 	}
 	lauf, halt := context.WithCancel(context.Background())

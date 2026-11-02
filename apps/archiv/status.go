@@ -46,6 +46,16 @@ type statusDatei struct {
 	LetzterFehler *Fehler                 `json:"letzter_fehler,omitempty"`
 	Packt         string                  `json:"packt,omitempty"`   // the backup being packed now
 	Liefert       string                  `json:"liefert,omitempty"` // the packet going into msgvault now
+	Abgleich      *abgleichStatus         `json:"abgleich,omitempty"`
+}
+
+// abgleichStatus: when contacts and calendars were last read (no names,
+// no counts: those are in the vault), and why not, as a sentence.
+type abgleichStatus struct {
+	Eingerichtet bool       `json:"eingerichtet"`
+	KontakteAm   *time.Time `json:"kontakte_am,omitempty"`
+	KalenderAm   *time.Time `json:"kalender_am,omitempty"`
+	Fehler       string     `json:"fehler,omitempty"`
 }
 
 // Wartende counts the backups per source that wait in the inbox.
@@ -92,6 +102,7 @@ type Lage struct {
 	FehlenSchluessel bool // Signal backups wait for the passphrase or the number
 	URL              string
 	Jetzt            time.Time
+	Abgleich         *Abgleich
 }
 
 // DreimalRot: after this many failures in a row of the same file with the
@@ -199,6 +210,27 @@ func statusBauen(l Lage) statusDatei {
 	}
 	if st.Fehler != "" {
 		s.Findings = append(s.Findings, befund{Severity: "gelb", Detail: st.Fehler, Fix: "laib logs"})
+	}
+	if a := l.Abgleich; a != nil {
+		as := a.Stand()
+		s.Abgleich = &abgleichStatus{Eingerichtet: a.Eingerichtet()}
+		if !as.Kontakte.Am.IsZero() {
+			t := as.Kontakte.Am
+			s.Abgleich.KontakteAm = &t
+		}
+		if !as.KalenderAm.IsZero() {
+			t := as.KalenderAm
+			s.Abgleich.KalenderAm = &t
+		}
+		for _, f := range []string{as.Fehler, as.Kontakte.Fehler, as.KalenderFehler} {
+			if f != "" && s.Abgleich.Fehler == "" {
+				s.Abgleich.Fehler = f
+			}
+		}
+		if as.Fehler == saysRadicaleAnmeldung {
+			s.Findings = append(s.Findings, befund{Severity: "gelb", Detail: saysRadicaleAnmeldung,
+				Fix: "Das Radicale-Konto des Archivs (RADICALE_USER) und seine Leserechte prüfen: laib templates/radicale/pre-start, laib logs radicale."})
+		}
 	}
 	return s
 }

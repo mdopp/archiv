@@ -66,6 +66,10 @@ var meldungen = map[string]string{
 	"imap":        "Gespeichert. Das Archiv holt deine Mails jetzt ab, danach jede Stunde.",
 	"whatsapp":    "Gespeichert. Das Archiv liest deine WhatsApp-Sicherung gleich ein.",
 	"passkey-weg": "Der Passkey ist entfernt; er öffnet das Archiv nicht mehr.",
+	"person-ja":   "Gemerkt: Das ist dieselbe Person.",
+	"person-nein": "Gemerkt: Das sind verschiedene Personen. Das Archiv fragt nicht wieder.",
+	"zusammen":    "Die beiden sind jetzt eine Person.",
+	"abgleich":    "Das Archiv gleicht deine Kontakte und Kalender jetzt ab.",
 }
 
 // Web is the whole HTTP side.
@@ -86,6 +90,8 @@ type Web struct {
 	Geaendert   func()
 	Puls        *Puls // open pages listen here (/tresor/live)
 	Passkeys    *Passkeys
+	Abgleich    *Abgleich      // contacts and calendars from Radicale (nil: not set up)
+	Personen    *Personenkarte // „Ist das dieselbe Person?“
 }
 
 type sitzungArt int
@@ -244,6 +250,10 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/signal", w.signal)
 	mux.HandleFunc("POST /tresor/imap", w.imap)
 	mux.HandleFunc("POST /tresor/whatsapp", w.whatsapp)
+	mux.HandleFunc("POST /tresor/abgleich", w.abgleichJetzt)
+	mux.HandleFunc("POST /tresor/personen/entscheiden", w.entscheiden)
+	mux.HandleFunc("GET /tresor/personen/vorschau", w.vorschau)
+	mux.HandleFunc("POST /tresor/personen/zusammen", w.zusammen)
 	return mux
 }
 
@@ -259,7 +269,7 @@ func (w *Web) stand(rw http.ResponseWriter, r *http.Request) {
 // lage is what the status and the page are made of.
 func (w *Web) lage(st Stand) Lage {
 	return Lage{Person: w.Person, Stand: st, Wartend: wartende(w.Eingang), Briefkasten: briefkastenStand(w.Briefkasten.Post), Protokoll: w.Protokoll,
-		Packt: w.packt(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.fehlenSignalSchluessel(), URL: w.PublicURL, Jetzt: time.Now()}
+		Packt: w.packt(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.fehlenSignalSchluessel(), URL: w.PublicURL, Jetzt: time.Now(), Abgleich: w.Abgleich}
 }
 
 // fehlenSignalSchluessel: Signal backups wait, and the passphrase or the
@@ -531,7 +541,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		w.mailKarte(&b, false)
 		w.smsKarte(&b)
 		w.whatsappKarte(&b)
-		w.kontakteKarte(&b)
+		w.kontakteKarte(&b, false)
 	case Offen:
 		b.WriteString(`<div id=kopf data-live>`)
 		if !st.Bereit {
@@ -559,7 +569,10 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		w.mailKarte(&b, true)
 		w.smsKarte(&b)
 		w.whatsappKarte(&b)
-		w.kontakteKarte(&b)
+		w.kontakteKarte(&b, true)
+		if st.Bereit {
+			w.personenKarte(&b)
+		}
 		w.passkeyKarte(&b)
 	}
 	seite(rw, code, "Archiv", b.String(), extra)
@@ -816,8 +829,74 @@ func (w *Web) smsKarte(b *strings.Builder) {
 	b.WriteString(`<p class=k>Kommen aus der Haus-App: Mehr → Nachrichten sichern → „SMS und Anrufliste übertragen“. Die App verschlüsselt sie schon auf dem Handy für dein Archiv; auf der Box kann sie niemand lesen, solange es zu ist.</p></section>`)
 }
 
-func (w *Web) kontakteKarte(b *strings.Builder) {
-	b.WriteString(`<section class=quelle id=karte-kontakte data-live><h3>Kontakte</h3><p class=k>Kommen aus der Haus-App: Mehr → Nachrichten sichern → „Kontakte übertragen“. Die App spiegelt alle Kontakte deines Handys, auch die von Google, jeden Tag in dein eigenes Adressbuch „Handy-Kontakte“ auf der Box. Das ist kein Teil des Tresors: Wie dein Kalender ist es für den Admin der Box lesbar. Damit das Archiv Namen statt Nummern zeigt, liest es dieses Adressbuch in einem nächsten Schritt.</p></section>`)
+// kontakteKarte: the address book and the calendars. Their numbers live
+// in the vault: while closed the card only says what happens.
+func (w *Web) kontakteKarte(b *strings.Builder, offen bool) {
+	b.WriteString(`<section class=quelle id=karte-kontakte data-live><h3>Kontakte und Kalender</h3>`)
+	b.WriteString(`<p class=k>Die Haus-App spiegelt die Kontakte deines Handys jeden Tag in dein Adressbuch „Handy-Kontakte“ auf der Box (Mehr → Nachrichten sichern → „Kontakte übertragen“); deine Google-Kalender und deine eigenen Kalender liegen dort auch. Ist dein Archiv offen, liest es beides alle paar Stunden. Es ändert dort nichts.</p>`)
+	a := w.Abgleich
+	switch {
+	case !a.Eingerichtet():
+		fmt.Fprintf(b, `<p class=zugang><span class=fehlt>%s</span></p></section>`, esc(saysRadicaleFehlt))
+		return
+	case !offen:
+		b.WriteString(`<p class=k>Was im Archiv ist, siehst du, wenn es offen ist: Die Termine liegen im Tresor.</p></section>`)
+		return
+	}
+	st := a.Stand()
+	if st.Laeuft {
+		b.WriteString(`<p class=laeuft>Gleicht gerade ab …</p>`)
+	}
+	if st.Fehler != "" {
+		fmt.Fprintf(b, `<p class="meldung fehler">%s</p>`, esc(st.Fehler))
+	}
+	// contacts
+	k := st.Kontakte
+	switch {
+	case k.Fehler != "":
+		fmt.Fprintf(b, `<p class="meldung fehler">%s</p>`, esc(k.Fehler))
+	case k.Leer:
+		fmt.Fprintf(b, `<p>%s</p>`, esc(saysAdressbuchLeer))
+	}
+	if !k.Am.IsZero() {
+		was := fmt.Sprintf("Kontakte zuletzt abgeglichen um %s", uhrzeit(k.Am))
+		if k.Neu+k.Geaendert+k.Entfernt > 0 {
+			was += fmt.Sprintf(" (%d neu, %d geändert, %d auf dem Handy gelöscht)", k.Neu, k.Geaendert, k.Entfernt)
+		}
+		if st.Personen > 0 {
+			was += "; " + anzahl(st.Personen, "Person", "Personen") + " im Archiv"
+		}
+		fmt.Fprintf(b, `<p>%s.</p>`, esc(was))
+	}
+	// calendars
+	if st.KalenderFehler != "" {
+		fmt.Fprintf(b, `<p class="meldung fehler">%s</p>`, esc(st.KalenderFehler))
+	}
+	if len(st.Kalender) == 0 {
+		if !st.KalenderAm.IsZero() {
+			b.WriteString(`<p class=k>Kein Kalender gefunden (Google-Kalender verbindest du in der Haus-App).</p>`)
+		}
+	} else {
+		b.WriteString(`<ul class=kalender>`)
+		for _, z := range st.Kalender {
+			zeile := esc(kalenderName(z)) + ": " + esc(anzahl(z.Termine, "Termin", "Termine"))
+			if z.Geloescht > 0 {
+				zeile += esc(fmt.Sprintf(", davon %d an der Quelle gelöscht (bleiben im Archiv)", z.Geloescht))
+			}
+			if z.QuelleWegSeit != nil {
+				zeile += esc(" — der Kalender ist an der Quelle gelöscht am " + datum(*z.QuelleWegSeit) + "; seine Termine bleiben im Archiv")
+			}
+			fmt.Fprintf(b, `<li>%s</li>`, zeile)
+		}
+		b.WriteString(`</ul>`)
+		if !st.KalenderAm.IsZero() {
+			fmt.Fprintf(b, `<p class=k>Zuletzt gelesen um %s. Im Archiv bleibt jeder Termin, den es einmal gesehen hat, auch wenn er an der Quelle gelöscht wird. In den Terminen suchen kannst du in einem späteren Schritt.</p>`, uhrzeit(st.KalenderAm))
+		}
+	}
+	if !st.Laeuft {
+		fmt.Fprintf(b, `<form method=post action="/tresor/abgleich">%s</form>`, knopf("Jetzt abgleichen", "Gleicht ab …", "k"))
+	}
+	b.WriteString(`</section>`)
 }
 
 func (w *Web) whatsappKarte(b *strings.Builder) {
@@ -955,4 +1034,6 @@ progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-colo
 .zugang{font-size:.95rem}.fehlt{color:var(--ausser);font-weight:500}
 details{margin:.4rem 0}summary{cursor:pointer;color:var(--akzent);font-weight:500;min-height:44px;display:flex;align-items:center}
 ol{padding-left:1.2rem}li{margin:.3rem 0}
+.vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:.5rem}
+select{display:block;font:inherit;padding:.5rem .6rem;margin-top:.2rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:inherit;width:100%;max-width:420px}
 `
