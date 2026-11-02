@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -379,6 +380,12 @@ func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var alt imapZugang
+	if roh, err := sch.Lesen(SchluesselIMAP); err == nil {
+		json.Unmarshal(roh, &alt)
+		nullen(roh)
+		alt.Passwort = ""
+	}
 	b, err := imapJSON(r.PostFormValue("host"), r.PostFormValue("benutzer"), r.PostFormValue("passwort"))
 	if err != nil {
 		w.antwort(rw, r, http.StatusBadRequest, "", saysIMAPFehlt)
@@ -391,6 +398,9 @@ func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if w.Mailholer != nil {
+		if alt.Benutzer != "" && (!strings.EqualFold(alt.Benutzer, strings.TrimSpace(r.PostFormValue("benutzer"))) || !strings.EqualFold(alt.Host, strings.TrimSpace(r.PostFormValue("host")))) {
+			w.Mailholer.KontoGewechselt()
+		}
 		w.Mailholer.NeuerSchluessel()
 	}
 	if w.Geaendert != nil {
@@ -435,13 +445,17 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 	case Verschlossen:
 		b.WriteString(`<h2>Dein Archiv ist abgeschlossen</h2>`)
 		b.WriteString(w.briefkastenText())
-		b.WriteString(w.eingangText(false))
 		fmt.Fprintf(&b, `<form method=post action="/tresor/oeffnen" class=feld>
 <input name=konto autocomplete=username value="%s" hidden>
 <label>Archiv-Passwort<input type=password name=passwort autocomplete=current-password required autofocus></label>
 %s</form>`, esc("Archiv "+w.Person), knopf("Archiv öffnen", "Öffne das Archiv …", ""))
-		fmt.Fprintf(&b, `<p class=k>%s</p>`, saysAdminLiest)
-		w.letzteImporte(&b)
+		fmt.Fprintf(&b, `<p class=k>%s Schlüssel ändern kannst du, wenn es offen ist.</p>`, saysAdminLiest)
+		if w.laeuftJetzt(&b) {
+			extra = `<div hidden data-auffrischen=10></div>`
+		}
+		w.signalKarte(&b, false)
+		w.mailKarte(&b, false)
+		w.whatsappKarte(&b)
 	case Offen:
 		if !st.Bereit {
 			if st.Fehler != "" {
@@ -458,11 +472,15 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 			fmt.Fprintf(&b, `<p class=k>Es schließt sich von selbst nach %s ohne Nutzung, also um %s, wenn bis dahin nichts geschieht. %s</p>`,
 				dauerText(w.Tresor.Leerlauf), st.ZuUm.Local().Format("15:04"), saysAdminLiest)
 		}
-		w.importStand(&b)
-		if extra == "" && (w.Briefkasten.Laeuft() != "" || w.Postbote.Laeuft() != "" || (w.Mailholer != nil && w.Mailholer.Laeuft())) {
+		if w.laeuftJetzt(&b) && extra == "" {
 			extra = `<div hidden data-auffrischen=10></div>`
 		}
-		w.schluesselFormulare(&b)
+		if briefkastenStand(w.Briefkasten.Post).Wartend > 0 && w.Postbote.Laeuft() == "" {
+			b.WriteString(w.briefkastenText())
+		}
+		w.signalKarte(&b, true)
+		w.mailKarte(&b, true)
+		w.whatsappKarte(&b)
 	}
 	seite(rw, code, "Archiv", b.String(), extra)
 }
@@ -519,71 +537,195 @@ func anzahl(n int, eins, mehr string) string {
 	return fmt.Sprintf("%d %s", n, mehr)
 }
 
-func (w *Web) letzteImporte(b *strings.Builder) {
-	ein, fehler, _ := w.Protokoll.Kopie()
-	if g, ok := w.Protokoll.Pakete()["signal"]; ok {
-		fmt.Fprintf(b, `<p class=k>Letzte Signal-Sicherung gelesen am %s: %s.</p>`, datum(g.Am), anzahl(g.Nachrichten, "neue Nachricht", "neue Nachrichten"))
+// --- what runs now
+
+var monate = [...]string{"Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember"}
+
+func monat(t time.Time) string {
+	t = t.Local()
+	return monate[t.Month()-1] + " " + strconv.Itoa(t.Year())
+}
+
+// tausender writes 41437 as 41.437.
+func tausender(n int) string {
+	s := strconv.Itoa(n)
+	for i := len(s) - 3; i > 0; i -= 3 {
+		s = s[:i] + "." + s[i:]
 	}
-	if e, ok := ein["signal"]; ok {
-		fmt.Fprintf(b, `<p class=k>Zuletzt ins Archiv übernommen am %s: %s.</p>`, datum(e.Am), anzahl(e.Zahlen.Nachrichten(), "Nachricht", "Nachrichten"))
+	return s
+}
+
+func uhrzeit(t time.Time) string {
+	if t.Local().YearDay() == time.Now().Local().YearDay() {
+		return t.Local().Format("15:04")
 	}
-	if g, ok := w.Protokoll.Pakete()["mail"]; ok {
-		fmt.Fprintf(b, `<p class=k>Mails zuletzt abgeholt am %s: %s.</p>`, datum(g.Am), anzahl(g.Nachrichten, "neue Mail", "neue Mails"))
+	return datum(t)
+}
+
+// laeuftJetzt says what runs now, each with what is known of its progress.
+func (w *Web) laeuftJetzt(b *strings.Builder) bool {
+	var zeilen []string
+	if l, seit := w.Briefkasten.LaeuftSeit(); l != "" {
+		zeilen = append(zeilen, fmt.Sprintf(`<p><b>Signal-Sicherung lesen</b> <span class=k>seit %s</span><progress></progress><span class=k>Die Box entschlüsselt %s und verpackt die neuen Nachrichten für dein Archiv.</span></p>`, uhrzeit(seit), esc(l)))
 	}
-	if e, ok := ein["mail"]; ok {
-		fmt.Fprintf(b, `<p class=k>Mails zuletzt ins Archiv übernommen am %s: %s.</p>`, datum(e.Am), anzahl(e.Zahlen.Mails, "Mail", "Mails"))
+	if w.Mailholer != nil {
+		if g := w.Mailholer.Gang(); g.Was != "" {
+			fortschritt, text := "<progress></progress>", "Sie fragt dein Postfach, was neu ist."
+			if g.Gesamt > 0 {
+				fortschritt = fmt.Sprintf(`<progress value=%d max=%d></progress>`, g.Fertig, g.Gesamt)
+				text = fmt.Sprintf("%s von %s Mails abgeholt", tausender(g.Fertig), tausender(g.Gesamt))
+				if !g.Bis.IsZero() {
+					text += ", bisher bis " + monat(g.Bis) + " (die ältesten kommen zuerst)"
+				}
+				text += "."
+			}
+			zeilen = append(zeilen, fmt.Sprintf(`<p><b>E-Mails abholen</b> <span class=k>seit %s</span>%s<span class=k>%s</span></p>`, uhrzeit(g.Seit), fortschritt, esc(text)))
+		}
 	}
-	if fehler != nil {
-		fmt.Fprintf(b, `<p class="meldung fehler">%s <span class=k>(%s)</span></p>`, esc(fehler.Satz), datum(fehler.Am))
+	if g := w.Postbote.Gang(); g.Was != "" {
+		was := "Nachrichten"
+		if g.Quelle == "mail" {
+			was = "Mails"
+		} else if g.Quelle == "signal" {
+			was = "Signal-Nachrichten"
+		}
+		menge := ""
+		if g.Gesamt > 0 {
+			menge = tausender(g.Gesamt) + " "
+		}
+		zeilen = append(zeilen, fmt.Sprintf(`<p><b>%s%s ins Archiv übernehmen</b> <span class=k>seit %s</span><progress></progress><span class=k>Wie weit es ist, meldet das Archiv erst am Ende. Bitte nicht abschließen, solange das läuft.</span></p>`, menge, was, uhrzeit(g.Seit)))
+	}
+	if len(zeilen) == 0 {
+		return false
+	}
+	b.WriteString(`<section class=jetzt aria-live=polite><h3>Gerade in Arbeit</h3>` + strings.Join(zeilen, "") + `</section>`)
+	return true
+}
+
+// --- one card per source
+
+func (w *Web) fehlerVon(b *strings.Builder, quelle string) {
+	_, f, _ := w.Protokoll.Kopie()
+	if f != nil && f.Quelle == quelle {
+		fmt.Fprintf(b, `<p class="meldung fehler">%s <span class=k>(%s)</span></p>`, esc(f.Satz), datum(f.Am))
 	}
 }
 
-func (w *Web) importStand(b *strings.Builder) {
-	b.WriteString(`<section><h3>Einlesen</h3>`)
-	if l := w.Briefkasten.Laeuft(); l != "" {
-		fmt.Fprintf(b, `<p class=laeuft aria-live=polite>Liest gerade %s …</p>`, esc(l))
-	}
-	if w.Mailholer != nil && w.Mailholer.Laeuft() {
-		b.WriteString(`<p class=laeuft aria-live=polite>Holt gerade neue Mails ab …</p>`)
-	}
-	if l := w.Postbote.Laeuft(); l != "" {
-		fmt.Fprintf(b, `<p class=laeuft aria-live=polite>Übernimmt gerade %s ins Archiv …</p>`, esc(l))
-	}
-	b.WriteString(w.briefkastenText())
-	b.WriteString(w.eingangText(true))
-	if w.Briefkasten.FehlenSchluessel() {
-		b.WriteString(`<p class="meldung fehler">Signal-Sicherungen warten, aber die Signal-Passphrase oder deine Nummer fehlt. Gib sie unten ein.</p>`)
-	}
-	w.letzteImporte(b)
-	b.WriteString(`</section>`)
-}
-
-func (w *Web) schluesselFormulare(b *strings.Builder) {
-	if _, ok := w.Tresor.Innen(); !ok {
+func (w *Web) imAchiv(b *strings.Builder, quelle, eins, mehr string) {
+	ein, _, _ := w.Protokoll.Kopie()
+	e, ok := ein[quelle]
+	if !ok {
+		b.WriteString(`<p class=k>Noch nichts im Archiv.</p>`)
 		return
 	}
-	sch := w.Schluessel
-	hinterlegt := func(name string) string {
-		if t, ok := sch.Hinterlegt(name); ok {
-			return `<span class=ok>hinterlegt am ` + datum(t) + `</span>`
-		}
-		return `<span class=k>fehlt</span>`
+	n := e.Zahlen.Nachrichten()
+	if quelle == "mail" {
+		n = e.Zahlen.Mails
 	}
-	fmt.Fprintf(b, `<section><h3>Schlüssel</h3><p class=k>Du kannst sie nur bei offenem Archiv eingeben; sie werden nie wieder angezeigt. Neu eingeben ersetzt sie.</p>
-<p class=hinweis>%s</p>
+	fmt.Fprintf(b, `<p>Zuletzt ins Archiv übernommen: %s, am %s.</p>`, esc(anzahl(n, eins, mehr)), datum(e.Am))
+}
+
+func (w *Web) signalKarte(b *strings.Builder, offen bool) {
+	b.WriteString(`<section class=quelle><h3>Signal</h3>`)
+	w.imAchiv(b, "signal", "Nachricht", "Nachrichten")
+	if n := wartende(w.Eingang)["signal"].Wartend; n > 0 {
+		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung wartet", "Sicherungen warten")))
+	}
+	w.fehlerVon(b, "signal")
+	sch := w.Schluessel
+	pt, pOK := sch.Hinterlegt(SchluesselSignal)
+	_, tOK := sch.Hinterlegt(SchluesselTelefon)
+	zugang := []string{}
+	if pOK {
+		zugang = append(zugang, "Passphrase hinterlegt am "+datum(pt))
+	} else {
+		zugang = append(zugang, `<span class=fehlt>Passphrase fehlt</span>`)
+	}
+	if tOK {
+		tel, _ := sch.Lesen(SchluesselTelefon)
+		zugang = append(zugang, "Nummer "+esc(maskiert(string(tel))))
+	} else {
+		zugang = append(zugang, `<span class=fehlt>Nummer fehlt</span>`)
+	}
+	fmt.Fprintf(b, `<p class=zugang>%s</p>`, strings.Join(zugang, " · "))
+	if !offen {
+		b.WriteString(`</section>`)
+		return
+	}
+	komplett := pOK && tOK
+	summary := "Signal einrichten"
+	if komplett {
+		summary = "Passphrase oder Nummer ändern"
+	}
+	fmt.Fprintf(b, `<details%s><summary>%s</summary>
+<p class=k>Was du hier einträgst, ersetzt das Bisherige. Ein leeres Feld bleibt, wie es ist. Hinterlegtes zeigt die Seite nie wieder an.</p>
 <form method=post action="/tresor/signal" class=feld>
-<p><b>Signal</b>: Passphrase %s · Nummer %s</p>
 <label>Signal-Passphrase (30 Ziffern, aus Signal → Einstellungen → Chats → Chat-Sicherungen)<input name=passphrase inputmode=numeric autocomplete=off spellcheck=false></label>
-<label>Deine Handynummer<input name=telefon type=tel autocomplete=tel placeholder="+49 151 2345678"></label>
-%s</form>`, saysBriefkasten, hinterlegt(SchluesselSignal), hinterlegt(SchluesselTelefon), knopf("Speichern", "Speichere …", ""))
-	fmt.Fprintf(b, `<form method=post action="/tresor/imap" class=feld>
-<p><b>E-Mail (IMAP)</b>: %s</p>
+<label>Deine Handynummer<input name=telefon type=tel autocomplete=tel placeholder="z. B. +49 151 2345678"></label>
+%s</form><p class=hinweis>%s</p></details></section>`, offenWenn(!komplett), summary, knopf(map[bool]string{true: "Ersetzen", false: "Speichern"}[komplett], "Speichere …", ""), saysBriefkasten)
+}
+
+func (w *Web) mailKarte(b *strings.Builder, offen bool) {
+	b.WriteString(`<section class=quelle><h3>E-Mail</h3>`)
+	w.imAchiv(b, "mail", "Mail", "Mails")
+	w.fehlerVon(b, "mail")
+	sch := w.Schluessel
+	var z imapZugang
+	t, ok := sch.Hinterlegt(SchluesselIMAP)
+	if ok {
+		if roh, err := sch.Lesen(SchluesselIMAP); err == nil {
+			json.Unmarshal(roh, &z)
+			nullen(roh)
+			z.Passwort = ""
+		}
+		fmt.Fprintf(b, `<p class=zugang>Postfach <b>%s</b> auf %s · App-Passwort hinterlegt am %s</p>`, esc(z.Benutzer), esc(z.Host), datum(t))
+	} else {
+		b.WriteString(`<p class=zugang><span class=fehlt>Kein Postfach eingetragen</span></p>`)
+	}
+	if !offen {
+		b.WriteString(`</section>`)
+		return
+	}
+	host, summary, erklaerung, knopfText := "imap.gmail.com", "Postfach eintragen", "", "Speichern"
+	if ok {
+		host, summary, knopfText = z.Host, "Neues App-Passwort oder anderes Postfach", "Ersetzen"
+		erklaerung = fmt.Sprintf(`<p class=k>Das Archiv holt ein Postfach. Was du hier speicherst, ersetzt %s. Mails, die schon im Archiv sind, bleiben drin.</p>`, esc(z.Benutzer))
+	}
+	fmt.Fprintf(b, `<details%s><summary>%s</summary>%s
 <p class=k>Mit einem App-Passwort deines Mail-Anbieters, nicht deinem normalen Passwort (Gmail: Google-Konto → Sicherheit → App-Passwörter; dafür muss die Bestätigung in zwei Schritten an sein). Das Archiv holt jede Stunde die neuen Mails ab, auch wenn es zu ist, und ändert auf dem Server nichts, nicht einmal „gelesen“. Bei Gmail liest es „Alle Nachrichten“ (ohne Spam und Papierkorb); deine Gmail-Labels kommen nicht mit.</p>
-<p class=hinweis>%s</p>
-<label>Server (für Gmail so lassen)<input name=host autocomplete=off value="imap.gmail.com"></label>
-<label>Benutzername, meist deine Mail-Adresse<input name=benutzer type=email autocomplete=off placeholder="z. B. name@gmail.com"></label>
+<form method=post action="/tresor/imap" class=feld>
+<label>Server (für Gmail so lassen)<input name=host autocomplete=off value="%s"></label>
+<label>Benutzername, meist deine Mail-Adresse<input name=benutzer type=email autocomplete=off value="%s" placeholder="z. B. name@gmail.com"></label>
 <label>App-Passwort<input name=passwort type=password autocomplete=new-password></label>
-%s</form></section>`, hinterlegt(SchluesselIMAP), saysMailPreis, knopf("Speichern", "Speichere …", ""))
+%s</form><p class=hinweis>%s</p></details></section>`, offenWenn(!ok), summary, erklaerung, esc(host), esc(z.Benutzer), knopf(knopfText, "Speichere …", ""), saysMailPreis)
+}
+
+func (w *Web) whatsappKarte(b *strings.Builder) {
+	b.WriteString(`<section class=quelle><h3>WhatsApp</h3>`)
+	if n := wartende(w.Eingang)["whatsapp"].Wartend; n > 0 {
+		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung wartet", "Sicherungen warten")))
+	}
+	b.WriteString(`<p class=k>WhatsApp liest das Archiv noch nicht ein; das kommt. Dafür braucht es den 64-stelligen Schlüssel deines WhatsApp-Backups. Ein Passkey reicht nicht: Aus ihm lässt sich der Schlüssel nicht auslesen.</p>
+<details><summary>So stellst du auf den 64-stelligen Schlüssel um</summary><ol>
+<li>WhatsApp → Einstellungen → Chats → Chat-Backup → Ende-zu-Ende-verschlüsseltes Backup → <b>Deaktivieren</b> (mit deinem Passkey bestätigen).</li>
+<li>Gleich danach wieder <b>Aktivieren</b> und „Stattdessen 64-stelligen Schlüssel verwenden“ wählen. Dazwischen liegt dein Backup unverschlüsselt bei Google, also direkt nacheinander.</li>
+<li>Den Schlüssel in Vaultwarden ablegen. Mit ihm stellst du auch auf einem neuen Handy deine Chats wieder her.</li>
+<li>„Jetzt sichern“ tippen.</li></ol></details></section>`)
+}
+
+func offenWenn(b bool) string {
+	if b {
+		return " open"
+	}
+	return ""
+}
+
+// maskiert shows a number by its ends only: +49 … 67.
+func maskiert(tel string) string {
+	if len(tel) < 7 {
+		return "…"
+	}
+	return tel[:3] + " … " + tel[len(tel)-2:]
 }
 
 // seite wraps a page: the same head, one stylesheet, one small script.
@@ -619,4 +761,10 @@ input{display:block;font:inherit;padding:.5rem .6rem;margin-top:.2rem;border:1px
 button{font:inherit;padding:.55rem 1.1rem;border:1px solid var(--akzent);border-radius:8px;background:var(--akzent);color:#fff;min-height:44px}button.k{background:none;color:var(--fg);border-color:var(--line)}
 button[aria-busy=true]{opacity:.6;cursor:progress}
 section{margin-top:1.2rem;border-top:1px solid var(--line)}
+section.quelle{border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem .6rem;margin-top:1rem}section.quelle h3{margin-top:.8rem}
+section.jetzt{border:1px solid var(--akzent);border-radius:10px;padding:.2rem 1rem .6rem;margin-top:1rem}
+progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-color:var(--akzent)}
+.zugang{font-size:.95rem}.fehlt{color:var(--ausser);font-weight:500}
+details{margin:.4rem 0}summary{cursor:pointer;color:var(--akzent);font-weight:500;min-height:44px;display:flex;align-items:center}
+ol{padding-left:1.2rem}li{margin:.3rem 0}
 `

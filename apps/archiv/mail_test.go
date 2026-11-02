@@ -425,3 +425,58 @@ func TestPostboteHandsAMailPacketToImportMaildir(t *testing.T) {
 		t.Fatalf("%+v", e)
 	}
 }
+
+func TestTheRoundSaysHowFarItIs(t *testing.T) {
+	var ms []Mail
+	for i := 1; i <= 10; i++ {
+		ms = append(ms, Mail{UID: uint32(i), Datum: time.Date(2020+i, 3, 1, 12, 0, 0, 0, time.UTC), Roh: mailText(fmt.Sprint(i), fmt.Sprint("Mail ", i))})
+	}
+	pf := &fakePostfach{ordner: []PostOrdner{{Name: "INBOX", Trenner: "/"}}, mails: map[string][]Mail{"INBOX": ms}}
+	mt := neuerMailholer(t, "x", "y")
+	mt.h.Verbinden = func(context.Context, imapZugang) (Postfach, error) { return pf, nil }
+	mt.h.Buendel = 4
+	var gaenge []Gang
+	mt.h.Geaendert = func() { gaenge = append(gaenge, mt.h.Gang()) }
+	mt.h.Runde(context.Background())
+	var fertig []int
+	for _, g := range gaenge {
+		if g.Gesamt == 10 {
+			fertig = append(fertig, g.Fertig)
+		}
+	}
+	if fmt.Sprint(fertig) != "[0 4 8 10]" {
+		t.Fatalf("progress: %v (%+v)", fertig, gaenge)
+	}
+	if b := gaenge[len(gaenge)-2].Bis; b.Year() != 2030 {
+		t.Fatalf("newest mail so far: %v", b)
+	}
+	if mt.h.Gang().Was != "" {
+		t.Fatal("a finished round still shows as running")
+	}
+}
+
+func TestAnotherMailboxIsFetchedFromTheStart(t *testing.T) {
+	post := func(text string) *fakePostfach {
+		var ms []Mail
+		for i := 1; i <= 3; i++ {
+			ms = append(ms, Mail{UID: uint32(i), Roh: mailText(text+fmt.Sprint(i), text)})
+		}
+		return &fakePostfach{ordner: []PostOrdner{{Name: "INBOX", Trenner: "/"}}, mails: map[string][]Mail{"INBOX": ms}}
+	}
+	mt := neuerMailholer(t, "x", "y")
+	pf := post("erstes")
+	mt.h.Verbinden = func(context.Context, imapZugang) (Postfach, error) { return pf, nil }
+	mt.h.Runde(context.Background())
+	pf = post("zweites") // the same folder, the same numbers, other mail
+	mt.h.KontoGewechselt()
+	mt.h.Now = func() time.Time { return tag.Add(time.Hour) }
+	mt.h.Runde(context.Background())
+	_, e, _ := mt.mails(t)
+	n := 0
+	for _, p := range e {
+		n += len(p)
+	}
+	if n != 6 {
+		t.Fatalf("the second mailbox was not fetched from the start: %v", e)
+	}
+}

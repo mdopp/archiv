@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -54,7 +55,34 @@ type Postbote struct {
 
 	mu      sync.Mutex
 	laeuft  string
+	gang    Gang
 	zurueck map[string]bool
+}
+
+// Gang is one piece of work running now, as the page shows it. Gesamt 0:
+// the size is not known (yet); Fertig 0 with Gesamt > 0: no progress is
+// reported (msgvault's import says nothing until it ends).
+type Gang struct {
+	Was    string    // the packet or backup
+	Quelle string    // signal, mail
+	Seit   time.Time // started
+	Fertig int
+	Gesamt int
+	Bis    time.Time // the newest message so far (mail)
+}
+
+// Gang says what is delivered now; Was is empty when nothing is.
+func (p *Postbote) Gang() Gang {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.gang
+}
+
+func (p *Postbote) gangSetzen(f func(*Gang)) {
+	p.mu.Lock()
+	f(&p.gang)
+	p.mu.Unlock()
+	p.geaendert()
 }
 
 func (p *Postbote) now() time.Time {
@@ -135,11 +163,13 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	}
 	p.mu.Lock()
 	p.laeuft = name
+	p.gang = Gang{Was: name, Seit: p.now()}
 	p.mu.Unlock()
 	p.geaendert()
 	defer func() {
 		p.mu.Lock()
 		p.laeuft = ""
+		p.gang = Gang{}
 		p.mu.Unlock()
 		p.geaendert()
 	}()
@@ -189,6 +219,11 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	if m.Quelle != "" {
 		quelle = m.Quelle
 	}
+	menge := len(nachrichten)
+	if quelle == "mail" {
+		menge = zaehleMails(filepath.Join(arbeit, "maildir"))
+	}
+	p.gangSetzen(func(g *Gang) { g.Quelle, g.Gesamt = quelle, menge })
 	if errors.Is(err, ErrPaketFormat) {
 		return fehler(fmt.Sprintf(saysAnderesPaket, name), err)
 	}
@@ -247,6 +282,18 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	log.Printf("archiv: Paket %s eingelesen: %d SMS, %d MMS, %d Anhänge", name, z.SMS, z.MMS, z.Anhaenge)
 	p.Protokoll.Eingelesen(quelle, name, z, p.now())
 	return nil
+}
+
+// zaehleMails counts the messages of an unpacked Maildir, for the page.
+func zaehleMails(dir string) int {
+	n := 0
+	filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			n++
+		}
+		return nil
+	})
+	return n
 }
 
 // anhangOderHinweis opens an attachment for the XML, or, when msgvault
