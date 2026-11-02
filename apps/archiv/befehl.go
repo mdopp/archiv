@@ -25,6 +25,24 @@ type Befehl struct {
 	Env      []string // the child's whole environment, nothing inherited
 	Eingabe  []byte   // secret, written to stdin, then stdin is closed
 	Terminal []byte   // secret, typed into a pseudo-terminal on stdin once the program has switched echo off
+	// Unterwegs, when set, gets the program's last output line every few
+	// seconds while it runs: msgvault's import-whatsapp rewrites one
+	// progress line with \r ("Processed: N | Added: M …").
+	Unterwegs func(zeile string)
+}
+
+// UnterwegsTakt: how often a running program's last line is looked at.
+var UnterwegsTakt = 5 * time.Second
+
+// letzteZeile is the last non-empty line of an output, \r and \n alike.
+func letzteZeile(b []byte) string {
+	f := strings.FieldsFunc(string(b), func(r rune) bool { return r == '\r' || r == '\n' })
+	for i := len(f) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(f[i]); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // Grundumgebung is what every child gets: no inherited variable, so
@@ -188,6 +206,27 @@ func (execAusfuehrer) Run(ctx context.Context, b Befehl) (Ausgabe, error) {
 	}
 	if err := cmd.Start(); err != nil {
 		return Ausgabe{}, err
+	}
+	if b.Unterwegs != nil {
+		fertig, weg := make(chan struct{}), make(chan struct{})
+		defer func() { close(fertig); <-weg }() // no line after Run returned
+		go func() {
+			defer close(weg)
+			t := time.NewTicker(UnterwegsTakt)
+			defer t.Stop()
+			zuletzt := ""
+			for {
+				select {
+				case <-fertig:
+					return
+				case <-t.C:
+					if z := letzteZeile(out.snapshot()); z != "" && z != zuletzt {
+						zuletzt = z
+						b.Unterwegs(z)
+					}
+				}
+			}
+		}()
 	}
 	warten := make(chan error, 1)
 	if term == nil {

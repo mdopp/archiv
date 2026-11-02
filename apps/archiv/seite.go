@@ -640,12 +640,18 @@ func (w *Web) laeuftJetzt(b *strings.Builder) bool {
 			was = "Signal-Nachrichten"
 		} else if g.Quelle == "sms" {
 			was = "SMS und Anrufe vom Handy"
+		} else if g.Quelle == "whatsapp" {
+			was = "WhatsApp-Nachrichten"
 		}
 		menge := ""
 		if g.Gesamt > 0 {
 			menge = tausender(g.Gesamt) + " "
 		}
-		zeilen = append(zeilen, fmt.Sprintf(`<p><b>%s%s ins Archiv übernehmen</b> <span class=k>seit %s</span><progress></progress><span class=k>Wie weit es ist, meldet das Archiv erst am Ende. Bitte nicht abschließen, solange das läuft.</span></p>`, menge, was, uhrzeit(g.Seit)))
+		stand := "Wie weit es ist, meldet das Archiv erst am Ende."
+		if g.Fertig > 0 && g.Gesamt == 0 { // WhatsApp counts as it goes, without knowing the whole
+			stand = fmt.Sprintf("Bisher %s durchgesehen, davon %s neu im Archiv.", tausender(g.Fertig), tausender(g.Neu))
+		}
+		zeilen = append(zeilen, fmt.Sprintf(`<p><b>%s%s ins Archiv übernehmen</b> <span class=k>seit %s</span><progress></progress><span class=k>%s Bitte nicht abschließen, solange das läuft.</span></p>`, menge, was, uhrzeit(g.Seit), esc(stand)))
 	}
 	if len(zeilen) == 0 {
 		b.WriteString(`<section class=jetzt id=jetzt data-live hidden></section>`) // the place, for the live page
