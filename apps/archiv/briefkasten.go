@@ -600,6 +600,21 @@ func einwerfen(tmp, post, quelle string, jetzt time.Time) (string, error) {
 	return "", errors.New("kein freier Name im Briefkasten")
 }
 
+// HalbeWeg removes the unfinished packets a stopped container left (their
+// writer's cleanup does not run when the process ends mid-packet: the
+// box, 2026-11-02, kept 193 MB of a first mail fetch). Called at start,
+// before anything writes; a restart fetches or reads those messages again.
+func HalbeWeg(post string) {
+	eintraege, _ := os.ReadDir(post)
+	for _, e := range eintraege {
+		if strings.HasPrefix(e.Name(), ".neu-") && e.Type().IsRegular() {
+			if err := os.Remove(filepath.Join(post, e.Name())); err == nil {
+				log.Printf("archiv: halbes Paket %s vom letzten Lauf entfernt", e.Name())
+			}
+		}
+	}
+}
+
 // Pakete lists the packets waiting in the Briefkasten, oldest first
 // (their names begin with the UTC time).
 func Pakete(post string) []string {
