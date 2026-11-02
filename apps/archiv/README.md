@@ -56,6 +56,22 @@ the passphrase as they arrive, and read the person's mail with the app
 password (which the provider can revoke); what is already in the archive
 stays readable only with the Archiv-Passwort.
 
+### Opening with a passkey
+
+A passkey can open the vault instead of the typed password (WebAuthn's PRF
+extension; see `passkey.go`). Ticking „Künftig mit Passkey öffnen“ when
+opening a closed vault with the password creates a passkey for this site
+(user verification required) and asks it for a secret for a random salt;
+the box keeps the password encrypted under HKDF(secret) with AES-GCM in
+`/data/schluessel/passkeys.json`. „Mit Passkey öffnen“ asks the passkey for
+the same secret and the box unwraps the password and opens the vault. The
+box does not verify WebAuthn signatures: it grants nothing by itself, only
+the secret unwraps, and the browser gives it only to this site after a
+fingerprint or PIN. The password stays the way in without the phone; a
+passkey can be removed on the open page. Needs a passkey store with PRF
+(Google Password Manager and iCloud Keychain have it; others may not — the
+page says so).
+
 ## Who gets in
 
 - `/healthz` — anyone (laib's health check).
