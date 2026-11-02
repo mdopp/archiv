@@ -272,9 +272,14 @@ func (w *Web) zusammenFormular(b *strings.Builder) {
 	sort.Slice(leute, func(i, j int) bool {
 		return strings.ToLower(personName(leute[i])) < strings.ToLower(personName(leute[j]))
 	})
+	weg := w.geloeschteKarten()
 	var opt strings.Builder
 	for _, p := range leute {
-		fmt.Fprintf(&opt, `<option value="%d">%s</option>`, p.ID, esc(personName(p)))
+		name := personName(p)
+		if t, ok := p.GeloeschtAm(weg); ok {
+			name += " (auf dem Handy gelöscht am " + t.Local().Format("02.01.2006") + ")"
+		}
+		fmt.Fprintf(&opt, `<option value="%d">%s</option>`, p.ID, esc(name))
 	}
 	fmt.Fprintf(b, `<details id=d-zusammen><summary>Zwei Personen von Hand zusammenführen</summary>
 <p class=k>Wenn jemand zweimal im Archiv steht (etwa einmal mit Handynummer, einmal mit Mail-Adresse). Du siehst vorher, was zusammenkommt.</p>
@@ -282,6 +287,15 @@ func (w *Web) zusammenFormular(b *strings.Builder) {
 <label>Diese Person bleibt<select name=a required><option value="">bitte wählen</option>%s</select></label>
 <label>und diese geht in ihr auf<select name=b required><option value="">bitte wählen</option>%s</select></label>
 <button class=k>Vorschau</button></form></details>`, opt.String(), opt.String())
+}
+
+// geloeschteKarten: the cards deleted on the phone, by UID (from the vault).
+func (w *Web) geloeschteKarten() map[string]time.Time {
+	innen, auf := w.Tresor.Innen()
+	if !auf {
+		return nil
+	}
+	return GeloeschtNachUID(innen)
 }
 
 func personName(p Person) string {
@@ -370,12 +384,16 @@ func (w *Web) vorschauSeite(rw http.ResponseWriter, r *http.Request, a, b int64,
 		fmt.Fprintf(&s, `<p class="meldung fehler" role=alert>%s</p>`, esc(fehler))
 	}
 	s.WriteString(`<h2>Zwei Personen zusammenführen</h2><p>So sieht es aus. Erst „Ja, zusammenführen“ ändert etwas.</p>`)
+	weg := w.geloeschteKarten()
 	for i, p := range []Person{pa, pb} {
 		rolle := "Bleibt (mit diesem Namen)"
 		if i == 1 {
 			rolle = "Geht in ihr auf"
 		}
 		fmt.Fprintf(&s, `<section class=quelle><h3>%s: %s</h3>`, rolle, esc(personName(p)))
+		if t, ok := p.GeloeschtAm(weg); ok {
+			fmt.Fprintf(&s, `<p class=k>Auf dem Handy gelöscht am %s; im Archiv bleibt sie.</p>`, t.Local().Format("02.01.2006"))
+		}
 		// what the messages used, then what the address book adds
 		ids, err := api.Identitaeten(r.Context(), p.ID)
 		punkte, err2 := api.Kontaktpunkte(r.Context(), p.ID)

@@ -431,6 +431,30 @@ warte2 60 "Google-Kalender „Arbeit“: 2 Termine, davon 1 an der Quelle gelös
 docker exec archiv2 sh -c 'cat /run/tresor/kalender/google-arbeit.json' | jq -e '.termine["g-zwei|"].an_der_quelle_geloescht_am != null and (.termine["g-zwei|"].daten | contains("SUMMARY:Termin zwei"))' ||
   fail2 "the deleted event is not kept"
 
+echo "a contact deleted on the phone stays in msgvault, marked; back on the phone, unmarked"
+[ "$(code -u anna:anna-pw -X DELETE http://radicale:5232/anna/handy-kontakte/ben2.vcf)" = 200 ] || fail2 "setup: delete a card"
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -X POST "$U2/tresor/abgleich")
+[ "$code" = 303 ] || fail2 "Jetzt abgleichen: $code"
+warte2 60 "Ben Mobil <span class=k>(auf dem Handy gelöscht am"
+sleep 2 # the sync after the store
+curl -fsS "${H[@]}" "$U2/api/v1/people" | jq -e '.people | length == 2' || { curl -sS "${H[@]}" "$U2/api/v1/people"; fail2 "the deleted contact's person left msgvault"; }
+bm=$(curl -fsS "${H[@]}" "$U2/api/v1/people" | jq -r '.people[] | select(.display_name == "Ben Mobil") | .id')
+[ -n "$bm" ] || fail2 "no person Ben Mobil"
+# msgvault 0.22.0 projects only FN, EMAIL and TEL of a card into the person
+# (store/carddav_resources.go): the served CATEGORIES line stays in the card
+# it keeps, but the person's profile does not show it. The mark the person
+# sees is the archive's page; here: the person and its numbers stay.
+curl -fsS "${H[@]}" "$U2/api/v1/people/$bm/profile" | jq -e '[.contact_points[].original_value] | index("+4915188888888") != null' || fail2 "the deleted contact's person lost its number"
+docker exec archiv2 sh -c 'cat /run/tresor/kontakte/handy-kontakte.json' | jq -e '[.karten[] | select(.auf_dem_handy_geloescht_am != null)] | length == 1' || fail2 "the store does not mark the card"
+[ "$(code -u anna:anna-pw -X PUT -H 'Content-Type: text/vcard' --data-binary "$(vcard 0c0c0c0c-0000-4000-8000-000000000002 'Ben Mobil' +4915188888888)" http://radicale:5232/anna/handy-kontakte/ben2.vcf)" = 201 ] || fail2 "setup: card back"
+nachher=$(stand_radicale)
+code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -X POST "$U2/tresor/abgleich")
+[ "$code" = 303 ] || fail2 "Jetzt abgleichen: $code"
+for _ in $(seq 60); do curl -fsS "${H[@]}" "$U2/tresor" | grep -q "auf dem Handy gelöscht" || break; sleep 1; done
+if curl -fsS "${H[@]}" "$U2/tresor" | grep -q "auf dem Handy gelöscht"; then fail2 "a card back on the phone is still marked"; fi
+docker exec archiv2 sh -c 'cat /run/tresor/kontakte/handy-kontakte.json' | jq -e '[.karten[] | select(.auf_dem_handy_geloescht_am != null)] | length == 0' || fail2 "the store still marks the card"
+curl -fsS "${H[@]}" "$U2/api/v1/people" | jq -e '.people | length == 2' || fail2 "the card back made a second person"
+
 echo "two persons merged by hand: preview, then the merge"
 ids=$(curl -fsS "${H[@]}" "$U2/api/v1/people" | jq -r '[.people[].id] | sort | map(tostring) | join(" ")')
 read -r A B <<<"$ids"

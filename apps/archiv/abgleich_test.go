@@ -197,7 +197,7 @@ func neuerAbgleich(t *testing.T) *abgleichTest {
 	os.MkdirAll(at.innen.Home(), 0o700)
 	os.WriteFile(at.innen.Home()+"/config.toml", []byte(msgvaultConfig(8090)), 0o600)
 	at.a = &Abgleich{Radicale: r, API: api, Run: at.run, Msgvault: "msgvault", Now: func() time.Time { return t0 },
-		Relais: &Relais{Radicale: r, Port: 18443, Adressen: func() ([]netip.Addr, error) { return []netip.Addr{netip.MustParseAddr("192.168.178.20")}, nil }, SystemCAs: "/nicht/da"}}
+		Relais: &Relais{Person: "anna", Port: 18443, Adressen: func() ([]netip.Addr, error) { return []netip.Addr{netip.MustParseAddr("192.168.178.20")}, nil }, SystemCAs: "/nicht/da"}}
 	if err := at.a.Vorbereiten(at.innen); err != nil {
 		t.Fatal(err)
 	}
@@ -242,12 +242,12 @@ func TestAbgleichFirstRound(t *testing.T) {
 	if strings.Contains(string(add.Eingabe), at.rad.passwort) {
 		t.Fatal("Radicale's password reached msgvault")
 	}
-	if st.Kontakte.Neu != 2 || !st.Kontakte.Verbunden || st.Personen != 2 {
+	if st.Kontakte.Neu != 2 || !st.Kontakte.Verbunden || st.Personen != 2 || st.Kontakte.Karten != 1 {
 		t.Fatalf("contacts: %+v, %d persons", st.Kontakte, st.Personen)
 	}
 	methoden, wer := at.rad.gesehen()
 	for i, m := range methoden {
-		if !strings.HasPrefix(m, "PROPFIND ") && !strings.HasPrefix(m, "GET ") {
+		if !strings.HasPrefix(m, "PROPFIND ") && !strings.HasPrefix(m, "GET ") && !strings.HasPrefix(m, "REPORT ") {
 			t.Errorf("Radicale got %s", m)
 		}
 		if wer[i] != "archiv-anna" {
@@ -325,5 +325,42 @@ func TestTheContactsCardPerState(t *testing.T) {
 	body = wt.rufe("GET", "/tresor", anna, nil).Body.String()
 	if strings.Contains(body, "Termine,") || !strings.Contains(body, "Die Termine liegen im Tresor") {
 		t.Fatalf("closed page: %s", body)
+	}
+}
+
+// A card deleted on the phone stays in the store and is served to
+// msgvault marked; back on the phone, the mark goes.
+func TestAContactDeletedOnThePhoneStays(t *testing.T) {
+	at := neuerAbgleich(t)
+	at.rad.setzen("handy-kontakte", fakeSammlung{art: "adressbuch"})
+	at.rad.karte("carla.vcf", vcard("u-carla", "Carla", "+4917011111111"))
+	at.a.Runde(t.Context(), at.innen)
+	at.rad.karte("ben.vcf", "")
+	at.a.Runde(t.Context(), at.innen)
+	k, err := kontakteLaden(kontakteDatei(at.innen))
+	if err != nil || len(k.Karten) != 2 {
+		t.Fatalf("%v %v", k, err)
+	}
+	ben := k.Karten["uid:u-ben"]
+	if ben.GeloeschtAm == nil || !strings.Contains(ben.Ausgabe(), "CATEGORIES:Auf dem Handy gelöscht am ") || !strings.HasSuffix(ben.Ausgabe(), "END:VCARD\r\n") {
+		t.Fatalf("Ben: %+v\n%s", ben, ben.Ausgabe())
+	}
+	st := at.a.Stand()
+	if st.Kontakte.Karten != 2 || len(st.Kontakte.Weg) != 1 || st.Kontakte.Weg[0].Name != "Ben" {
+		t.Fatalf("%+v", st.Kontakte)
+	}
+	if GeloeschtNachUID(at.innen)["u-ben"].IsZero() {
+		t.Fatal("the persons cannot be marked")
+	}
+	alterTag := ben.ETag()
+	at.rad.karte("ben-neu.vcf", vcard("u-ben", "Ben", "+4915199999999")) // back, under another file name
+	at.a.Runde(t.Context(), at.innen)
+	k, _ = kontakteLaden(kontakteDatei(at.innen))
+	ben = k.Karten["uid:u-ben"]
+	if ben.GeloeschtAm != nil || strings.Contains(ben.Ausgabe(), "gelöscht") || ben.Href != "ben.vcf" || ben.ETag() == alterTag {
+		t.Fatalf("back on the phone: %+v", ben)
+	}
+	if len(at.a.Stand().Kontakte.Weg) != 0 {
+		t.Fatal("still listed as deleted")
 	}
 }

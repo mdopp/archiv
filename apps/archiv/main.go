@@ -82,7 +82,7 @@ func main() {
 		Takt: sekunden("KONTAKTE_TAKT", 3*time.Hour), Arbeit: tresor.Arbeit}
 	if rad != nil {
 		relaisPort, _ := strconv.Atoi(env("KONTAKTE_RELAIS_PORT", "18443"))
-		ab.Relais = &Relais{Radicale: rad, Port: relaisPort}
+		ab.Relais = &Relais{Person: person, Port: relaisPort}
 	}
 	tresor.Vorbereiten = ab.Vorbereiten
 	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),

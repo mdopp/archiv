@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -43,11 +44,19 @@ var kontakteSyncZeile = regexp.MustCompile(kontakteSyncZeileMuster)
 type KontakteStand struct {
 	Am        time.Time // the last sync that went through
 	Verbunden bool
-	Leer      bool // handy-kontakte does not exist yet
+	Leer      bool        // handy-kontakte does not exist yet, and the archive has no card
+	Karten    int         // cards in the archive's store
+	Weg       []Geloescht // of them, deleted on the phone (newest first)
 	Neu       int
 	Geaendert int
 	Entfernt  int
 	Fehler    string
+}
+
+// Geloescht is a contact deleted on the phone, kept in the archive.
+type Geloescht struct {
+	Name string
+	Am   time.Time
 }
 
 type AbgleichStand struct {
@@ -183,6 +192,34 @@ func (a *Abgleich) Lauf(ctx context.Context, innen Innen) {
 	}
 }
 
+// kontakteZaehlen: how many cards the store holds, and which are gone on the phone.
+func (a *Abgleich) kontakteZaehlen(k *Kontaktablage) {
+	var weg []Geloescht
+	for _, c := range k.Karten {
+		if c.GeloeschtAm != nil {
+			weg = append(weg, Geloescht{Name: c.Name, Am: *c.GeloeschtAm})
+		}
+	}
+	sort.Slice(weg, func(i, j int) bool { return weg[i].Am.After(weg[j].Am) })
+	a.setzen(func(s *AbgleichStand) { s.Kontakte.Leer, s.Kontakte.Karten, s.Kontakte.Weg = false, len(k.Karten), weg })
+}
+
+// GeloeschtAm says when the card with this UID was deleted on the phone
+// (for the page's persons); ok false while it is there or unknown.
+func GeloeschtNachUID(innen Innen) map[string]time.Time {
+	out := map[string]time.Time{}
+	k, err := kontakteLaden(kontakteDatei(innen))
+	if err != nil {
+		return out
+	}
+	for _, c := range k.Karten {
+		if c.GeloeschtAm != nil && c.UID != "" {
+			out[c.UID] = *c.GeloeschtAm
+		}
+	}
+	return out
+}
+
 // Runde: the calendars, then the contacts.
 func (a *Abgleich) Runde(ctx context.Context, innen Innen) {
 	if a.Arbeit != nil {
@@ -296,11 +333,50 @@ func (a *Abgleich) kontakte(ctx context.Context, innen Innen, samml []Sammlung) 
 			da = true
 		}
 	}
-	if !da {
+	// first into the archive's own store: every card ever seen stays
+	datei := kontakteDatei(innen)
+	ablage, err := kontakteLaden(datei)
+	if errors.Is(err, os.ErrNotExist) {
+		ablage, err = nil, nil
+	}
+	if err != nil {
+		log.Printf("archiv: Kontakte im Tresor: %v (bleiben, wie sie sind)", err)
+		a.setzen(func(s *AbgleichStand) { s.Kontakte.Fehler = saysKontakteAbgleich })
+		return
+	}
+	switch {
+	case da:
+		karten, err := a.Radicale.AdressbuchHolen(ctx)
+		if err != nil {
+			if ctx.Err() == nil {
+				log.Printf("archiv: Adressbuch lesen: %v", err)
+				a.setzen(func(s *AbgleichStand) { s.Kontakte.Fehler = saysKontakteAbgleich })
+			}
+			return
+		}
+		if ablage == nil {
+			ablage = neueKontaktablage()
+		}
+		neu, geaendert, weg := ablage.Einmischen(karten, a.now())
+		if err := ablage.speichern(datei); err != nil {
+			log.Printf("archiv: Kontakte speichern: %v", err)
+			a.setzen(func(s *AbgleichStand) { s.Kontakte.Fehler = saysKontakteAbgleich })
+			return
+		}
+		if neu+geaendert+weg > 0 {
+			log.Printf("archiv: Kontakte: %d neu, %d geändert, %d auf dem Handy gelöscht (bleiben im Archiv)", neu, geaendert, weg)
+		}
+	case ablage != nil && ablage.QuelleWegSeit == nil: // the book is gone: its cards stay as they were
+		g := a.now()
+		ablage.QuelleWegSeit = &g
+		ablage.speichern(datei)
+		log.Printf("archiv: das Adressbuch %s ist in Radicale nicht mehr da; die Kontakte bleiben im Archiv", adressbuchName)
+	}
+	if ablage == nil {
 		a.setzen(func(s *AbgleichStand) { s.Kontakte.Leer, s.Kontakte.Fehler = true, "" })
 		return
 	}
-	a.setzen(func(s *AbgleichStand) { s.Kontakte.Leer = false })
+	a.kontakteZaehlen(ablage)
 	if a.Relais == nil {
 		return
 	}
@@ -356,7 +432,8 @@ func (a *Abgleich) kontakte(ctx context.Context, innen Innen, samml []Sammlung) 
 		scheitern(saysKontakteAbgleich, "abgleichen", aus, err)
 		return
 	}
-	k := KontakteStand{Am: a.now(), Verbunden: true}
+	alt := a.Stand().Kontakte
+	k := KontakteStand{Am: a.now(), Verbunden: true, Karten: alt.Karten, Weg: alt.Weg}
 	if m := kontakteSyncZeile.FindStringSubmatch(aus.Text); m != nil {
 		k.Neu, _ = strconv.Atoi(m[2])
 		k.Geaendert, _ = strconv.Atoi(m[3])

@@ -23,7 +23,7 @@ import (
 // logs in with its own Radicale account (RADICALE_USER, e.g. archiv-anna),
 // which Radicale lets read exactly those collections of exactly this
 // person and write nothing (laib templates/radicale/pre-start). Every
-// request this file makes is PROPFIND or GET.
+// request the archive makes is PROPFIND, REPORT or GET.
 type Radicale struct {
 	Basis         *url.URL // RADICALE_URL: the server's root, e.g. http://host.containers.internal:5232/
 	Benutzer      string   // RADICALE_USER

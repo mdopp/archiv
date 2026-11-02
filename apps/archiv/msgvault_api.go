@@ -204,10 +204,26 @@ var errVeraltet = errors.New("veraltet")
 // --- persons
 
 type Person struct {
-	ID             int64   `json:"id"`
-	DisplayName    string  `json:"display_name"`
-	Revision       int64   `json:"revision"`
-	ParticipantIDs []int64 `json:"participant_ids"`
+	ID              int64   `json:"id"`
+	DisplayName     string  `json:"display_name"`
+	Revision        int64   `json:"revision"`
+	ParticipantIDs  []int64 `json:"participant_ids"`
+	VCardUID        string  `json:"vcard_uid"`
+	CardDAVBindings []struct {
+		RemoteUID string `json:"remote_uid"`
+	} `json:"carddav_bindings"`
+}
+
+// GeloeschtAm: when this person's card was deleted on the phone, by the
+// archive's contact store (weg: UID -> date).
+func (p Person) GeloeschtAm(weg map[string]time.Time) (time.Time, bool) {
+	for _, b := range p.CardDAVBindings {
+		if t, ok := weg[b.RemoteUID]; ok {
+			return t, true
+		}
+	}
+	t, ok := weg[p.VCardUID]
+	return t, ok
 }
 
 func (m *MsgvaultAPI) Personen(ctx context.Context) ([]Person, error) {
