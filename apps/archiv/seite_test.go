@@ -165,17 +165,25 @@ func TestPagesPerState(t *testing.T) {
 	if tel, _ := wt.w.Schluessel.Lesen(SchluesselTelefon); string(tel) != "+491511234567" || !strings.HasPrefix(wt.w.Schluessel.Dir, wt.data) {
 		t.Fatalf("number stored as %q in %s", tel, wt.w.Schluessel.Dir)
 	}
-	if fi, _ := os.Stat(filepath.Join(wt.w.Schluessel.Dir, SchluesselSignal)); fi == nil || fi.Mode().Perm() != 0o600 {
-		t.Fatal("the passphrase file is not 0600")
+	// the passphrase inside the vault, owner-only, and nowhere outside
+	innen, _ := wt.tt.Innen()
+	if fi, _ := os.Stat(innen.SignalPassphrase()); fi == nil || fi.Mode().Perm() != 0o600 {
+		t.Fatal("the passphrase is not in the vault, 0600")
 	}
-	if !strings.Contains(body, "Wer Root auf der Box hat, kann damit deine Signal-Sicherungen entschlüsseln") || !strings.Contains(body, "während es offen ist") {
-		t.Fatal("the page does not say what the passphrase on the box means")
+	if b, _ := os.ReadFile(innen.SignalPassphrase()); string(b) != "123451234512345123451234512345" {
+		t.Fatalf("the passphrase in the vault: %d bytes", len(b))
+	}
+	if _, err := os.Stat(filepath.Join(wt.w.Schluessel.Dir, altSignal)); !os.IsNotExist(err) {
+		t.Fatal("the passphrase was also stored outside the vault")
+	}
+	if !strings.Contains(body, "Deine Signal-Passphrase liegt im Tresor") || !strings.Contains(body, "während es offen ist") {
+		t.Fatal("the page does not say where the passphrase is")
 	}
 	if rec := wt.rufe("POST", "/tresor/abschliessen", anna, url.Values{}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("abschliessen: %d", rec.Code)
 	}
 	body = wt.rufe("GET", "/", anna, nil).Body.String()
-	if !strings.Contains(body, "Archiv öffnen") || strings.Contains(body, "Signal-Passphrase (30") {
+	if !strings.Contains(body, "Archiv öffnen") || strings.Contains(body, "Signal-Passphrase (30") || !strings.Contains(body, saysSignalZu) || strings.Contains(body, "Passphrase fehlt") {
 		t.Fatalf("verschlossen:\n%s", body)
 	}
 	if rec := wt.rufe("POST", "/tresor/signal", anna, url.Values{"passphrase": {passphrase}}); rec.Code != http.StatusLocked {
@@ -548,5 +556,125 @@ func TestAPasskeyOpensTheVaultWithThePasswordItWasGiven(t *testing.T) {
 	}
 	if o := wt.rufe("GET", "/tresor/passkey/optionen", map[string]string{proxyHeader: "s3cret", "Remote-User": "ben"}, nil); o.Code == 200 {
 		t.Fatal("another person gets the options")
+	}
+}
+
+// A passphrase left in the old outside store (before 2026-11-02) moves into
+// the vault on the next opening: written inside, the outside file
+// overwritten and removed, one log line without the secret; the next
+// Signal delivery uses the inside one, and nothing outside the vault — the
+// key folder, the status file, the record, the log, the page — holds it.
+func TestTheSignalPassphraseMovesIntoTheVaultOnOpening(t *testing.T) {
+	var buf bytes.Buffer
+	log.SetOutput(&buf)
+	defer log.SetOutput(os.Stderr)
+	wt := neuesWeb(t)
+	wt.tt.Einziehen = wt.w.Schluessel.SignalEinziehen
+	wt.oeffnen(t)
+	wt.rufe("POST", "/tresor/signal", anna, url.Values{"telefon": {annaTel}})
+	wt.tt.Abschliessen(context.Background(), "test")
+
+	alt := filepath.Join(wt.w.Schluessel.Dir, altSignal)
+	if err := os.WriteFile(alt, []byte(passphrase+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	zweiterName := filepath.Join(wt.data, "zweiter-name") // a hard link sees what is written into the file's blocks
+	if err := os.Link(alt, zweiterName); err != nil {
+		t.Fatal(err)
+	}
+	vorher := buf.Len()
+	if rec := wt.rufe("POST", "/tresor/oeffnen", anna, url.Values{"passwort": {geheim}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("öffnen: %d", rec.Code)
+	}
+	wt.tt.bereit(t)
+	innen, _ := wt.tt.Innen()
+	if _, err := os.Stat(alt); !os.IsNotExist(err) {
+		t.Fatal("the passphrase is still outside the vault")
+	}
+	if b, _ := os.ReadFile(zweiterName); len(b) != len(passphrase)+1 || strings.Trim(string(b), "\x00") != "" {
+		t.Fatalf("the outside file was removed without being overwritten: %q", b)
+	}
+	if b, _ := os.ReadFile(innen.SignalPassphrase()); string(b) != passphrase {
+		t.Fatalf("not in the vault: %d bytes", len(b))
+	}
+	if fi, _ := os.Stat(innen.SignalPassphrase()); fi == nil || fi.Mode().Perm() != 0o600 {
+		t.Fatal("the passphrase in the vault is not 0600")
+	}
+	if n := strings.Count(buf.String()[vorher:], "Signal-Passphrase in den Tresor übernommen"); n != 1 {
+		t.Fatalf("logged %d times:\n%s", n, buf.String())
+	}
+
+	// again: nothing outside, nothing to do, nothing logged
+	wt.tt.Abschliessen(context.Background(), "test")
+	vorher = buf.Len()
+	wt.rufe("POST", "/tresor/oeffnen", anna, url.Values{"passwort": {geheim}})
+	wt.tt.bereit(t)
+	if b, _ := os.ReadFile(innen.SignalPassphrase()); string(b) != passphrase || strings.Contains(buf.String()[vorher:], "Signal-Passphrase") {
+		t.Fatalf("the second opening: %d bytes inside, log:\n%s", len(b), buf.String()[vorher:])
+	}
+
+	// the next Signal delivery reads the inside one
+	run := &fakeSignalImport{pb: wt.w.Postbote}
+	wt.w.Postbote.Run = run
+	wt.w.Eingang.Stabil("signal")
+	legen(t, wt.inbox, "signal/signal-1.backup", 5, tag)
+	wt.w.Eingang.Stabil("signal")
+	wt.w.Postbote.Runde(context.Background(), innen)
+	if run.anzahl() != 2 || string(run.befehle[0].Terminal) != passphrase+"\n" {
+		t.Fatalf("the delivery did not use the passphrase from the vault: %d commands", run.anzahl())
+	}
+	if l, _ := wt.w.Eingang.Liste("signal"); len(l) != 0 {
+		t.Fatalf("not imported: %v", l)
+	}
+
+	// nowhere outside the vault
+	wt.w.Protokoll.Fehlschlag(Fehler{Am: time.Now(), Quelle: "signal", Datei: "signal-2.backup", Satz: saysSignalFalsch}) // the record written once more
+	status := filepath.Join(wt.data, "laib-status.json")
+	statusSchreiben(status, statusBauen(wt.w.lage(wt.tt.Stand())))
+	for _, dir := range []string{wt.data, wt.inbox} {
+		filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			if b, _ := os.ReadFile(p); bytes.Contains(b, []byte(passphrase)) {
+				t.Errorf("the passphrase outside the vault in %s", p)
+			}
+			return nil
+		})
+	}
+	if _, err := os.Stat(status); err != nil {
+		t.Fatal("no status file, so the walk proves nothing about it")
+	}
+	for _, pfad := range []string{"/tresor", "/tresor/stand"} {
+		if body := wt.rufe("GET", pfad, anna, nil).Body.String(); strings.Contains(body, passphrase) {
+			t.Fatalf("the passphrase on %s", pfad)
+		}
+	}
+	if strings.Contains(buf.String(), passphrase) {
+		t.Fatalf("the passphrase in the log:\n%s", buf.String())
+	}
+}
+
+// A passphrase already in the vault is newer than one left outside (the
+// page writes only inside): the outside one goes, the inside one stays.
+func TestAnOldOutsidePassphraseDoesNotReplaceTheOneInTheVault(t *testing.T) {
+	wt := neuesWeb(t)
+	wt.tt.Einziehen = wt.w.Schluessel.SignalEinziehen
+	wt.oeffnen(t)
+	neu := "999999999999999999999999999999"
+	if rec := wt.rufe("POST", "/tresor/signal", anna, url.Values{"passphrase": {neu}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("signal: %d", rec.Code)
+	}
+	wt.tt.Abschliessen(context.Background(), "test")
+	alt := filepath.Join(wt.w.Schluessel.Dir, altSignal)
+	os.WriteFile(alt, []byte(passphrase), 0o600)
+	wt.rufe("POST", "/tresor/oeffnen", anna, url.Values{"passwort": {geheim}})
+	wt.tt.bereit(t)
+	innen, _ := wt.tt.Innen()
+	if b, _ := os.ReadFile(innen.SignalPassphrase()); string(b) != neu {
+		t.Fatal("the old outside passphrase replaced the newer one in the vault")
+	}
+	if _, err := os.Stat(alt); !os.IsNotExist(err) {
+		t.Fatal("the old passphrase stayed outside")
 	}
 }

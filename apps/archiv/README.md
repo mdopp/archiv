@@ -48,17 +48,32 @@ error output is scrubbed of the secret before it is logged. Tests:
 `befehl_test.go` (also through real exec and a real pty), `seite_test.go`
 (`TestPasswordNeverInTheLog`).
 
-Keys the person enters (Signal passphrase, own number, IMAP host/user/app
-password) are owner-only files in `/data/schluessel/`, **outside** the
-vault: the Mailholer fetches mail while it is closed. (The Signal
-passphrase is used only while the vault is open since 2026-11-02, so it
-could move inside, as the WhatsApp key is; not done yet.) They are
-accepted only while the vault is open (so only the person sets them) and
-never shown again: the page shows „hinterlegt am …“ and says the price in
-plain words: whoever has root on the box can decrypt the person's Signal
-backups with the passphrase, and read the person's mail with the app
-password (which the provider can revoke); what is already in the archive
-stays readable only with the Archiv-Passwort.
+Where the keys the person enters live:
+
+| key | where | why |
+|---|---|---|
+| own number | `/data/schluessel/telefon`, outside the vault, 0600 | no secret; the page and the status say it is missing (masked number) while the vault is closed |
+| IMAP host/user/app password | `/data/schluessel/imap`, outside the vault, 0600 | the Mailholer fetches mail while the vault is closed |
+| Signal passphrase | `/run/tresor/signal-passphrase`, **inside** the vault, 0600 | Signal is read only while the vault is open (since 2026-11-02) |
+| WhatsApp key | `/run/tresor/whatsapp-schluessel`, **inside** the vault, 0600 | WhatsApp is read only while the vault is open |
+
+All of them are accepted only while the vault is open (so only the person
+sets them) and never shown again: the page shows „hinterlegt am …“. For
+the keys outside it says the price in plain words: whoever has root on the
+box can read the person's mail with the app password (which the provider
+can revoke); what is already in the archive stays readable only with the
+Archiv-Passwort. The keys inside are readable only while the vault is
+open; closed, the page cannot tell whether the Signal passphrase is there
+and says it is entered while open.
+
+Until 2026-11-02 the Signal passphrase was kept outside, in
+`/data/schluessel/signal` (owner: „Bring den Key dann doch in
+Sicherheit“). Every opening moves one left there into the vault
+(`Schluessel.SignalEinziehen`): written inside atomically and read back,
+unless the vault already holds one (that one is newer: the page writes only
+inside), then the outside file is overwritten with zeros and removed, and
+one log line says so, without the secret. Nothing there: nothing happens.
+On an error the outside file stays and the next opening tries again.
 
 ### Opening with a passkey
 
@@ -111,7 +126,8 @@ database and the attachment files — and that plaintext may exist only
 inside the vault. So Signal backups wait, still encrypted by Signal, in
 the inbox until the vault is open. Then the Postbote takes each stable
 `signal/**/signal-*.backup`, **oldest first** (by mtime), once the Signal
-passphrase and the person's number are stored:
+passphrase (inside the vault, `/run/tresor/signal-passphrase`, entered on
+the page while open) and the person's number are stored:
 
 1. A new, empty folder `/run/tresor/arbeit/signal-<rand>/` (inside the
    vault). `signalbackup-tools <backup> --output <folder>/ --no-showprogress`,
@@ -257,7 +273,7 @@ person's Radicale address book `handy-kontakte`, outside the vault.
 
 The person enters the 64-digit key of their WhatsApp backup on the page
 while the vault is open; it is stored inside the vault
-(`whatsapp-schluessel`), unlike the Signal passphrase. WhatsApp's
+(`whatsapp-schluessel`), as the Signal passphrase is. WhatsApp's
 `msgstore.db.crypt15` holds the whole history every day and stays in the
 inbox anyway (it is also the newest backup for a new phone), so nothing is
 lost by waiting for the opening, and the key is never readable on a closed
@@ -388,7 +404,9 @@ passphrase, a refused mail login) stay yellow and say what to enter.
   packet through the real `import-maildir`; WhatsApp media encrypted into
   `letzte/` and given back to Haus only while open; a non-backup in
   `signal/` fails with the sentence, stays, and leaves nothing in the
-  vault's work folder or the Briefkasten.
+  vault's work folder or the Briefkasten; the Signal passphrase inside the
+  vault (0600) and nowhere in `/data` while closed, and one left in the old
+  outside store moved inside at the next opening.
 - **Proven on the box** (the Kraftwerk, 2026-11-02): rootless podman on
   Fedora CoreOS mounts the vault with `/dev/fuse` and `SYS_ADMIN`. The
   first real Signal backup went through: signalbackup-tools read it into a

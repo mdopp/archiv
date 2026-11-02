@@ -135,7 +135,6 @@ func neuerBriefkasten(t *testing.T) *bkTest {
 	id, _ := age.GenerateX25519Identity()
 	os.WriteFile(filepath.Join(data, "briefkasten.pub"), []byte(id.Recipient().String()+"\n"), 0o644)
 	sch := Schluessel{Dir: filepath.Join(data, "schluessel")}
-	sch.Speichern(SchluesselSignal, []byte(passphrase))
 	sch.Speichern(SchluesselTelefon, []byte(annaTel))
 	b := &Briefkasten{Eingang: &Eingang{Dir: inbox}, Letzte: filepath.Join(inbox, "letzte"), Post: filepath.Join(data, "briefkasten"),
 		Empfaenger: filepath.Join(data, "briefkasten.pub"), Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")},

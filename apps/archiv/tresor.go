@@ -56,6 +56,7 @@ func (i Innen) Home() string               { return filepath.Join(i.Wurzel, "msg
 func (i Innen) Identitaet() string         { return filepath.Join(i.Wurzel, "age-identitaet") }      // the private key of the Briefkasten
 func (i Innen) Arbeit() string             { return filepath.Join(i.Wurzel, "arbeit") }              // plaintext exports while an import runs, emptied after each
 func (i Innen) WhatsAppSchluessel() string { return filepath.Join(i.Wurzel, "whatsapp-schluessel") } // the 64-digit key, only inside: WhatsApp is read only while open
+func (i Innen) SignalPassphrase() string   { return filepath.Join(i.Wurzel, "signal-passphrase") }   // the 30 digits, only inside: Signal is read only while open
 func (i Innen) WhatsAppStand() string      { return filepath.Join(i.Wurzel, "whatsapp-stand") }      // which database was imported last
 func (i Innen) GrosseAnhaenge() string     { return filepath.Join(i.Wurzel, "grosse-anhaenge") }     // attachments msgvault refuses (MaxAnhang), kept beside it
 func (i Innen) APIKey() string             { return filepath.Join(i.Home(), "api-key") }
@@ -72,6 +73,10 @@ type Tresor struct {
 	// Lauf runs in the background while the vault is open and msgvault
 	// answers (the import); it must return soon after ctx ends.
 	Lauf func(ctx context.Context, innen Innen)
+	// Einziehen runs on every opening, before anything reads the inside:
+	// it moves a key left outside into the vault (SignalEinziehen). An
+	// error is logged and the vault opens anyway; the next opening tries again.
+	Einziehen func(innen Innen) error
 	// Geaendert is called after every transition (the status file).
 	Geaendert func()
 	Now       func() time.Time
@@ -221,6 +226,11 @@ func (t *Tresor) oeffnen(ctx context.Context, pw []byte) error {
 	if err != nil {
 		t.Mounter.Unmount(context.Background(), t.Mnt)
 		return fmt.Errorf("Tresor einrichten: %w", err)
+	}
+	if t.Einziehen != nil {
+		if err := t.Einziehen(innen); err != nil {
+			log.Printf("archiv: Signal-Passphrase in den Tresor übernehmen: %v (bleibt außen, nächstes Öffnen versucht es wieder)", err)
+		}
 	}
 	lauf, halt := context.WithCancel(context.Background())
 	fertig := make(chan struct{})

@@ -65,6 +65,7 @@ func main() {
 		Dienst:     &Msgvault{Bin: env("MSGVAULT", "msgvault"), Port: port},
 		Leerlauf:   sekunden("LEERLAUF", 2*time.Hour),
 	}
+	tresor.Einziehen = schluessel.SignalEinziehen
 	takt := sekunden("IMPORT_TAKT", 20*time.Second)
 	bk := &Briefkasten{Eingang: eingang, Letzte: filepath.Join(eingangDir, "letzte"), Post: filepath.Join(data, "briefkasten"),
 		Empfaenger: empfaenger, Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Protokoll: prot, Takt: takt}

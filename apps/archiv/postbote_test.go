@@ -93,6 +93,7 @@ func neuerSignalTest(t *testing.T) *sigTest {
 	innen := Innen{Wurzel: t.TempDir()}
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
+	os.WriteFile(innen.SignalPassphrase(), []byte(passphrase), 0o600)
 	st := &sigTest{run: &fakeSignalImport{}, innen: innen, inbox: bt.inbox, jetzt: tag.Add(240 * time.Hour)}
 	st.pb = &Postbote{Post: bt.b.Post, Eingang: bt.b.Eingang, Letzte: bt.b.Letzte, Schluessel: bt.sch, Protokoll: bt.b.Protokoll,
 		Run: st.run, Msgvault: "msgvault", SignalBin: "signalbackup-tools", Now: func() time.Time { return st.jetzt }}
@@ -271,10 +272,10 @@ func TestSignalWaitsForTheKeys(t *testing.T) {
 	st := neuerSignalTest(t)
 	st.pb.Eingang.Stabil("signal")
 	legen(t, st.inbox, "signal/signal-1.backup", 5, tag)
-	os.Remove(filepath.Join(st.pb.Schluessel.Dir, SchluesselSignal))
+	os.Remove(st.innen.SignalPassphrase())
 	st.runde()
 	os.Remove(filepath.Join(st.pb.Schluessel.Dir, SchluesselTelefon))
-	st.pb.Schluessel.Speichern(SchluesselSignal, []byte(passphrase))
+	os.WriteFile(st.innen.SignalPassphrase(), []byte(passphrase), 0o600)
 	st.runde()
 	if st.run.anzahl() != 0 {
 		t.Fatal("ran without the passphrase or the number")
@@ -310,10 +311,15 @@ func TestSignalBackupsWaitingAreSaid(t *testing.T) {
 	wt := neuesWeb(t)
 	legen(t, wt.inbox, "signal/signal-1.backup", 5, tag)
 	if !wt.w.fehlenSignalSchluessel() {
-		t.Fatal("no passphrase stored, a backup waits: not said")
+		t.Fatal("closed, no number stored, a backup waits: not said")
 	}
-	wt.w.Schluessel.Speichern(SchluesselSignal, []byte(passphrase))
+	wt.oeffnen(t)
+	innen, _ := wt.tt.Innen()
 	wt.w.Schluessel.Speichern(SchluesselTelefon, []byte(annaTel))
+	if !wt.w.fehlenSignalSchluessel() {
+		t.Fatal("open, no passphrase in the vault, a backup waits: not said")
+	}
+	os.WriteFile(innen.SignalPassphrase(), []byte(passphrase), 0o600)
 	if wt.w.fehlenSignalSchluessel() {
 		t.Fatal("both keys stored, still said missing")
 	}
@@ -334,7 +340,6 @@ func TestSignalBackupsWaitingAreSaid(t *testing.T) {
 		t.Fatalf("open: %+v", s.Findings)
 	}
 
-	wt.oeffnen(t)
 	wt.w.Postbote.gang = Gang{Was: "signal-1.backup", Quelle: "signal", Seit: time.Now()}
 	body := wt.rufe("GET", "/tresor", anna, nil).Body.String()
 	if !strings.Contains(body, "Signal-Nachrichten ins Archiv übernehmen") || !strings.Contains(body, "Erst entschlüsselt die Box die Sicherung") {

@@ -4,8 +4,9 @@
 # and the supervisor end to end (anlegen, öffnen, the key reaching msgvault,
 # an additive import, a Signal backup that fails, a real Signal backup —
 # made here by signalbackup-tools, two messages added — decrypted into the
-# vault and read by msgvault's import-signal, abschließen, a wrong
-# password, öffnen again, packets of SMS-XML messages and of mail going
+# vault and read by msgvault's import-signal, abschließen, a passphrase
+# left in the old outside store, a wrong password, öffnen again (the
+# passphrase moved into the vault), packets of SMS-XML messages and of mail going
 # into msgvault at the opening).
 #
 # The IMAP fetch itself is proven by `go test` against go-imap's server;
@@ -139,8 +140,9 @@ arbeit_leer() { # the folder is removed right after the error is recorded
 }
 arbeit_leer
 [ -z "$(sudo find "$D/data/briefkasten" -name '.*' 2>/dev/null)" ] || fail "an unfinished packet stayed"
-sudo test -f "$D/data/schluessel/signal" || fail "the passphrase is not outside the vault"
-[ "$(sudo stat -c %a "$D/data/schluessel/signal")" = 600 ] || fail "the passphrase file is not 0600"
+docker exec archiv test -s /run/tresor/signal-passphrase || fail "the passphrase is not inside the vault"
+[ "$(docker exec archiv stat -c %a /run/tresor/signal-passphrase)" = 600 ] || fail "the passphrase file is not 0600"
+if sudo test -e "$D/data/schluessel/signal"; then fail "the passphrase is outside the vault"; fi
 curl -fsS "${H[@]}" "$U/tresor" | grep -q "hinterlegt am" || fail "the keys are not shown as stored"
 if curl -fsS "${H[@]}" "$U/tresor" | grep -q "$PASSPHRASE"; then fail "the passphrase is shown"; fi
 
@@ -200,6 +202,11 @@ if docker exec archiv grep -q " /run/tresor " /proc/self/mounts; then fail "stil
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer x' "$U/api/v1/stats")" = 423 ] || fail "a bearer while closed is not 423"
 
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Archiv-Haus: haus' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = 423 ] || fail "media while closed is not 423"
+if sudo grep -rqF "$PASSPHRASE" "$D/data"; then fail "the Signal passphrase readable outside the closed vault"; fi
+
+echo "a passphrase left in the old outside store (before 2026-11-02) moves into the vault on the next opening"
+printf '%s\n' "$PASSPHRASE" | sudo tee "$D/data/schluessel/signal" >/dev/null
+sudo chmod 600 "$D/data/schluessel/signal"
 
 echo "the Briefkasten while closed: packets the vault cannot see (an SMS XML, as Signal packets were made before import-signal), the real msgvault takes them on opening"
 PNG=iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==
@@ -246,6 +253,9 @@ code=$(curl -s -o "$D/falsch.html" -w '%{http_code}' "${H[@]}" --data-urlencode 
 code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passwort=$PW" "$U/tresor/oeffnen")
 [ "$code" = 303 ] || fail "öffnen: $code"
 warte 180 '.zustand == "offen" and .bereit == true'
+if sudo test -e "$D/data/schluessel/signal"; then fail "the old outside passphrase stayed after opening"; fi
+docker exec archiv test -s /run/tresor/signal-passphrase || fail "no passphrase inside after the move"
+docker logs archiv 2>&1 | grep -q "alte Signal-Passphrase außerhalb des Tresors gelöscht" || fail "the move was not logged"
 warte 120 '.briefkasten.wartend == 0 and .letzter_import.signal.anzahl == 3 and .letzter_import.mail.zahlen.mails == 2'
 curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_import, .letztes_paket'
 [ -z "$(docker exec archiv ls -A /run/tresor/arbeit)" ] || fail "plaintext left in the vault's work folder after delivery"

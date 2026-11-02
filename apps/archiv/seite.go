@@ -54,7 +54,8 @@ const (
 	saysWAFormat        = "Der WhatsApp-Schlüssel hat 64 Zeichen, Ziffern und die Buchstaben a bis f. Leerzeichen dürfen dazwischen stehen."
 	saysAdminLiest      = "Solange dein Archiv offen ist, kann der Admin der Box es lesen. Abgeschlossen sieht niemand etwas, auch nicht in den Sicherungen der Box."
 	saysMailPreis       = "Dafür liegt das App-Passwort auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit deine Mails lesen. Du kannst das App-Passwort bei deinem Anbieter jederzeit widerrufen; dann holt das Archiv nichts mehr ab."
-	saysSignalHinweis   = "Signal-Sicherungen liest das Archiv, während es offen ist; bis dahin warten sie verschlüsselt im Eingang. Deine Signal-Passphrase liegt auf der Box, außerhalb des Tresors: Wer Root auf der Box hat, kann damit deine Signal-Sicherungen entschlüsseln. Was schon in deinem Archiv ist, bleibt nur mit deinem Archiv-Passwort lesbar."
+	saysSignalHinweis   = "Signal-Sicherungen liest das Archiv, während es offen ist; bis dahin warten sie verschlüsselt im Eingang. Deine Signal-Passphrase liegt im Tresor: Ist das Archiv abgeschlossen, kann sie niemand lesen, auch der Admin nicht."
+	saysSignalZu        = "Die Signal-Passphrase trägst du bei offenem Archiv ein. Sie liegt im Tresor; deshalb liest das Archiv Signal nur, wenn es offen ist."
 )
 
 var meldungen = map[string]string{
@@ -262,14 +263,28 @@ func (w *Web) lage(st Stand) Lage {
 }
 
 // fehlenSignalSchluessel: Signal backups wait, and the passphrase or the
-// number is not stored.
+// number is not stored. The passphrase is inside the vault: while it is
+// closed nobody can tell, so then only the number counts.
 func (w *Web) fehlenSignalSchluessel() bool {
 	if wartende(w.Eingang)["signal"].Wartend == 0 {
 		return false
 	}
-	_, p := w.Schluessel.Hinterlegt(SchluesselSignal)
 	_, t := w.Schluessel.Hinterlegt(SchluesselTelefon)
-	return !p || !t
+	if innen, auf := w.Tresor.Innen(); auf {
+		if _, p := signalHinterlegt(innen); !p {
+			return true
+		}
+	}
+	return !t
+}
+
+// signalHinterlegt says when the passphrase was stored in the open vault.
+func signalHinterlegt(innen Innen) (time.Time, bool) {
+	fi, err := os.Stat(innen.SignalPassphrase())
+	if err != nil || fi.Size() == 0 {
+		return time.Time{}, false
+	}
+	return fi.ModTime(), true
 }
 
 // packt names what becomes a packet now: the mail.
@@ -354,9 +369,16 @@ func (w *Web) offenesFach(rw http.ResponseWriter, r *http.Request) (Schluessel, 
 	return w.Schluessel, true
 }
 
+// signal stores the passphrase inside the vault (Innen.SignalPassphrase)
+// and the number outside, both only while the vault is open.
 func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 	sch, ok := w.offenesFach(rw, r)
 	if !ok {
+		return
+	}
+	innen, auf := w.Tresor.Innen()
+	if !auf {
+		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
 	}
 	pass, tel := r.PostFormValue("passphrase"), r.PostFormValue("telefon")
@@ -381,7 +403,7 @@ func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if p != nil {
-		err = sch.Speichern(SchluesselSignal, p)
+		err = schreibenAtomar(innen.SignalPassphrase(), p, 0o600)
 	}
 	if err == nil && t != "" {
 		err = sch.Speichern(SchluesselTelefon, []byte(t))
@@ -432,7 +454,7 @@ func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
 	http.Redirect(rw, r, "/tresor?m=imap", http.StatusSeeOther)
 }
 
-// whatsapp stores the key inside the vault (unlike Signal's passphrase):
+// whatsapp stores the key inside the vault (as Signal's passphrase):
 // WhatsApp's database holds the whole history every day, so it can wait
 // for the opening, and the key then is never readable on a closed box.
 func (w *Web) whatsapp(rw http.ResponseWriter, r *http.Request) {
@@ -702,12 +724,19 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 	}
 	w.fehlerVon(b, "signal")
 	sch := w.Schluessel
-	pt, pOK := sch.Hinterlegt(SchluesselSignal)
+	innen, auf := w.Tresor.Innen()
+	pt, pOK := time.Time{}, false
+	if auf {
+		pt, pOK = signalHinterlegt(innen)
+	}
 	_, tOK := sch.Hinterlegt(SchluesselTelefon)
 	zugang := []string{}
-	if pOK {
+	switch {
+	case !offen || !auf:
+		// inside the closed vault: the page cannot tell, and says where it is
+	case pOK:
 		zugang = append(zugang, "Passphrase hinterlegt am "+datum(pt))
-	} else {
+	default:
 		zugang = append(zugang, `<span class=fehlt>Passphrase fehlt</span>`)
 	}
 	if tOK {
@@ -717,8 +746,8 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 		zugang = append(zugang, `<span class=fehlt>Nummer fehlt</span>`)
 	}
 	fmt.Fprintf(b, `<p class=zugang>%s</p>`, strings.Join(zugang, " · "))
-	if !offen {
-		b.WriteString(`</section>`)
+	if !offen || !auf {
+		fmt.Fprintf(b, `<p class=k>%s</p></section>`, saysSignalZu)
 		return
 	}
 	komplett := pOK && tOK
