@@ -425,6 +425,23 @@ func TestHausGetsMediaOnlyWhileOpen(t *testing.T) {
 	if rec.Code != 200 || rec.Body.String() != "BILD-INHALT" || rec.Header().Get("Content-Type") != "image/jpeg" {
 		t.Fatalf("medium: %d %q %s", rec.Code, rec.Body, rec.Header().Get("Content-Type"))
 	}
+	// a video larger than one age chunk (64 KiB), resumed in the middle:
+	// the bytes from there, the whole length known
+	video := make([]byte, 200_000)
+	for i := range video {
+		video[i] = byte(i * 7)
+	}
+	os.WriteFile(src, video, 0o644)
+	if err := verschluesseln(src, filepath.Join(wt.w.Letzte, "whatsapp", "Media", "WhatsApp Video", "VID-1.mp4.age"), empf); err != nil {
+		t.Fatal(err)
+	}
+	rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Video/VID-1.mp4", map[string]string{hausHeader: "haus-geheim", "Range": "bytes=65000-"}, nil)
+	if rec.Code != http.StatusPartialContent || !bytes.Equal(rec.Body.Bytes(), video[65000:]) || rec.Header().Get("Content-Range") != "bytes 65000-199999/200000" {
+		t.Fatalf("range: %d %d bytes %q", rec.Code, rec.Body.Len(), rec.Header().Get("Content-Range"))
+	}
+	if rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Video/VID-1.mp4", haus, nil); rec.Header().Get("Content-Length") != "200000" || !bytes.Equal(rec.Body.Bytes(), video) {
+		t.Fatalf("whole: %q %d bytes", rec.Header().Get("Content-Length"), rec.Body.Len())
+	}
 	for _, p := range []string{"/intern/whatsapp/medien/../../../tresor/gocryptfs.conf", "/intern/whatsapp/medien/%2e%2e/%2e%2e/x"} {
 		if rec := wt.rufe("GET", p, haus, nil); rec.Code == 200 {
 			t.Fatalf("%s: %d", p, rec.Code)
