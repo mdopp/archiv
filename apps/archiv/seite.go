@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// The pages, German and phone first, as Haus and Gesundheit: every
+// The pages, German and phone first, as Homes and Gesundheit: every
 // button answers at once (it says what runs), every form ends on the page
 // with a sentence, never a raw error.
 //
@@ -84,7 +84,7 @@ type Web struct {
 	Eingang     *Eingang
 	Protokoll   *Protokoll
 	Schluessel  Schluessel   // outside the vault: the import runs while it is closed
-	HausSecret  string       // ARCHIV_HAUS_SECRET: Haus' way to the restore files
+	HomesSecret string       // ARCHIV_HOMES_SECRET (legacy ARCHIV_HOMES_SECRET): Homes' way to the restore files
 	Letzte      string       // /eingang/letzte
 	Archiv      http.Handler // msgvault, see archivProxy
 	Geaendert   func()
@@ -257,7 +257,7 @@ func (w *Web) seiten() *http.ServeMux {
 	return mux
 }
 
-// stand is the state as JSON, for Haus' „Archiv öffnen / abschließen“.
+// stand is the state as JSON, for Homes' „Archiv öffnen / abschließen“.
 func (w *Web) stand(rw http.ResponseWriter, r *http.Request) {
 	st := w.Tresor.Stand()
 	s := statusBauen(w.lage(st))
@@ -826,14 +826,14 @@ func (w *Web) smsKarte(b *strings.Builder) {
 	if _, ok := w.Schluessel.Hinterlegt(SchluesselTelefon); !ok {
 		b.WriteString(`<p class=zugang><span class=fehlt>Deine Nummer fehlt</span> (bei Signal eintragen): ohne sie weiß das Archiv nicht, welche SMS du geschrieben hast.</p>`)
 	}
-	b.WriteString(`<p class=k>Kommen aus der Haus-App: Mehr → Nachrichten sichern → „SMS und Anrufliste übertragen“. Die App verschlüsselt sie schon auf dem Handy für dein Archiv; auf der Box kann sie niemand lesen, solange es zu ist.</p></section>`)
+	b.WriteString(`<p class=k>Kommen aus der Homes-App: Mehr → Nachrichten sichern → „SMS und Anrufliste übertragen“. Die App verschlüsselt sie schon auf dem Handy für dein Archiv; auf der Box kann sie niemand lesen, solange es zu ist.</p></section>`)
 }
 
 // kontakteKarte: the address book and the calendars. Their numbers live
 // in the vault: while closed the card only says what happens.
 func (w *Web) kontakteKarte(b *strings.Builder, offen bool) {
 	b.WriteString(`<section class=quelle id=karte-kontakte data-live><h3>Kontakte und Kalender</h3>`)
-	b.WriteString(`<p class=k>Die Haus-App spiegelt die Kontakte deines Handys jeden Tag in dein Adressbuch „Handy-Kontakte“ auf der Box (Mehr → Nachrichten sichern → „Kontakte übertragen“); deine Google-Kalender und deine eigenen Kalender liegen dort auch. Ist dein Archiv offen, liest es beides alle paar Stunden. Es ändert dort nichts.</p>`)
+	b.WriteString(`<p class=k>Die Homes-App spiegelt die Kontakte deines Handys jeden Tag in dein Adressbuch „Handy-Kontakte“ auf der Box (Mehr → Nachrichten sichern → „Kontakte übertragen“); deine Google-Kalender und deine eigenen Kalender liegen dort auch. Ist dein Archiv offen, liest es beides alle paar Stunden. Es ändert dort nichts.</p>`)
 	a := w.Abgleich
 	switch {
 	case !a.Eingerichtet():
@@ -892,7 +892,7 @@ func (w *Web) kontakteKarte(b *strings.Builder, offen bool) {
 	}
 	if len(st.Kalender) == 0 {
 		if !st.KalenderAm.IsZero() {
-			b.WriteString(`<p class=k>Kein Kalender gefunden (Google-Kalender verbindest du in der Haus-App).</p>`)
+			b.WriteString(`<p class=k>Kein Kalender gefunden (Google-Kalender verbindest du in der Homes-App).</p>`)
 		}
 	} else {
 		b.WriteString(`<ul class=kalender>`)
@@ -952,7 +952,7 @@ func (w *Web) whatsappKarte(b *strings.Builder) {
 <li>WhatsApp → Einstellungen → Chats → Chat-Backup → Ende-zu-Ende-verschlüsseltes Backup → <b>Deaktivieren</b> (mit deinem Passkey bestätigen).</li>
 <li>Gleich danach wieder <b>Aktivieren</b> und „Stattdessen 64-stelligen Schlüssel verwenden“ wählen. Dazwischen liegt dein Backup unverschlüsselt bei Google, also direkt nacheinander.</li>
 <li>Den Schlüssel in Vaultwarden ablegen und hier eintragen.</li>
-<li>„Jetzt sichern“ tippen, in WhatsApp und danach in der Haus-App.</li></ol></details></section>`, offenWenn(!hat), summary, knopf(knopfText, "Speichere …", ""))
+<li>„Jetzt sichern“ tippen, in WhatsApp und danach in der Homes-App.</li></ol></details></section>`, offenWenn(!hat), summary, knopf(knopfText, "Speichere …", ""))
 }
 
 func offenWenn(b bool) string {

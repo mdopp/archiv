@@ -31,7 +31,7 @@ import (
 // the box has not set it up.
 
 const (
-	saysAdressbuchLeer      = "Dein Adressbuch „Handy-Kontakte“ ist auf der Box noch leer. Übertrage deine Kontakte in der Haus-App: Mehr → Nachrichten sichern → „Kontakte übertragen“."
+	saysAdressbuchLeer      = "Dein Adressbuch „Handy-Kontakte“ ist auf der Box noch leer. Übertrage deine Kontakte in der Homes-App: Mehr → Nachrichten sichern → „Kontakte übertragen“."
 	saysKontakteVerbinden   = "Das Archiv konnte dein Adressbuch nicht anbinden. Es versucht es beim nächsten Abgleich wieder; hilft das nicht, sag dem Admin Bescheid."
 	saysKontakteAbgleich    = "Der Abgleich deiner Kontakte hat nicht geklappt. Es versucht es beim nächsten Abgleich wieder; hilft das nicht, sag dem Admin Bescheid."
 	saysKalenderLesen       = "Ein Kalender ließ sich nicht lesen (%s). Was schon im Archiv ist, bleibt; beim nächsten Abgleich versucht es das Archiv wieder."

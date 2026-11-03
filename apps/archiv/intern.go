@@ -14,7 +14,7 @@ import (
 	"filippo.io/age"
 )
 
-// Haus' internal way in (ARCHIV_HAUS_SECRET in X-Archiv-Haus):
+// Homes' internal way in (ARCHIV_HOMES_SECRET in X-Archiv-Homes):
 //
 //	GET /intern/empfaenger                 the person's public key (age), for a packet made elsewhere
 //	GET /intern/whatsapp/medien/<pfad>     one WhatsApp media file from letzte/, decrypted — only
@@ -22,15 +22,45 @@ import (
 //	                                       with Range, so a phone resumes a large video
 //
 // The signal and WhatsApp database backups in letzte/ are encrypted by
-// the messengers themselves; Haus serves those straight from the inbox
+// the messengers themselves; Homes serves those straight from the inbox
 // mount. WhatsApp's media are plaintext on the phone, so the archive
 // keeps them only age-encrypted, and only it can give them back.
 
-const hausHeader = "X-Archiv-Haus"
+const (
+	homesHeader = "X-Archiv-Homes"
+	homesEnv    = "ARCHIV_HOMES_SECRET"
+)
+
+// Legacy names from before the program Haus was renamed Homes (laib#1021):
+// the archive image and the Laib template update on different nights, so
+// both the old env and the old header are still accepted. Removed once the
+// box runs Homes (laib#1021 step 9).
+const (
+	legacyHausHeader = "X-Archiv-Haus"
+	legacyHausEnv    = "ARCHIV_HAUS_SECRET"
+)
+
+// homesSecret is ARCHIV_HOMES_SECRET, or the legacy ARCHIV_HAUS_SECRET
+// while the new one is empty.
+func homesSecret(getenv func(string) string) string {
+	if s := getenv(homesEnv); s != "" {
+		return s
+	}
+	return getenv(legacyHausEnv)
+}
+
+// homesHeaderValue is X-Archiv-Homes, or the legacy X-Archiv-Haus when the
+// new header is absent.
+func homesHeaderValue(r *http.Request) string {
+	if v := r.Header.Get(homesHeader); v != "" {
+		return v
+	}
+	return r.Header.Get(legacyHausHeader)
+}
 
 func (w *Web) intern(rw http.ResponseWriter, r *http.Request) {
-	got := r.Header.Get(hausHeader)
-	if w.HausSecret == "" || subtle.ConstantTimeCompare([]byte(got), []byte(w.HausSecret)) != 1 {
+	got := homesHeaderValue(r)
+	if w.HomesSecret == "" || subtle.ConstantTimeCompare([]byte(got), []byte(w.HomesSecret)) != 1 {
 		jsonFehler(rw, http.StatusUnauthorized, saysNichtAngemeldet)
 		return
 	}

@@ -35,7 +35,7 @@ const (
 	saysPaketKaputt        = "Das Paket %s ließ sich nicht öffnen. Es bleibt im Briefkasten; sag dem Admin Bescheid."
 	saysWAOhneSchluessel   = "Der WhatsApp-Schlüssel fehlt. Trag ihn auf der Archiv-Seite ein."
 	saysWASchluesselFalsch = "Die WhatsApp-Sicherung ließ sich mit deinem Schlüssel nicht öffnen. Prüf den 64-stelligen Schlüssel und trag ihn noch einmal ein."
-	saysSMSKaputt          = "Die SMS-Datei %s ließ sich nicht entschlüsseln. Sie bleibt im Eingang; schick sie aus der Haus-App noch einmal."
+	saysSMSKaputt          = "Die SMS-Datei %s ließ sich nicht entschlüsseln. Sie bleibt im Eingang; schick sie aus der Homes-App noch einmal."
 	saysGrosserAnhang      = "[Anhang %s, %d MB: zu groß für die Suche im Archiv. Er liegt im Tresor unter grosse-anhaenge/%s.]"
 	saysUebernahme         = "Das Archiv konnte die Nachrichten aus %s nicht übernehmen. Verloren geht nichts: es versucht es in einer halben Stunde noch einmal und bei jedem Öffnen."
 	saysKeineNummer        = "Pakete warten, aber deine Handynummer fehlt. Gib sie unter „Schlüssel“ ein."
@@ -195,7 +195,7 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 	}
 }
 
-// whatsappNeueste is the newest WhatsApp database in the inbox (Haus
+// whatsappNeueste is the newest WhatsApp database in the inbox (Homes
 // keeps the day's msgstore.db.crypt15 and dated copies beside it).
 func (p *Postbote) whatsappNeueste() (Datei, bool) {
 	if p.Eingang == nil {
@@ -234,7 +234,7 @@ func (p *Postbote) whatsappWartet(innen Innen) bool {
 // whatsapp imports the newest WhatsApp database once (ADR 0029): it is
 // decrypted with the key inside the vault into the vault's work folder,
 // handed to msgvault and removed. The database stays in the inbox: it is
-// also the newest backup for a new phone (letzte/), and Haus replaces it
+// also the newest backup for a new phone (letzte/), and Homes replaces it
 // with the next day's. Media are not imported yet.
 func (p *Postbote) whatsapp(ctx context.Context, innen Innen, telefon string) {
 	if !p.whatsappWartet(innen) {
@@ -535,7 +535,7 @@ func (p *Postbote) wartet(name string) bool {
 	return ok && p.now().Before(t)
 }
 
-// SMSZustellen imports one file of the phone's SMS or calls: the Haus app
+// SMSZustellen imports one file of the phone's SMS or calls: the Homes app
 // wrote it as an SMS Backup & Restore XML and encrypted it to the
 // Briefkasten, so it is read here, inside the open vault, and handed to
 // msgvault's own SMS import (which keeps one of each message, so a file

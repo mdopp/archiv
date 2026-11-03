@@ -52,7 +52,7 @@ func neuesWeb(t *testing.T) *webTest {
 		Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Protokoll: prot}
 	pb := &Postbote{Post: bk.Post, Eingang: eingang, Letzte: bk.Letzte, Schluessel: sch, Protokoll: prot, Run: &fakeMsgvault{}}
 	wt.data = data
-	wt.w = &Web{Passkeys: &Passkeys{Datei: filepath.Join(data, "schluessel", "passkeys.json")}, Person: "anna", Secret: "s3cret", HausSecret: "haus-geheim", Tresor: tt.Tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang,
+	wt.w = &Web{Passkeys: &Passkeys{Datei: filepath.Join(data, "schluessel", "passkeys.json")}, Person: "anna", Secret: "s3cret", HomesSecret: "homes-geheim", Tresor: tt.Tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang,
 		Protokoll: prot, Schluessel: sch, Letzte: bk.Letzte, Archiv: archivProxy(port)}
 	return wt
 }
@@ -399,29 +399,35 @@ func TestStatusSaysOneBackupInTheSingular(t *testing.T) {
 	}
 }
 
-// Haus' way to the restore files: only with its secret; media only while
+// Homes' way to the restore files: only with its secret; media only while
 // open (they are age-encrypted in letzte/, the private key is in the vault).
-func TestHausGetsMediaOnlyWhileOpen(t *testing.T) {
+func TestHomesGetsMediaOnlyWhileOpen(t *testing.T) {
 	wt := neuesWeb(t)
-	haus := map[string]string{hausHeader: "haus-geheim"}
+	homes := map[string]string{homesHeader: "homes-geheim"}
 	if rec := wt.rufe("GET", "/intern/empfaenger", nil, nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("no secret: %d", rec.Code)
 	}
-	if rec := wt.rufe("GET", "/intern/empfaenger", map[string]string{hausHeader: "falsch"}, nil); rec.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong secret: %d", rec.Code)
+	for _, h := range []string{homesHeader, legacyHausHeader} {
+		if rec := wt.rufe("GET", "/intern/empfaenger", map[string]string{h: "falsch"}, nil); rec.Code != http.StatusUnauthorized {
+			t.Fatalf("wrong secret on %s: %d", h, rec.Code)
+		}
 	}
 	wt.oeffnen(t)
-	rec := wt.rufe("GET", "/intern/empfaenger", haus, nil)
-	if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), "age1") {
-		t.Fatalf("empfaenger: %d %s", rec.Code, rec.Body)
+	// the new header, and the legacy one an old Homes (Haus) still sends
+	for _, h := range []string{homesHeader, legacyHausHeader} {
+		rec := wt.rufe("GET", "/intern/empfaenger", map[string]string{h: "homes-geheim"}, nil)
+		if rec.Code != 200 || !strings.HasPrefix(rec.Body.String(), "age1") {
+			t.Fatalf("empfaenger via %s: %d %s", h, rec.Code, rec.Body)
+		}
 	}
+	rec := wt.rufe("GET", "/intern/empfaenger", homes, nil)
 	empf, _ := empfaengerLesen(wt.tt.Empfaenger)
 	src := filepath.Join(t.TempDir(), "IMG-1.jpg")
 	os.WriteFile(src, []byte("BILD-INHALT"), 0o644)
 	if err := verschluesseln(src, filepath.Join(wt.w.Letzte, "whatsapp", "Media", "WhatsApp Images", "IMG-1.jpg.age"), empf); err != nil {
 		t.Fatal(err)
 	}
-	rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", haus, nil)
+	rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", homes, nil)
 	if rec.Code != 200 || rec.Body.String() != "BILD-INHALT" || rec.Header().Get("Content-Type") != "image/jpeg" {
 		t.Fatalf("medium: %d %q %s", rec.Code, rec.Body, rec.Header().Get("Content-Type"))
 	}
@@ -435,20 +441,20 @@ func TestHausGetsMediaOnlyWhileOpen(t *testing.T) {
 	if err := verschluesseln(src, filepath.Join(wt.w.Letzte, "whatsapp", "Media", "WhatsApp Video", "VID-1.mp4.age"), empf); err != nil {
 		t.Fatal(err)
 	}
-	rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Video/VID-1.mp4", map[string]string{hausHeader: "haus-geheim", "Range": "bytes=65000-"}, nil)
+	rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Video/VID-1.mp4", map[string]string{homesHeader: "homes-geheim", "Range": "bytes=65000-"}, nil)
 	if rec.Code != http.StatusPartialContent || !bytes.Equal(rec.Body.Bytes(), video[65000:]) || rec.Header().Get("Content-Range") != "bytes 65000-199999/200000" {
 		t.Fatalf("range: %d %d bytes %q", rec.Code, rec.Body.Len(), rec.Header().Get("Content-Range"))
 	}
-	if rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Video/VID-1.mp4", haus, nil); rec.Header().Get("Content-Length") != "200000" || !bytes.Equal(rec.Body.Bytes(), video) {
+	if rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Video/VID-1.mp4", homes, nil); rec.Header().Get("Content-Length") != "200000" || !bytes.Equal(rec.Body.Bytes(), video) {
 		t.Fatalf("whole: %q %d bytes", rec.Header().Get("Content-Length"), rec.Body.Len())
 	}
 	for _, p := range []string{"/intern/whatsapp/medien/../../../tresor/gocryptfs.conf", "/intern/whatsapp/medien/%2e%2e/%2e%2e/x"} {
-		if rec := wt.rufe("GET", p, haus, nil); rec.Code == 200 {
+		if rec := wt.rufe("GET", p, homes, nil); rec.Code == 200 {
 			t.Fatalf("%s: %d", p, rec.Code)
 		}
 	}
 	wt.tt.Abschliessen(context.Background(), "t")
-	if rec := wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", haus, nil); rec.Code != http.StatusLocked {
+	if rec := wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", homes, nil); rec.Code != http.StatusLocked {
 		t.Fatalf("closed: %d", rec.Code)
 	}
 }
@@ -696,5 +702,24 @@ func TestAnOldOutsidePassphraseDoesNotReplaceTheOneInTheVault(t *testing.T) {
 	}
 	if _, err := os.Stat(alt); !os.IsNotExist(err) {
 		t.Fatal("the old passphrase stayed outside")
+	}
+}
+
+// The secret comes from ARCHIV_HOMES_SECRET, and from the legacy
+// ARCHIV_HAUS_SECRET while the new one is empty (laib#1021).
+func TestHomesSecretReadsBothEnvNames(t *testing.T) {
+	for _, c := range []struct {
+		env  map[string]string
+		want string
+	}{
+		{map[string]string{"ARCHIV_HOMES_SECRET": "neu"}, "neu"},
+		{map[string]string{"ARCHIV_HAUS_SECRET": "alt"}, "alt"},
+		{map[string]string{"ARCHIV_HOMES_SECRET": "neu", "ARCHIV_HAUS_SECRET": "alt"}, "neu"},
+		{map[string]string{"ARCHIV_HOMES_SECRET": "", "ARCHIV_HAUS_SECRET": "alt"}, "alt"},
+		{map[string]string{}, ""},
+	} {
+		if got := homesSecret(func(k string) string { return c.env[k] }); got != c.want {
+			t.Fatalf("%v: %q, want %q", c.env, got, c.want)
+		}
 	}
 }

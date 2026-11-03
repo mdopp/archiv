@@ -5,7 +5,7 @@ Das Nachrichten-Archiv je Person — for the household on a Laib box
 laib#985, laib#986). One container per person: a small Go supervisor keeps
 the person's [msgvault](https://github.com/wesm/msgvault) archive in a
 gocryptfs vault that only their password opens, and closes it after two
-idle hours. Signal backups, the phone's SMS and calls (from the Haus app)
+idle hours. Signal backups, the phone's SMS and calls (from the Homes app)
 and mail (IMAP, every hour) reach it even while the vault is closed: they
 wait encrypted in the person's Briefkasten or inbox, which only the open
 vault can read. The newest Signal backup stays on the box for a new phone
@@ -14,8 +14,8 @@ vault can read. The newest Signal backup stays on the box for a new phone
 ```mermaid
 flowchart LR
   person(["Person"])
-  app["Haus-App\n(Handy)"]
-  haus["Haus\n/napi/sicherung · /napi/kontakte"]
+  app["Homes-App\n(Handy)"]
+  homes["Homes\n/napi/sicherung · /napi/kontakte"]
   imap[("Mail-Anbieter\nIMAP")]
   radicale[("Radicale\n<person>/handy-kontakte")]
   eingang[("/eingang\nsignal/ · sms/ · whatsapp/\n.briefkasten.pub")]
@@ -29,11 +29,11 @@ flowchart LR
     end
   end
 
-  app -->|"Signal-Sicherung"| haus
-  app -->|"SMS + Anrufe,\nauf dem Handy verschlüsselt"| haus
-  app -->|"Kontakte (vCard)"| haus
-  haus --> eingang
-  haus -->|"Spiegel"| radicale
+  app -->|"Signal-Sicherung"| homes
+  app -->|"SMS + Anrufe,\nauf dem Handy verschlüsselt"| homes
+  app -->|"Kontakte (vCard)"| homes
+  homes --> eingang
+  homes -->|"Spiegel"| radicale
   briefkasten -->|"öffentlicher Schlüssel"| eingang
   eingang -->|"signal/"| briefkasten
   briefkasten --> post
@@ -46,7 +46,7 @@ flowchart LR
 ```
 
 What is readable where: the inbox's Signal and WhatsApp files are
-encrypted by the messenger, the SMS files by the Haus app, the packets by
+encrypted by the messenger, the SMS files by the Homes app, the packets by
 age to the Briefkasten; the private key and msgvault's database live only
 in the vault. The keys that let the box read while the vault is closed (the
 Signal passphrase, the IMAP app password) lie outside it, and the page says
@@ -69,7 +69,7 @@ Made in the Werkstatt (`laib-app new archiv`).
 
 | | |
 |---|---|
-| env | `ARCHIV_PERSON` (the person's login, required), `PROXY_SECRET` (the route's proxySecret; Caddy sends it as `X-Archiv-Proxy`), `ARCHIV_HAUS_SECRET` (Haus' `/intern/…`), `TZ`; optional `PUBLIC_URL`, `LEERLAUF` (seconds, default 7200) |
+| env | `ARCHIV_PERSON` (the person's login, required), `PROXY_SECRET` (the route's proxySecret; Caddy sends it as `X-Archiv-Proxy`), `ARCHIV_HOMES_SECRET` (Homes' `/intern/…`), `TZ`; optional `PUBLIC_URL`, `LEERLAUF` (seconds, default 7200) |
 | mounts | `/data` ← `${DATA_DIR}/archiv/<person>` (`tresor/`, `briefkasten/`, `schluessel/`, `gesehen/`, `briefkasten.pub`, `laib-status.json`, `archiv-stand.json`); `/eingang` ← `${DATA_DIR}/archiv-eingang/<person>` (read, write, delete) |
 | backup | `${DATA_DIR}/archiv-eingang/<person>/letzte` is `backup: false` (a phone backup itself, GBs that change nightly) |
 | FUSE | `AddDevice=/dev/fuse`, `AddCapability=SYS_ADMIN`; the supervisor runs as the container's root |

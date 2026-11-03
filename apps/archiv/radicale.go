@@ -17,9 +17,9 @@ import (
 )
 
 // Radicale is the box's CalDAV/CardDAV server, read here and only read:
-// the person's address book handy-kontakte (Haus mirrors the phone's
+// the person's address book handy-kontakte (Homes mirrors the phone's
 // contacts there) and their calendars google-* (laib's kalender mirrors
-// the person's Google calendars) and privat-* (made in Haus). The archive
+// the person's Google calendars) and privat-* (made in Homes). The archive
 // logs in with its own Radicale account (RADICALE_USER, e.g. archiv-anna),
 // which Radicale lets read exactly those collections of exactly this
 // person and write nothing (laib templates/radicale/pre-start). Every

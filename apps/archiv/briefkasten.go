@@ -181,8 +181,8 @@ func (b *Briefkasten) Runde(ctx context.Context) {
 }
 
 // aushaengen puts the Briefkasten's public key into the inbox as
-// .briefkasten.pub (a dot-file: never a backup), where Haus hands it to
-// the person's phone: the Haus app encrypts SMS and calls to it before
+// .briefkasten.pub (a dot-file: never a backup), where Homes hands it to
+// the person's phone: the Homes app encrypts SMS and calls to it before
 // they leave the phone (ADR 0029 §9).
 func (b *Briefkasten) aushaengen(empf *age.X25519Recipient) {
 	ziel := filepath.Join(b.Eingang.Dir, ".briefkasten.pub")
