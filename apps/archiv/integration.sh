@@ -337,7 +337,7 @@ permissions: RrWw
 
 [haushalt]
 user: .+
-collection: haus/(haushalt(-kontakte)?|familie-[^/]+)(/.*)?
+collection: homes/(haushalt(-kontakte)?|familie-[^/]+)(/.*)?
 permissions: rw
 RIGHTS
 docker network create archivnet >/dev/null
