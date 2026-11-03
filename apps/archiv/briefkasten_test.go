@@ -416,7 +416,7 @@ func TestAnAttachmentTooBigForMsgvaultIsKeptInTheVaultAndNamedInTheMessage(t *te
 	leer(t, innen.Arbeit(), "the vault's work folder")
 }
 
-// smsVomHandy is what the Haus app uploads: an SMS Backup & Restore XML,
+// smsVomHandy is what the Homes app uploads: an SMS Backup & Restore XML,
 // encrypted on the phone to the Briefkasten's public key.
 func smsVomHandy(t *testing.T, dir, name string, an age.Recipient, xml string) string {
 	t.Helper()
@@ -438,7 +438,7 @@ func TestThePhonesSMSAndCallsComeInEncryptedAndAreImportedWhenOpen(t *testing.T)
 	bt.runde()
 	pub, err := os.ReadFile(filepath.Join(bt.inbox, ".briefkasten.pub"))
 	if err != nil || strings.TrimSpace(string(pub)) != bt.id.Recipient().String() {
-		t.Fatalf("the public key is not in the inbox for the Haus app: %q %v", pub, err)
+		t.Fatalf("the public key is not in the inbox for the Homes app: %q %v", pub, err)
 	}
 	smsDatei := smsVomHandy(t, bt.inbox, "sms-20261102T120000Z.xml.age", bt.id.Recipient(), signalXML(sms(1700000000000, 1, "+4917011111111", "vom Handy")))
 	anrufe := smsVomHandy(t, bt.inbox, "anrufe-20261102T120000Z.xml.age", bt.id.Recipient(), `<?xml version='1.0' encoding='UTF-8' standalone='yes' ?><calls count="1"><call number="+4917011111111" duration="61" date="1700000000000" type="1" presentation="1" contact_name="Ben" /></calls>`)

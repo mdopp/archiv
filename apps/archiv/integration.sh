@@ -76,7 +76,7 @@ echo teil >"$D/eingang/.teil/abc"
 head -c 4096 /dev/urandom >"$D/eingang/whatsapp/Databases/msgstore.db.crypt15"
 echo "KLARTEXT-BILD-VOM-HANDY" >"$D/eingang/whatsapp/Media/WhatsApp Images/IMG-1.jpg"
 docker run -d --name archiv "${FUSE[@]}" \
-  -e ARCHIV_PERSON=anna -e PROXY_SECRET=s3cret -e ARCHIV_HAUS_SECRET=haus -e EINGANG_RUHE=2 -e IMPORT_TAKT=2 -e LEERLAUF=3600 \
+  -e ARCHIV_PERSON=anna -e PROXY_SECRET=s3cret -e ARCHIV_HOMES_SECRET=homes -e EINGANG_RUHE=2 -e IMPORT_TAKT=2 -e LEERLAUF=3600 \
   -v "$D/data:/data" -v "$D/eingang:/eingang" -p 127.0.0.1:18145:8080 "$IMG" >/dev/null
 U=http://127.0.0.1:18145
 H=(-H "X-Archiv-Proxy: s3cret" -H "Remote-User: anna")
@@ -185,14 +185,14 @@ sudo test -f "$D/eingang/letzte/signal/signal-2026-10-02-03-00-00.backup" || fai
 [ -z "$(sudo find "$D/eingang/signal" -name 'signal-*.backup')" ] || fail "the imported backup stayed in the inbox"
 if sudo grep -rq SIGNALTEXT "$D/data"; then fail "Signal plaintext outside the vault"; fi
 
-echo "WhatsApp: the newest database kept, the media only encrypted, Haus gets them back while open"
+echo "WhatsApp: the newest database kept, the media only encrypted, Homes gets them back while open"
 for _ in $(seq 30); do sudo test -f "$D/eingang/letzte/whatsapp/Media/WhatsApp Images/IMG-1.jpg.age" && break; sleep 1; done
 sudo test -f "$D/eingang/letzte/whatsapp/Databases/msgstore.db.crypt15" || fail "the newest WhatsApp database is not kept"
 sudo test -f "$D/eingang/letzte/whatsapp/Media/WhatsApp Images/IMG-1.jpg.age" || fail "the media file was not encrypted into letzte/"
 [ ! -e "$D/eingang/whatsapp/Media/WhatsApp Images/IMG-1.jpg" ] || fail "the plaintext media stayed in the inbox"
 if sudo grep -rq KLARTEXT-BILD "$D/eingang"; then fail "plaintext media somewhere in the inbox"; fi
-[ "$(curl -fsS -H 'X-Archiv-Haus: haus' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = KLARTEXT-BILD-VOM-HANDY ] || fail "Haus does not get the media back"
-[ "$(curl -s -o /dev/null -w '%{http_code}' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = 401 ] || fail "the media without Haus' secret"
+[ "$(curl -fsS -H 'X-Archiv-Homes: homes' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = KLARTEXT-BILD-VOM-HANDY ] || fail "Homes does not get the media back"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = 401 ] || fail "the media without Homes' secret"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -X POST "$U/tresor/abschliessen")
 [ "$code" = 303 ] || fail "abschließen: $code"
@@ -201,7 +201,7 @@ if docker exec archiv grep -q " /run/tresor " /proc/self/mounts; then fail "stil
 [ -z "$(docker exec archiv ls -A /run/tresor)" ] || fail "the mount point shows files while closed"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer x' "$U/api/v1/stats")" = 423 ] || fail "a bearer while closed is not 423"
 
-[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Archiv-Haus: haus' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = 423 ] || fail "media while closed is not 423"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Archiv-Homes: homes' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = 423 ] || fail "media while closed is not 423"
 if sudo grep -rqF "$PASSPHRASE" "$D/data"; then fail "the Signal passphrase readable outside the closed vault"; fi
 
 echo "a passphrase left in the old outside store (before 2026-11-02) moves into the vault on the next opening"
@@ -378,7 +378,7 @@ vorher=$(stand_radicale)
 printf '%s\n' "$RPW" >"$R/radicale-password"
 chmod 644 "$R/radicale-password"
 docker run -d --name archiv2 --network archivnet "${FUSE[@]}" \
-  -e ARCHIV_PERSON=anna -e PROXY_SECRET=s3cret -e ARCHIV_HAUS_SECRET=haus -e LEERLAUF=3600 \
+  -e ARCHIV_PERSON=anna -e PROXY_SECRET=s3cret -e ARCHIV_HOMES_SECRET=homes -e LEERLAUF=3600 \
   -e RADICALE_URL=http://radicale:5232/ -e RADICALE_USER=archiv-anna -v "$R/radicale-password:/run/secrets/radicale-password:ro" \
   -v "$R/data2/data:/data" -v "$R/eingang:/eingang" -p 127.0.0.1:18146:8080 "$IMG" >/dev/null
 U2=http://127.0.0.1:18146

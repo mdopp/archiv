@@ -99,7 +99,7 @@ page says so).
   `Remote-User` = `ARCHIV_PERSON`. Another signed-in person: 403. Neither: 401.
   A form posted from another origin: 403.
 - `/tresor…` — the supervisor's pages (`/tresor/stand` is the state as JSON,
-  for Haus' control).
+  for Homes' control).
 - Every other path, while open: msgvault's own web UI and API (it lives at
   the root: absolute asset paths, no frames). The supervisor adds
   `X-API-Key` itself; Caddy's headers and Authelia's cookie stay behind.
@@ -112,10 +112,10 @@ page says so).
 
 ## The inbox
 
-Haus puts the backups into `/eingang/<quelle>/…` (haus#207); `.teil/`,
+Homes puts the backups into `/eingang/<quelle>/…` (homes#207); `.teil/`,
 every dot-entry and `letzte/` are never read as inbox. A file counts once
 its size and mtime stayed the same for a minute (as this process saw it —
-Haus sets the phone's mtime).
+Homes sets the phone's mtime).
 
 ### Signal: read while open, by msgvault's import-signal
 
@@ -169,7 +169,7 @@ a few minutes.
 
 The Briefkasten runs every 20 s whether the vault is open or closed, as
 soon as the vault has been made once (it needs the public key). It writes
-the public key into the inbox for the Haus app, keeps WhatsApp's newest
+the public key into the inbox for the Homes app, keeps WhatsApp's newest
 database in `letzte/` and encrypts WhatsApp's media there (below). Mail
 comes as packets (below). A packet is ONE file
 `/data/briefkasten/<UTC time>-<quelle>.age`, age-encrypted to the person's
@@ -204,11 +204,11 @@ then a packet of the same messages: still no duplicates.
 | Signal | the newest imported `signal-*.backup`, as the phone wrote it (encrypted by Signal) |
 | WhatsApp | `whatsapp/Databases/msgstore.db.crypt15`: the newest database, as the phone wrote it (encrypted by WhatsApp; a hard link — the inbox copies wait for the WhatsApp import), and `whatsapp/Media/<path>.age`: **every** media file, age-encrypted to the person's key — on the phone they are plaintext, so the plaintext leaves the inbox as soon as it is encrypted |
 
-Haus serves the database files straight from its own mount of the inbox.
-Media need the private key: Haus asks the archive,
-`GET /intern/whatsapp/medien/<path>` with `X-Archiv-Haus:
-<ARCHIV_HAUS_SECRET>`, answered only while the vault is open (423 while
-closed). `GET /intern/empfaenger` gives Haus the public key.
+Homes serves the database files straight from its own mount of the inbox.
+Media need the private key: Homes asks the archive,
+`GET /intern/whatsapp/medien/<path>` with `X-Archiv-Homes:
+<ARCHIV_HOMES_SECRET>`, answered only while the vault is open (423 while
+closed). `GET /intern/empfaenger` gives Homes the public key.
 
 ### Mail: fetched every hour, vault closed or open
 
@@ -251,12 +251,12 @@ any SMS Backup & Restore XML (an old Android SMS backup too).
 
 ### SMS and calls: encrypted on the phone
 
-The Haus app (switch „SMS und Anrufliste übertragen“, ADR 0029 §9) writes
+The Homes app (switch „SMS und Anrufliste übertragen“, ADR 0029 §9) writes
 the phone's SMS, MMS and call log as SMS Backup & Restore XML, encrypts
 each file with age to the Briefkasten's public key, and uploads it to
 `/eingang/sms/<name>.xml.age`. The key reaches the phone this way: the
 Briefkasten writes it into the inbox as `.briefkasten.pub` (a dot-file,
-never a backup), Haus serves it at `GET /napi/sicherung/schluessel`.
+never a backup), Homes serves it at `GET /napi/sicherung/schluessel`.
 
 These files need no packing: they are already unreadable on the box. When
 the vault opens, the Postbote decrypts each into the vault's work folder
@@ -267,7 +267,7 @@ the file leaves the inbox; one that cannot be decrypted stays, and the
 page says so. Attachments over 25 MiB fail msgvault's SMS import here
 (the packet path sets them aside, this one does not yet).
 
-Contacts take another way: Haus mirrors the phone's contacts into the
+Contacts take another way: Homes mirrors the phone's contacts into the
 person's Radicale address book `handy-kontakte`, outside the vault; the
 archive reads them from there (below, "Contacts and calendars").
 
@@ -296,7 +296,7 @@ beginning with `.` and renames it into place when complete.
 
 - **Encryption:** [age](https://age-encryption.org/v1) v1, one X25519
   recipient: the person's public key (`age1…`, from
-  `/data/briefkasten.pub`, or for Haus `GET /intern/empfaenger`). Any
+  `/data/briefkasten.pub`, or for Homes `GET /intern/empfaenger`). Any
   age-compatible library works (Kotlin: e.g. kage / jagged).
 - **Inside:** a POSIX tar (ustar or PAX), UTF-8 names, regular files only:
   1. `manifest.json` — **the first entry**:
@@ -348,9 +348,9 @@ archive. Both already live in the box's Radicale, outside the vault:
 
 | what | where in Radicale | who writes it there |
 |---|---|---|
-| the phone's contacts | `<person>/handy-kontakte/` | Haus (the Haus app mirrors the phone's address book daily) |
+| the phone's contacts | `<person>/handy-kontakte/` | Homes (the Homes app mirrors the phone's address book daily) |
 | the person's Google calendars | `<person>/google-<name>/` (not `google-kontakte`, a Takeout's address book) | laib's `kalender` service, every 15 minutes |
-| calendars made in Haus „nur für mich“ | `<person>/privat-<name>/` | Haus |
+| calendars made in Homes „nur für mich“ | `<person>/privat-<name>/` | Homes |
 
 While the vault is open the **Abgleich** (`abgleich.go`) reads them: at the
 opening, then every `KONTAKTE_TAKT` seconds (default 3 hours), and on
@@ -553,14 +553,14 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | what | value |
 |---|---|
 | image | `ghcr.io/mdopp/archiv:<sha>` (a database inside: pin, no `AutoUpdate`) |
-| env | `ARCHIV_PERSON=<login>` (required), `PROXY_SECRET=!secret …` (the route's proxySecret, sent as `X-Archiv-Proxy`), `ARCHIV_HAUS_SECRET=!secret …` (shared with Haus, for `/intern/…`), `TZ`, optional `PUBLIC_URL` (used in the status' fix sentences), `LEERLAUF` (s, default 7200) |
+| env | `ARCHIV_PERSON=<login>` (required), `PROXY_SECRET=!secret …` (the route's proxySecret, sent as `X-Archiv-Proxy`), `ARCHIV_HOMES_SECRET=!secret …` (shared with Homes, for `/intern/…`), `TZ`, optional `PUBLIC_URL` (used in the status' fix sentences), `LEERLAUF` (s, default 7200) |
 | mounts | `${DATA_DIR}/archiv/<person>:/data:z` (the cipher folder, the Briefkasten, the keys, the status file; backed up), `${DATA_DIR}/archiv-eingang/<person>:/eingang:z` (read, write **and delete**: the archive removes packed backups and writes `letzte/`) |
 | backup: false | `${DATA_DIR}/archiv-eingang/<person>/letzte` **must not** be in restic (`backup: false`): it is itself a backup of the phone, and a 2.7 GB Signal file that changes every night would add 2.7 GB to restic every night. (The rest of the inbox is transient and need not be backed up either.) |
 | tmpfs | none needed: plaintext is only ever written inside the vault (its work folder). |
 | disk | reading a Signal backup needs its decrypted size free on `/data` for a few minutes; Signal backups wait in the inbox while the vault is closed, one per night. |
-| Haus' way in | `/intern/…` is on the same port 8080; Haus must reach it (host side, as Gesundheit's MCP port) with `X-Archiv-Haus: <ARCHIV_HAUS_SECRET>`. |
+| Homes' way in | `/intern/…` is on the same port 8080; Homes must reach it (host side, as Gesundheit's MCP port) with `X-Archiv-Homes: <ARCHIV_HOMES_SECRET>`. Until the box runs Homes (laib#1021 step 9) the legacy names `ARCHIV_HAUS_SECRET` and `X-Archiv-Haus` are accepted too (`intern.go`). |
 | FUSE | `AddDevice=/dev/fuse`, `AddCapability=SYS_ADMIN` (mount in the container's own user and mount namespace). On the runner Docker also needed `--security-opt apparmor=unconfined`; on Fedora CoreOS SELinux may need its own label option — unproven. |
-| user | the supervisor runs as the container's root (it mounts, and msgvault's key file must belong to the process user). Rootless podman maps that root to the service user; no `UserNS=keep-id`. The inbox folder is shared with Haus: the archiv container must be able to delete what Haus wrote there (write permission on the folders Haus makes, which it makes 0775). |
+| user | the supervisor runs as the container's root (it mounts, and msgvault's key file must belong to the process user). Rootless podman maps that root to the service user; no `UserNS=keep-id`. The inbox folder is shared with Homes: the archiv container must be able to delete what Homes wrote there (write permission on the folders Homes makes, which it makes 0775). |
 | port | the container listens on `8080` (pages, msgvault proxy); publish `127.0.0.1:<port>:8080`, `lan: false`. msgvault's `8090` stays inside. |
 | health | `http://127.0.0.1:<port>/healthz` (answers in every state) |
 | status | `status: file: ${DATA_DIR}/archiv/<person>/laib-status.json` |
@@ -582,7 +582,7 @@ passphrase, a refused mail login) stay yellow and say what to enter.
   taken into the real msgvault on opening — an SMS and an MMS with a picture
   arrive, and a packet of messages msgvault already has adds nothing; a mail
   packet through the real `import-maildir`; WhatsApp media encrypted into
-  `letzte/` and given back to Haus only while open; a non-backup in
+  `letzte/` and given back to Homes only while open; a non-backup in
   `signal/` fails with the sentence, stays, and leaves nothing in the
   vault's work folder or the Briefkasten; the Signal passphrase inside the
   vault (0600) and nowhere in `/data` while closed, and one left in the old
@@ -619,7 +619,7 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 - **Unproven**: a real phone's Signal backup through `import-signal` (CI's
   backup is generated and tiny; the box's first one is the proof, with its
   time, the RAM signalbackup-tools needs and the disk the decrypted folder
-  takes); SMS and calls from the Haus app (built, not yet on a
+  takes); SMS and calls from the Homes app (built, not yet on a
   phone); WhatsApp on a real backup (the decryption is proven on a
   generated one in `integration.sh`, msgvault's import of a real msgstore
   is not); how much RAM signalbackup-tools needs for a larger backup (it
@@ -627,7 +627,7 @@ passphrase, a refused mail login) stay yellow and say what to enter.
   a passkey cannot be read out).
 - **What import-signal leaves out** (msgvault's own list): SMS, MMS and
   calls Signal kept as the phone's SMS app (the phone's SMS come through
-  the Haus app instead), group and safety-number updates, timer changes,
+  the Homes app instead), group and safety-number updates, timer changes,
   payments and other events; stories and story replies; messages deleted
   for everyone; scheduled messages not yet sent; earlier versions of an
   edited message (the newest text stays, marked as edited); legacy groups

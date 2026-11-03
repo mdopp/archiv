@@ -12,11 +12,11 @@ import (
 	"time"
 )
 
-// The inbox (ADR 0029 §4): Haus writes the person's phone backups into
+// The inbox (ADR 0029 §4): Homes writes the person's phone backups into
 // /eingang/<quelle>/…, still encrypted by the messenger, its partials in
 // /eingang/.teil/. A dot-entry is never a backup. A file is imported only
 // when it is stable: the same size and mtime for Ruhe, as seen by this
-// process (Haus sets the phone's mtime, so the mtime alone says nothing
+// process (Homes sets the phone's mtime, so the mtime alone says nothing
 // about when the file arrived).
 
 // Quellen are the inbox folders, in the order the page shows them. The
@@ -34,11 +34,11 @@ func istSicherung(quelle, rel string) bool {
 	switch quelle {
 	case "signal":
 		return strings.HasPrefix(name, "signal-") && strings.HasSuffix(name, ".backup")
-	case "whatsapp": // Databases/msgstore.db.crypt15 and the copies Haus keeps beside it (.crypt15.<YYYYMMDD-HHMMSS>); not Media/
+	case "whatsapp": // Databases/msgstore.db.crypt15 and the copies Homes keeps beside it (.crypt15.<YYYYMMDD-HHMMSS>); not Media/
 		return !strings.HasPrefix(rel, "Media/") && strings.HasPrefix(name, "msgstore") && strings.Contains(name, ".crypt15")
 	case "discord":
 		return strings.HasSuffix(strings.ToLower(name), ".zip")
-	case "sms": // SMS Backup & Restore XML (messages or calls), age-encrypted on the phone by the Haus app
+	case "sms": // SMS Backup & Restore XML (messages or calls), age-encrypted on the phone by the Homes app
 		return strings.HasSuffix(name, ".xml.age")
 	}
 	return false
@@ -51,7 +51,7 @@ type Datei struct {
 	Rel     string // below the source's folder
 	Groesse int64
 	Mtime   time.Time
-	Seit    time.Time // when it arrived (ctime: the rename into place and Haus' chtimes set it)
+	Seit    time.Time // when it arrived (ctime: the rename into place and Homes' chtimes set it)
 }
 
 func (d Datei) schluessel() string { return d.Pfad }

@@ -1,7 +1,7 @@
 // archiv: one person's message archive (laib ADR 0029). A small
 // supervisor around msgvault: it keeps the archive in a gocryptfs vault
 // that only the person's password opens, starts msgvault while it is
-// open, imports the phone backups Haus leaves in the inbox and the mail
+// open, imports the phone backups Homes leaves in the inbox and the mail
 // it fetches over IMAP, closes the
 // vault again after two idle hours, and writes laib's status file.
 package main
@@ -85,7 +85,7 @@ func main() {
 		ab.Relais = &Relais{Person: person, Port: relaisPort}
 	}
 	tresor.Vorbereiten = ab.Vorbereiten
-	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HausSecret: os.Getenv("ARCHIV_HAUS_SECRET"),
+	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HomesSecret: homesSecret(os.Getenv),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
 		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}}
 

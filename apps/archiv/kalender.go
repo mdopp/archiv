@@ -15,7 +15,7 @@ import (
 
 // Calendars in the archive (owner, 2026-11-02): while the vault is open
 // the archive reads the person's calendars from Radicale (google-*,
-// mirrored there by laib's kalender; privat-*, made in Haus) and keeps
+// mirrored there by laib's kalender; privat-*, made in Homes) and keeps
 // every event it has ever seen, inside the vault: one file per calendar,
 // kalender/<name>.json. msgvault 0.22.0 has no CalDAV import, so this
 // store is the archive's own. It only grows: an event is keyed by UID and

@@ -26,7 +26,7 @@ var tag = time.Date(2026, 10, 1, 3, 0, 0, 0, time.UTC)
 func TestEingangIgnoresDotEntriesAndOtherFiles(t *testing.T) {
 	dir := t.TempDir()
 	legen(t, dir, "signal/signal-2026-10-01-03-00-00.backup", 10, tag)
-	legen(t, dir, ".teil/0123", 10, tag)                                // Haus' partials
+	legen(t, dir, ".teil/0123", 10, tag)                                // Homes' partials
 	legen(t, dir, "signal/.signal-2026-10-02-03-00-00.backup", 10, tag) // hidden
 	legen(t, dir, "signal/.zwischen/signal-2026-10-03-03-00-00.backup", 10, tag)
 	legen(t, dir, "signal/notizen.txt", 10, tag)
