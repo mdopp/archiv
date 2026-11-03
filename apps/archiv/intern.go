@@ -18,7 +18,8 @@ import (
 //
 //	GET /intern/empfaenger                 the person's public key (age), for a packet made elsewhere
 //	GET /intern/whatsapp/medien/<pfad>     one WhatsApp media file from letzte/, decrypted — only
-//	                                       while the vault is open (the private key is inside)
+//	                                       while the vault is open (the private key is inside);
+//	                                       with Range, so a phone resumes a large video
 //
 // The signal and WhatsApp database backups in letzte/ are encrypted by
 // the messengers themselves; Haus serves those straight from the inbox
@@ -76,7 +77,15 @@ func (w *Web) medium(rw http.ResponseWriter, r *http.Request, rel string) {
 		return
 	}
 	defer f.Close()
-	klar, err := age.Decrypt(f, id)
+	fi, err := f.Stat()
+	if err != nil || !fi.Mode().IsRegular() {
+		jsonFehler(rw, http.StatusNotFound, "Diese Datei gibt es nicht.")
+		return
+	}
+	// decrypted chunk by chunk where it is read: a Range (a phone resuming a
+	// large video) costs only the chunks it touches, and the plaintext's
+	// length is known before the first byte (Content-Length)
+	klar, groesse, err := age.DecryptReaderAt(f, fi.Size(), id)
 	if err != nil {
 		log.Printf("archiv: Medium %s: %v", rel, err)
 		jsonFehler(rw, http.StatusInternalServerError, "Diese Datei ließ sich nicht entschlüsseln. Sag dem Admin Bescheid.")
@@ -88,8 +97,5 @@ func (w *Web) medium(rw http.ResponseWriter, r *http.Request, rel string) {
 	}
 	rw.Header().Set("Content-Type", typ)
 	rw.Header().Set("Cache-Control", "no-store")
-	if r.Method == http.MethodHead {
-		return
-	}
-	io.Copy(rw, klar)
+	http.ServeContent(rw, r, "", fi.ModTime(), io.NewSectionReader(klar, 0, groesse))
 }
