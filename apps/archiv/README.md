@@ -576,7 +576,8 @@ inside the open vault; closed, there is no net, not even in memory.
   `archiv-umfeld`, version 1: the photos' ids, times, places and persons,
   the names and Immich's birthdays, the contacts with their family name,
   birthday and streets, the ties, the household's cards as last read),
-  `verborgen.json` (who is hidden) and `antworten.json` (step 2). Every round reads everything
+  `verborgen.json` (who is hidden), `antworten.json` (step 2),
+  `gruppen.json` and `hinweise.json` (step 5). Every round reads everything
   again and rebuilds (a merge or a rename in Immich cannot drift); Immich
   out of reach keeps the last photos.
 - **When**: at the opening, then every `UMFELD_TAKT` seconds (default an
@@ -596,19 +597,25 @@ inside the open vault; closed, there is no net, not even in memory.
   „Steht nahe“ with its reasons, never a question and never written to
   an address book — so a Freund/in, Kollege/Kollegin or Nachbar/in
   between two people is not asked. Asked are, in this order: pairs with
-  the person („du“); the derived relations (step 6); the family circle
+  the person („du“); the active groups (step 5); the derived relations
+  (step 6); the family circle
   (the person, her relatives — answered or a phone book's relation, from
   relative to relative — and everyone with the family name of one of
   them, each pair, tie or not); then two others of the same family name
   (umlauts alike), or whose shared address suggests family, with a tie.
   A tie needs two photo days, something a phone book says, or two
   conversations; weaker is never asked. Within each group a derived one
-  first, then the strongest tie. A kind is suggested deterministically:
-  „Oma“/„Opa“/„Tante“/„Onkel“ in a name toward the person; the same
+  first, then the strongest tie. A kind is suggested: a relation word a
+  name begins with toward the person („Oma Hilde“, „Mama“,
+  „Schwiegermutter Hedwig“; `beziehungswoerter.yml`, step 5), such a
+  contact asked even without a tie; what the box's model read in their
+  messages (step 5); the same
   family name and address with the age gap (Geschwister, Partner/in,
-  Eltern/Kind, Großeltern/Enkel, else verwandt); the same address and
-  under 12 years apart Partner/in; the same firm Kollege/Kollegin; the
-  same street, another house Nachbar/in; five photo days or more without
+  Eltern/Kind, Großeltern/Enkel, else verwandt); a group named Familie
+  (sonstige verwandt); the same address and under 12 years apart
+  Partner/in; the same firm Kollege/Kollegin; a group named Arbeit,
+  Nachbarschaft or Freundeskreis; the same street, another house
+  Nachbar/in; five photo days or more without
   a sign of family Freund/in. The cards give N, BDAY and ADR for it,
   Immich the persons' `birthDate`. The kinds: Partner/in, Ex-Partner/in,
   Eltern, Kind, Geschwister, Großeltern, Enkel/in, Onkel/Tante,
@@ -693,6 +700,75 @@ inside the open vault; closed, there is no net, not even in memory.
   request body; `archiv umfeld-gespraeche < antwort.json` reads an answer
   as a round does (`integration.sh` runs both against the real msgvault).
 
+**Step 5:** relation hints: words, groups, the box's model (owner
+2026-11-11: „Kombination aus Schlagwort suche und LLM … Vorher sollten
+aktive Gruppen vom Benutzer kategorisiert werden“).
+
+- **The words** are one file, `beziehungswoerter.yml` (built into the
+  image; `woerter.go`): kinship and affection words in German, English,
+  Spanish, French, Turkish, Polish, Russian (also transliterated) and
+  Arabic (transliterated and a few in its script), each with the kinds it
+  hints at, the suggestion first; the words of a group title with the
+  category they suggest; and the words that are also names (`Anne`,
+  `Hala`), which never make a suggestion from a contact's name. Words
+  compare as `klar` does and with accents dropped: „Schwägerin“ is
+  „SCHWAEGERIN“ and „Schwagerin“, „kardeşim“ is „kardesim“; never inside
+  another word („Tomate“, „Europa“). `go test` checks the file.
+- **Names and titles (no model):** a contact whose name begins with such a
+  word is asked toward the person with that kind („Mama“ → Mutter/Vater,
+  „„Mama“ im Namen“); a group's title suggests its category („Familie
+  Dopp“ → Familie, „Eltern 3b“ → Elterngruppe, „Oma & Opa“ → Familie).
+- **Groups first** (`gruppen.go`): an active group chat (3 to 30 members,
+  a title, two members the phone books know, a message in the last 12
+  months) is a question after the person's own pairs: „Wie würdest du die
+  Gruppe „…“ nennen?“ with its members' initials (no message) and the
+  chips Familie, Freundeskreis, Verein, Arbeit, Klasse, Elterngruppe,
+  Nachbarschaft, Reisegruppe, Politik, Sonstiges, the title's suggestion
+  marked, and Später. One tap keeps it in the vault
+  (`/run/tresor/umfeld/gruppen.json`, 0600), never in an address book;
+  the toast has Rückgängig, „Deine Gruppen“ (`/tresor/umfeld`) Vergessen.
+  What it does: Familie (the person's) puts the members into the family
+  circle, so pairs among them are asked, suggested „sonstige verwandt“;
+  Arbeit gives „Kollege/Kollegin (Gruppe „…“)“, Elterngruppe „Eltern aus
+  „…““, Klasse „aus der Klasse „…““, Verein, Freundeskreis, Nachbarschaft,
+  Reisegruppe and Politik their own reason on „Steht nahe“ (at most two a
+  tie); Arbeit, Nachbarschaft and Freundeskreis also a suggestion. A
+  title's category counts for reasons and suggestions until the person
+  answers; only the person's own Familie widens the circle.
+- **The model** (`hinweise.go`), only while the vault is open and the box
+  has one (`MODEL_URL`, laib's model role): each round asks msgvault (one
+  read-only statement, `messages.snippet` filtered by the words, the
+  newest 500, no list mail) and keeps the messages the file's words are
+  really in, whose sender and at least one recipient the phone books know
+  (in a chat the person is a recipient of what she did not send). At most
+  10 a round go to the model, one after the other, at most 3 per pair:
+  `POST $MODEL_URL/chat/completions` (`X-Laib-Background`, the model key,
+  `response_format: json_object`, temperature 0) with who wrote it to whom
+  as letters (A the sender; the person marked), what is known of them (the
+  person's answers, the phone books' relations, shared groups and their
+  categories, family names), the words found and the text (at most 600
+  characters). The answer must be one JSON object
+  `{"beziehungen":[{"x","y","art","sicher"}]}` and nothing else; a
+  relation needs two known letters, a kind of the questions and a
+  sureness from 0 to 1. Readings of 0.7 or more add up per pair and
+  kind; the kind with the most, alone, is the pair's suggestion, the cue
+  its reason („Vorschlag, weil Kim dir „Hallo Mama, kommst du“
+  schreibt.“), and a family kind makes the pair a question even without a
+  tie. Nothing is set without the person's tap.
+- **Kept**: per message msgvault's id, when, the sender's and recipients'
+  nodes, the cue (a few words around the word) and the readings, in
+  `/run/tresor/umfeld/hinweise.json` (0600): no message is sent twice.
+  Before it sends, the round asks the lease (`MODEL_LEASE`, `GET`): any
+  window standing, or the proxy refusing (409, 429, 503), or no answer,
+  and the rest waits for a later round; nothing piles up. Nothing of a
+  text or an answer is logged (counts only); the text leaves the vault
+  only in the request to the box's own model.
+- `archiv umfeld-hinweise -sql` prints the statement as msgvault's request
+  body (`-wort w`: with one word instead, for the fixtures);
+  `archiv umfeld-hinweise < antwort.json` reads an answer as a round does,
+  one line a message without its text (`integration.sh` runs both against
+  the real msgvault).
+
 **Step 6:** derived relations (`abgeleitet.go`).
 
 - From what is known — answers and the phone books' relations — follow
@@ -720,8 +796,7 @@ inside the open vault; closed, there is no net, not even in memory.
 - Names compare with umlauts spelled out (`klar`): „Jürgen Groß“ is
   „Juergen Gross“, case and accents aside.
 
-Not yet (steps 3–7): group chats and mail threads, the pair page, group
-suggestions, derived relations, the family tree.
+Not yet: the pair page, the family tree.
 
 ## Status for laib
 
@@ -774,6 +849,7 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | stop | `TimeoutStopSec` ≥ 90: closing stops msgvault (≤ 30 s) and unmounts |
 | Radicale (contacts, calendars) | `RADICALE_URL=http://host.containers.internal:5232` (Radicale's root, no path), `RADICALE_USER=archiv-<person>`, and that account's password as a file: `Secret=<the instance's ARCHIV_RADICALE_PASSWORD>,type=mount,target=radicale-password` (read from `RADICALE_PASSWORD_FILE`, default `/run/secrets/radicale-password`; never an environment variable). Without `RADICALE_URL` and `RADICALE_USER` the page says the box has not set it up. Optional: `KONTAKTE_TAKT` (s, default 10800), `KONTAKTE_RELAIS_PORT` (default 18443, inside the container only). |
 | Immich (Umfeld) | `IMMICH_URL=http://host.containers.internal:2283` (Immich's root; `uses: [immich]`). The key is the person's own, entered on the page, never the template's. Optional: `UMFELD_TAKT` (s, default 3600). |
+| the box's model (Umfeld, step 5) | `MODEL_URL`, `MODEL_LEASE`, `MODEL_KEY` (laib's builtins as a pod reaches them: `http://host.containers.internal:11435/v1`, `…/api/model-lease`, the model key) and `MODEL_NAME` (the household preset, used when the lease names none). Without `MODEL_URL` no message goes anywhere; names, titles and groups still give their hints. |
 | Homes (answers) | `ARCHIV_HOMES_INTERN=http://host.containers.internal:8650` (Homes' own port on the box, where an answer is written; laib's template sets it). The packet is signed with `ARCHIV_HOMES_SECRET`; without either, answers stay in the vault and the card says so. |
 | Radicale account and rights | an LLDAP account `archiv-<person>` per instance (seeded like `kalender`, its password the instance's generated secret), and in `templates/radicale/pre-start`'s rights, **right after `[root]`** (before every `user: .+`/`(.+)` section): `[archiv-home]` user `archiv-(.+)`, collection `{0}`, permissions `R`; `[archiv-lesen]` user `archiv-(.+)`, collection `{0}/(handy-kontakte\|google-(?!kontakte(/\|$))[^/]+\|privat-[^/]+)(/.*)?`, permissions `r`; `[archiv-sonst-nichts]` user `archiv-.+`, collection `.*`, permissions empty. `integration.sh` runs these rights in a real Radicale. For Umfeld (archiv#27) the account also reads `homes/haushalt-kontakte` (read only; the laib template change and its ADR 0029 amendment bring that right); until then the archive gets 403 there and the page says the household book is missing. |
 | backup | do not quiesce by stopping the unit (that locks the vault); while open, a snapshot catches a live SQLite in ciphertext — the restore is only as good as that moment. |

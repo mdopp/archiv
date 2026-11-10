@@ -109,13 +109,14 @@ type Knoten struct {
 // distinct photo days and Seit the first one's year (0 none); Fest what
 // the phone books say; Chats the group chats both are in and Mails the
 // messages of the mail threads both are in, Faeden how many threads
-// (gespraeche.go).
+// (gespraeche.go); Gruppen those group chats' ids (gruppen.go).
 type Kante struct {
 	A, B                 string
 	Staerke, Rang        float64
 	Tage, Seit           int
 	Fest                 []festBand
 	Chats, Mails, Faeden int
+	Gruppen              []string
 }
 
 // belegt: the tie has the evidence a tie needs to show at all: two photo
@@ -138,6 +139,15 @@ type Netz struct {
 	von       map[string]string // node by contact key
 	kanten    map[string][]*Kante
 	ich       string
+	// gespraech are the table's conversations by id, paarGruppen the group
+	// chats each pair shares (by paarKey, tie or not), gruppen the person's
+	// categories (gruppen.go), gelesen what the box's model read in the
+	// messages and hinweise its relations by pair (hinweise.go).
+	gespraech   map[string]netzGespraech
+	paarGruppen map[string][]string
+	gruppen     map[string]gruppenAntwort
+	gelesen     map[string]gelesen
+	hinweise    map[string]paarHinweis
 }
 
 // neuesNetz builds the net of st with the hidden ones and the answers.
@@ -152,6 +162,7 @@ func neuesNetz(st netzTabelle, verborgen map[string]string, antworten map[string
 	if n.st.Namen == nil {
 		n.st.Namen = map[string]string{}
 	}
+	n.gruppen, n.gelesen, n.hinweise = map[string]gruppenAntwort{}, map[string]gelesen{}, map[string]paarHinweis{}
 	n.bauen()
 	return n
 }
@@ -186,6 +197,10 @@ func (n *Netz) bauen() {
 		nicht[id] = art == verbergenNicht
 	}
 	n.knoten, n.von, n.kanten = map[string]Knoten{}, map[string]string{}, map[string][]*Kante{}
+	n.gespraech = map[string]netzGespraech{}
+	for _, g := range n.st.Gespraeche {
+		n.gespraech[g.ID] = g
+	}
 	for id, name := range n.st.Namen {
 		n.knoten[id] = Knoten{ID: id, Name: name}
 	}
@@ -433,6 +448,7 @@ func (n *Netz) Gruende(mitte string, k Kante) string {
 	out = append(out, gespraechGruende(k)...)
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	out = append(out, n.gruppenGruende(k)...)
 	for _, f := range k.Fest {
 		switch {
 		case f.Gesagt:

@@ -204,6 +204,7 @@ func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mit
 			fmt.Fprintf(&b, `<p class=weiter-in><a href="/tresor?tab=fragen">%s</a></p>`, esc(anzahl(len(jetzt), "Frage", "Fragen")+" zum Nachbessern"))
 		}
 		w.antwortenListe(&b, n, "/tresor/umfeld")
+		gruppenListe(&b, n, "/tresor/umfeld")
 		b.WriteString(w.toast(n, r.URL.Query().Get("getan"), "/tresor/umfeld"))
 	}
 	fmt.Fprintf(&b, `<p class=hinweis>%s</p>`, esc(saysUmfeldHinweis))

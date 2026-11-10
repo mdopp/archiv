@@ -103,13 +103,23 @@ type merkmale struct {
 // relations already known (abgeleitet.go), Weil names them; such a pair
 // may have no tie (Kante then holds only A and B). Konflikt: the
 // derivation disagrees with an answer or with another derivation.
+// Gruppe: no pair but „Wie würdest du die Gruppe … nennen?“ (gruppen.go).
 type Frage struct {
 	X, Y                 Knoten
 	Ich                  bool
 	Kante                Kante
 	Vorschlag, Weil      string
 	Abgeleitet, Konflikt bool
+	Gruppe               *GruppenFrage
 	regel                int
+}
+
+// key is the question's: the pair's, or the group's.
+func (f Frage) key() string {
+	if f.Gruppe != nil {
+		return gruppeKey(f.Gruppe.ID)
+	}
+	return paarKey(f.X.ID, f.Y.ID)
 }
 
 var errFrageWeg = errors.New("Umfeld: diese Frage gibt es nicht mehr")
@@ -122,7 +132,7 @@ func datumVon(s string) time.Time { t, _ := time.Parse("2006-01-02", s); return 
 // none for „Oma Hilde“ (a given name).
 func nachname(family, name string) string {
 	ws := strings.Fields(name)
-	if family == "" && len(ws) > 1 && rufnamen[strings.ToLower(ws[0])] == "" {
+	if wort, _ := woerter.imNamen(name); family == "" && len(ws) > 1 && wort == "" {
 		family = ws[len(ws)-1]
 	}
 	return klar(family)
@@ -210,8 +220,17 @@ func (n *Netz) Portion(seit time.Time) (jetzt, weitere []Frage) {
 			getan++
 		}
 	}
+	for _, a := range n.gruppen {
+		if !a.Am.Before(seit) {
+			getan++
+		}
+	}
 	for _, f := range n.offen() {
-		a, da := n.antworten[paarKey(f.X.ID, f.Y.ID)]
+		a, da := n.antworten[f.key()]
+		if f.Gruppe != nil {
+			g, gda := n.gruppen[f.Gruppe.ID]
+			a, da = antwort{Art: g.Kategorie, Am: g.Am}, gda
+		}
 		if len(jetzt) < fragenJeBesuch-getan && !(da && a.Art == artSpaeter && !a.Am.Before(seit)) {
 			jetzt = append(jetzt, f)
 		} else {
@@ -273,13 +292,18 @@ func (n *Netz) familienkreis() map[string]bool {
 			kreis[id] = true
 		}
 	}
+	for _, id := range n.familienGruppen() { // a group the person named Familie
+		kreis[id] = true
+	}
 	return kreis
 }
 
 // offen are the open questions, none about a hidden person, in the order
-// of „What is asked“: the person's, the derived between others, the
-// family circle, then the rest; within each a derived one first, then
-// the strongest tie; the skipped last. n.mu is held.
+// of „What is asked“: the person's, the active groups (gruppen.go), the
+// derived between others, the family circle, then the rest; within each a
+// derived one first, then the strongest tie; the skipped last. A pair a
+// name's word or the box's model points to family (hinweise.go) is asked
+// with or without a tie. n.mu is held.
 func (n *Netz) offen() (out []Frage) {
 	offenesPaar := func(a, b string) bool { // shown, no answer but Später, no relation in a phone book
 		return a != b && n.sichtbar(a) && n.sichtbar(b) && !n.imBuchBeziehung(a, b) &&
@@ -333,8 +357,19 @@ func (n *Netz) offen() (out []Frage) {
 			}
 		}
 	}
+	for _, p := range n.hinweisPaare() { // a name's word, the model's reading: ties or not
+		if !gesehen[paarKey(p[0], p[1])] && offenesPaar(p[0], p[1]) {
+			gesehen[paarKey(p[0], p[1])] = true
+			fragen(p[0], p[1], n.kanteZwischen(p[0], p[1]), true)
+		}
+	}
+	out = append(out, n.gruppenFragen()...)
 	spaeter := func(f Frage) int {
-		if n.antworten[paarKey(f.X.ID, f.Y.ID)].Art == artSpaeter {
+		art := n.antworten[f.key()].Art
+		if f.Gruppe != nil {
+			art = n.gruppen[f.Gruppe.ID].Kategorie
+		}
+		if art == artSpaeter {
 			return 1
 		}
 		return 0
@@ -343,12 +378,14 @@ func (n *Netz) offen() (out []Frage) {
 		switch {
 		case f.Ich:
 			return 0
-		case f.Abgeleitet:
+		case f.Gruppe != nil:
 			return 1
-		case kreis[f.X.ID] && kreis[f.Y.ID]:
+		case f.Abgeleitet:
 			return 2
+		case kreis[f.X.ID] && kreis[f.Y.ID]:
+			return 3
 		}
-		return 3
+		return 4
 	}
 	abgeleitetZuerst := func(f Frage) int {
 		if f.Abgeleitet {
@@ -358,7 +395,7 @@ func (n *Netz) offen() (out []Frage) {
 	}
 	slices.SortFunc(out, func(a, b Frage) int {
 		return cmp.Or(cmp.Compare(spaeter(a), spaeter(b)), cmp.Compare(gruppe(a), gruppe(b)), cmp.Compare(abgeleitetZuerst(a), abgeleitetZuerst(b)),
-			cmp.Compare(a.regel, b.regel), cmp.Compare(b.Kante.Rang, a.Kante.Rang), strings.Compare(paarKey(a.X.ID, a.Y.ID), paarKey(b.X.ID, b.Y.ID)))
+			cmp.Compare(a.regel, b.regel), cmp.Compare(b.Kante.Rang, a.Kante.Rang), cmp.Compare(gruppenZeit(b), gruppenZeit(a)), strings.Compare(a.key(), b.key()))
 	})
 	return out
 }
@@ -371,18 +408,26 @@ func (n *Netz) kanteZwischen(x, y string) Kante {
 			return *k
 		}
 	}
-	return Kante{A: min(x, y), B: max(x, y)}
+	return Kante{A: min(x, y), B: max(x, y), Gruppen: n.paarGruppen[paarKey(x, y)]}
 }
 
-// rufnamen are a name's first words that say the relation to the person.
-var rufnamen = map[string]string{"oma": "grosseltern", "opa": "grosseltern", "tante": "onkel", "onkel": "onkel"}
+// gruppenZeit orders group questions, the newest first; 0 for a pair.
+func gruppenZeit(f Frage) int64 {
+	if f.Gruppe == nil {
+		return 0
+	}
+	return f.Gruppe.zuletzt.Unix()
+}
 
-// vorschlag is the kind X likely is of Y, and why; "" none. Deterministic,
-// no gender guessed: a „Oma“ in the name toward the person; the same
-// family name and address make family, the age gap its kind; the same
-// address and a similar age Partner/in; the same firm Kollege/Kollegin;
-// the same street, another house Nachbar/in; many photo days without a
-// sign of family (both family names known and different) Freund/in.
+// vorschlag is the kind X likely is of Y, and why; "" none. No gender
+// guessed: a relation word a name begins with toward the person („Oma
+// Hilde“, beziehungswoerter.yml); what the box's model read in their
+// messages (hinweise.go); the same family name and address make family,
+// the age gap its kind; a group named Familie; the same address and a
+// similar age Partner/in; the same firm Kollege/Kollegin; a group named
+// Arbeit, Nachbarschaft or Freundeskreis; the same street, another house
+// Nachbar/in; many photo days without a sign of family (both family names
+// known and different) Freund/in.
 func (n *Netz) vorschlag(x, y string, k *Kante) (string, string) {
 	mx, my := n.merkmale[x], n.merkmale[y]
 	fest := func(art string) bool {
@@ -395,25 +440,53 @@ func (n *Netz) vorschlag(x, y string, k *Kante) (string, string) {
 	}
 	aelter := mx.geb.Before(my.geb)
 	abstand := fmt.Sprintf("%d Jahre Altersunterschied", int(math.Round(jahre)))
-	erstes, _, _ := strings.Cut(n.knoten[x].Name, " ")
+	wort, wortArten := n.namensWort(x)
+	h, hinweis := n.hinweise[paarKey(x, y)]
+	if hinweis && h.X != x {
+		h.Art = cmp.Or(gegen[h.Art], h.Art)
+	}
+	gArt, gWeil := n.gruppenVorschlag(k)
 	const weilFamilie = "gleicher Nachname und gleiche Adresse"
 	switch {
-	case y == n.ich && rufnamen[strings.ToLower(erstes)] != "":
-		return rufnamen[strings.ToLower(erstes)], "„" + erstes + "“ im Namen"
+	case y == n.ich && wort != "":
+		return wortArten[0], "„" + wort + "“ im Namen"
+	case hinweis:
+		return h.Art, h.Weil
 	case fest(bandAdresse) && familie && jahre < 0:
 		return "verwandt", weilFamilie
 	case fest(bandAdresse) && familie:
 		return familienArt(jahre, aelter, n.now(), mx.geb, my.geb), weilFamilie + ", " + abstand
+	case gArt == "verwandt":
+		return gArt, gWeil
 	case fest(bandAdresse) && jahre >= 0 && jahre < 12:
 		return "partner", "gleiche Adresse, " + abstand
 	case fest(bandFirma):
 		return "kollege", "gleiche Firma"
+	case gArt != "":
+		return gArt, gWeil
 	case !fest(bandAdresse) && slices.ContainsFunc(mx.strassen, func(s string) bool { return slices.Contains(my.strassen, s) }):
 		return "nachbar", "gleiche Straße, anderes Haus"
 	case mx.family != "" && my.family != "" && !familie && k.Tage >= freundTage:
 		return "freund", anzahlT(k.Tage, "Tag", "Tage") + " zusammen auf deinen Fotos, kein Zeichen von Familie"
 	}
 	return "", ""
+}
+
+// namensWort is the relation word one of x's names begins with („Oma
+// Hilde“: Immich's name or a contact's), and its kinds; n.mu is held.
+func (n *Netz) namensWort(x string) (string, []string) {
+	namen := []string{n.knoten[x].Name}
+	for _, k := range n.st.Kontakte {
+		if cmp.Or(k.Person, k.Key) == x {
+			namen = append(namen, k.Name)
+		}
+	}
+	for _, name := range namen {
+		if wort, arten := woerter.imNamen(name); wort != "" {
+			return wort, arten
+		}
+	}
+	return "", nil
 }
 
 // familienArt is the kind within one family at one address, by the age gap.
@@ -446,7 +519,7 @@ func (n *Netz) Beantworten(x, y, art string) (Frage, map[string]antwort, error) 
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	fs := n.offen()
-	i := slices.IndexFunc(fs, func(f Frage) bool { return paarKey(f.X.ID, f.Y.ID) == paarKey(x, y) })
+	i := slices.IndexFunc(fs, func(f Frage) bool { return f.Gruppe == nil && paarKey(f.X.ID, f.Y.ID) == paarKey(x, y) })
 	if i < 0 || !gueltig(art) {
 		return Frage{}, nil, errFrageWeg
 	}

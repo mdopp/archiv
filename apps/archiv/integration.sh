@@ -283,6 +283,20 @@ grep -qx "chat 3 1 false Familie" <<<"$gespraeche" || { cat "$D/gespraeche-antwo
 if grep -q '^chat 2 ' <<<"$gespraeche"; then fail "a chat of two counted as a group"; fi
 grep -q "^mail 2 [12] false$" <<<"$gespraeche" || { cat "$D/gespraeche-antwort.json"; fail "Ben's mails to Anna are no thread of two"; }
 
+echo "Umfeld (archiv#27): the statement for messages with a relation word, against the real msgvault's views"
+docker exec archiv archiv umfeld-hinweise -sql >"$D/hinweise.json"
+code=$(curl -s -o "$D/hinweise-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/hinweise.json" "$U/api/v1/query")
+[ "$code" = 200 ] || { cat "$D/hinweise-antwort.json"; fail "msgvault refuses the relation words' statement: $code"; }
+docker exec -i archiv archiv umfeld-hinweise <"$D/hinweise-antwort.json" || fail "the relation words' answer does not read"
+# the fixtures' SMS say „Hallo eins“ and „Hallo zwei“: with the one word „hallo“ the same statement finds both
+docker exec archiv archiv umfeld-hinweise -sql -wort hallo >"$D/hallo.json"
+code=$(curl -s -o "$D/hallo-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/hallo.json" "$U/api/v1/query")
+[ "$code" = 200 ] || { cat "$D/hallo-antwort.json"; fail "msgvault refuses the statement with one word: $code"; }
+hallo=$(docker exec -i archiv archiv umfeld-hinweise <"$D/hallo-antwort.json") || fail "the answer does not read: $hallo"
+echo "$hallo"
+[ "$(grep -c . <<<"$hallo")" -ge 2 ] || { cat "$D/hallo-antwort.json"; fail "the statement found no message with „hallo“"; }
+grep -q "von=1" <<<"$hallo" || { cat "$D/hallo-antwort.json"; fail "no sender read for a message"; }
+
 docker stop -t 90 archiv >/dev/null
 docker logs archiv >"$D/log" 2>&1
 grep -q "abgeschlossen (Container hält an)" "$D/log" || fail "stopping the container did not close the vault"

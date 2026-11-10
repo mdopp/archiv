@@ -299,6 +299,7 @@ type gespraechSumme struct {
 // new tie from gespraecheMin conversations on.
 func (n *Netz) gespraecheDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
 	summen := map[[2]string]*gespraechSumme{}
+	n.paarGruppen = map[string][]string{}
 	for _, g := range n.st.Gespraeche {
 		if !g.zaehlt() {
 			continue
@@ -322,6 +323,7 @@ func (n *Netz) gespraecheDazu(alle map[[2]string]*Kante, nicht map[string]bool) 
 				s.s += w
 				if g.Art == gespraechChat {
 					s.chats++
+					n.paarGruppen[paarKey(a, b)] = append(n.paarGruppen[paarKey(a, b)], g.ID)
 				} else {
 					s.faeden++
 					s.mails += g.Nachrichten
@@ -340,7 +342,7 @@ func (n *Netz) gespraecheDazu(alle map[[2]string]*Kante, nicht map[string]bool) 
 		}
 		add := min(s.s, gespraechDeckel)
 		k.Staerke, k.Rang = k.Staerke+add, k.Rang+add
-		k.Chats, k.Mails, k.Faeden = s.chats, s.mails, s.faeden
+		k.Chats, k.Mails, k.Faeden, k.Gruppen = s.chats, s.mails, s.faeden, n.paarGruppen[paarKey(key[0], key[1])]
 	}
 }
 
