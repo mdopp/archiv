@@ -99,7 +99,17 @@ page says so).
   `Remote-User` = `ARCHIV_PERSON`. Another signed-in person: 403. Neither: 401.
   A form posted from another origin: 403.
 - `/tresor…` — the supervisor's pages (`/tresor/stand` is the state as JSON,
-  for Homes' control).
+  for Homes' control). Open, `/tresor` is the workplace (owner 2026-11-10,
+  in Homes' look: its tokens, rows, pills and quiet lines, phone width
+  first): a top bar with „Abschließen“, the search (`/tresor/suche`: the
+  contacts whose name matches — umlauts and their spelled-out form, and
+  case, count the same, „Jürgen“ finds „Juergen Burger“ — then msgvault's
+  own full-text page, in the other spelling too), then **Fragen** (one
+  question at a time, „Ist das dieselbe Person?“ below), **Steht nahe**,
+  and **Stammbaum** (its place; a later step). The sources are one line
+  („✓ aktuell“, what runs, or what needs the person); their details and
+  setup are `/tresor/quellen`, open or closed. Closed and new, the page
+  opens or makes the vault in the same look.
 - Every other path, while open: msgvault's own web UI and API (it lives at
   the root: absolute asset paths, no frames). The supervisor adds
   `X-API-Key` itself; Caddy's headers and Authelia's cookie stay behind.
@@ -381,6 +391,16 @@ calendars below —
 - a card gone at the source **stays**, marked
   `auf_dem_handy_geloescht_am`; if it comes back (even under another file
   name), the mark goes;
+- a card the phone sends under a **new UID** (2026-11-10: six contacts
+  were reported deleted and 26 new, all still on the phone) is the same
+  contact when, in the same sync, the old UID is gone and the new one
+  has the same name (umlauts and their spelled-out form, and case, alike)
+  and a number (last nine digits) or an e-mail in common: the old card
+  takes the new UID and data and keeps its history, its first sight and
+  the file name msgvault knows; it is neither deleted nor new. A card an
+  older archive already marked deleted in the sync that first saw its
+  new UID is put right the same way. Only a card nothing matches is
+  marked deleted;
 - the whole book gone from Radicale: every card stays as it was, the
   store marked `quelle_weg_seit`.
 
@@ -568,7 +588,7 @@ inside the open vault; closed, there is no net, not even in memory.
   middle (`?mitte=`), „Ausblenden“ and „Nicht berechnen“ (out before any
   tie is computed), the hidden ones restorable. Closed, the locked page.
 
-**Step 2 (this):** „Wie steht X zu Y?“ and „Übernehmen“ into Homes.
+**Step 2 (this):** „Wie steht X zu Y?“, one tap into the address books.
 
 - **The questions** (`fragen.go`, Homes' `internal/netz/fragen.go` moved
   here with its tests and the same fixture): a tie among either end's
@@ -586,30 +606,44 @@ inside the open vault; closed, there is no net, not even in memory.
   Schwiegereltern, Schwiegerkind, Schwager/Schwägerin, Freund/in,
   Kollege/Kollegin, Nachbar/in, Bekannte/r, sonstige verwandt, and
   „Kennen sich nicht“ (the tie leaves the net); „Keine Beziehung“ is never
-  asked again, „Überspringen“ comes last.
+  asked again, „Später“ comes last. On the main page one at a time: both
+  faces (initials), „X ist für Y …“, four kinds as chips (the suggestion
+  marked), „kennen sich nicht“, „mehr …“ for the rest, why it is
+  suggested, and where the answer goes („kommt ins Adressbuch der
+  Familie“, „kommt nur auf dein Handy“, or „bleibt in deinem Archiv“ with
+  the reason: a person only on photos cannot be written).
 - **The answers** are kept only in the vault,
   `/run/tresor/umfeld/antworten.json` (0600): a kind becomes the pair's
   relation in the net in place of the phone books' („Kind (von dir
-  angegeben)“). „Deine Antworten“ lists them, with what the phone books
-  already say of the two and „Vergessen“.
-- **Übernehmen** (`uebernahme.go`): the archive writes no address book.
-  A kind's answer carries a form that posts a signed packet to Homes
-  (`HOMES_URL` + `/kontakte/uebernehmen`); Homes shows each line and
-  where it goes, and writes only after the person confirms on Homes' own
-  page. Where it goes: both ends in the household book → both household
-  cards, each naming the other by UID („Haushalts-Adressbuch, sieht die
-  Familie“); otherwise → only the person's own phone, on each end that is
-  a phone contact, by name („nur dein Handy“); neither → nothing to take
-  over. A household card never gets a name from the phone or the photos;
-  the packet carries a household UID only when both ends have one.
-- **The packet** (version 1, the contract with Homes):
-  `d = base64url(JSON {"person", "bis", "zeilen": [{"x": {"name",
-  "haushalt"?, "handy"?}, "y": {…}, "art"}]})`, `s =
-  base64url(HMAC-SHA256(ARCHIV_HOMES_SECRET, "archiv-uebernahme-1." +
-  d))`, both without padding; `x` is `art` of `y`. Homes takes it only
-  from the login `person`, checks `s` with that person's archive secret
-  and refuses it after `bis` (at most two hours). It travels in a POST
-  body, never in a URL.
+  angegeben)“), and what Homes wrote of it (`eingetragen`: where, the line,
+  when). „Deine Antworten“ (`/tresor/umfeld`) lists them, with what the
+  phone books already say, what became of each, „Eintragen“ for one Homes
+  did not take, and „Vergessen“ (the same as Rückgängig).
+- **One tap** (`fragen_seite.go`, `uebernahme.go`; owner 2026-11-10:
+  the tap in the person's own open archive is their consent): a chip is a
+  form post — no script needed; the page's script sends it in the
+  background and swaps the page in place. It saves the answer in the
+  vault and has Homes write it at once, server to server; the page comes
+  back with the next question and a toast „✓ … eingetragen ·
+  Rückgängig“ for ten seconds. Rückgängig (and Vergessen later) has Homes
+  take the written line back, then forgets the answer; if Homes does not
+  answer, both stay and the page says so. The archive writes no address
+  book itself. Where it goes: both ends in the household book → both
+  household cards, each naming the other by UID; otherwise → only the
+  person's own phone, on each end that is a phone contact, by name;
+  neither → it stays in the vault. A household card never gets a name
+  from the phone or the photos; the packet carries a household UID only
+  when both ends have one.
+- **The packet** (version 2, the contract with Homes'
+  `internal/uebernahme`): `POST <ARCHIV_HOMES_INTERN>/intern/uebernahme`,
+  form `d`, `s`; `d = base64url(JSON {"person", "am", "nonce", "weg"?,
+  "zeilen": [{"x": {"name", "haushalt"?, "handy"?}, "y": {…}, "art"}]})`,
+  `s = base64url(HMAC-SHA256(ARCHIV_HOMES_SECRET, "archiv-uebernahme-2." +
+  d))`, both without padding; `x` is `art` of `y`, `weg` takes the lines
+  back. Homes checks `s` with the secret of the person `d` names, takes
+  `am` for two minutes and each nonce once, and refuses anything that
+  came through the public route. It goes from the archive's container to
+  Homes' own port on the box, never through a browser.
 
 Not yet (steps 3–7): group chats and mail threads, the pair page, group
 suggestions, derived relations, the family tree.
@@ -665,7 +699,7 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | stop | `TimeoutStopSec` ≥ 90: closing stops msgvault (≤ 30 s) and unmounts |
 | Radicale (contacts, calendars) | `RADICALE_URL=http://host.containers.internal:5232` (Radicale's root, no path), `RADICALE_USER=archiv-<person>`, and that account's password as a file: `Secret=<the instance's ARCHIV_RADICALE_PASSWORD>,type=mount,target=radicale-password` (read from `RADICALE_PASSWORD_FILE`, default `/run/secrets/radicale-password`; never an environment variable). Without `RADICALE_URL` and `RADICALE_USER` the page says the box has not set it up. Optional: `KONTAKTE_TAKT` (s, default 10800), `KONTAKTE_RELAIS_PORT` (default 18443, inside the container only). |
 | Immich (Umfeld) | `IMMICH_URL=http://host.containers.internal:2283` (Immich's root; `uses: [immich]`). The key is the person's own, entered on the page, never the template's. Optional: `UMFELD_TAKT` (s, default 3600). |
-| Homes (Übernehmen) | `HOMES_URL=https://www.<domain>` (Homes' public address, where „Übernehmen“ posts); without it the address is `PUBLIC_URL`'s with `www` for its first label. The packet is signed with `ARCHIV_HOMES_SECRET`; without that secret there is no „Übernehmen“. |
+| Homes (answers) | `ARCHIV_HOMES_INTERN=http://host.containers.internal:8650` (Homes' own port on the box, where an answer is written; laib's template sets it). The packet is signed with `ARCHIV_HOMES_SECRET`; without either, answers stay in the vault and the card says so. |
 | Radicale account and rights | an LLDAP account `archiv-<person>` per instance (seeded like `kalender`, its password the instance's generated secret), and in `templates/radicale/pre-start`'s rights, **right after `[root]`** (before every `user: .+`/`(.+)` section): `[archiv-home]` user `archiv-(.+)`, collection `{0}`, permissions `R`; `[archiv-lesen]` user `archiv-(.+)`, collection `{0}/(handy-kontakte\|google-(?!kontakte(/\|$))[^/]+\|privat-[^/]+)(/.*)?`, permissions `r`; `[archiv-sonst-nichts]` user `archiv-.+`, collection `.*`, permissions empty. `integration.sh` runs these rights in a real Radicale. For Umfeld (archiv#27) the account also reads `homes/haushalt-kontakte` (read only; the laib template change and its ADR 0029 amendment bring that right); until then the archive gets 403 there and the page says the household book is missing. |
 | backup | do not quiesce by stopping the unit (that locks the vault); while open, a snapshot catches a live SQLite in ciphertext — the restore is only as good as that moment. |
 

@@ -337,7 +337,7 @@ func (w *Web) entscheiden(rw http.ResponseWriter, r *http.Request) {
 		if antwort == "ja" {
 			m = "ja"
 		}
-		http.Redirect(rw, r, "/tresor?m=person-"+m+"#karte-personen", http.StatusSeeOther)
+		http.Redirect(rw, r, "/tresor?tab=fragen&m=person-"+m+"#karte-personen", http.StatusSeeOther)
 	case errors.Is(err, errVeraltet):
 		w.antwort(rw, r, http.StatusConflict, "", saysVorschlagVeraltet)
 	case errors.Is(err, errZweiPersonen):
@@ -468,7 +468,7 @@ func (w *Web) zusammen(rw http.ResponseWriter, r *http.Request) {
 		if w.Geaendert != nil {
 			w.Geaendert()
 		}
-		http.Redirect(rw, r, "/tresor?m=zusammen#karte-personen", http.StatusSeeOther)
+		http.Redirect(rw, r, "/tresor?tab=fragen&m=zusammen#karte-personen", http.StatusSeeOther)
 	case errors.Is(err, errVeraltet):
 		w.vorschauSeite(rw, r, a, b, saysZusammenVeraltet)
 	default:
@@ -484,5 +484,5 @@ func (w *Web) abgleichJetzt(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Abgleich.Jetzt()
-	http.Redirect(rw, r, "/tresor?m=abgleich#karte-kontakte", http.StatusSeeOther)
+	http.Redirect(rw, r, "/tresor/quellen?m=abgleich#karte-kontakte", http.StatusSeeOther)
 }

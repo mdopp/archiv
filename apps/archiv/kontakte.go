@@ -154,6 +154,7 @@ func (k *Kontaktablage) Einmischen(quelle []QuellKarte, jetzt time.Time) (neu, g
 		}
 		alt.Daten, alt.Name = daten, name
 	}
+	neu -= k.neuVerschluesselt(da, jetzt)
 	for key, c := range k.Karten {
 		if !da[key] && c.GeloeschtAm == nil {
 			g := jetzt
@@ -164,6 +165,91 @@ func (k *Kontaktablage) Einmischen(quelle []QuellKarte, jetzt time.Time) (neu, g
 	k.ZuletztGelesen = jetzt
 	k.QuelleWegSeit = nil
 	return neu, geaendert, weg
+}
+
+// neuVerschluesselt finds the cards the phone sent under a new UID: a card
+// gone at the source in this sync (or marked gone by the sync that first
+// saw the other, an older archive's mistake) and one first seen then, with
+// the same name and a number or an e-mail in common, are one contact. The
+// old card takes the new one's UID and data and keeps its history, its
+// first sight and the href the relay serves it under, so msgvault sees a
+// changed card, not one deleted and one new. Says how many of this sync's
+// new cards were such.
+func (k *Kontaktablage) neuVerschluesselt(da map[string]bool, jetzt time.Time) (zusammen int) {
+	var weg, frisch []string
+	for key := range k.Karten {
+		if da[key] {
+			frisch = append(frisch, key)
+		} else {
+			weg = append(weg, key)
+		}
+	}
+	sort.Strings(weg)
+	sort.Strings(frisch)
+	for _, wk := range weg {
+		alt, seit := k.Karten[wk], jetzt
+		if alt.GeloeschtAm != nil {
+			seit = *alt.GeloeschtAm
+		}
+		for i, nk := range frisch {
+			c := k.Karten[nk]
+			if !c.ErstGesehen.Equal(seit) || !gleicherKontakt(alt.Daten, c.Daten) {
+				continue
+			}
+			if alt.GeloeschtAm == nil {
+				zusammen++
+			}
+			alt.Frueher = append(append(alt.Frueher, alt.Daten), c.Frueher...)
+			if len(alt.Frueher) > fruehereVersions {
+				alt.Frueher = alt.Frueher[len(alt.Frueher)-fruehereVersions:]
+			}
+			if vcardOhne(alt.Daten, "REV", "PRODID", "UID") != vcardOhne(c.Daten, "REV", "PRODID", "UID") {
+				g := jetzt
+				alt.Geaendert = &g
+			}
+			alt.UID, alt.Name, alt.Daten, alt.ZuletztGesehen, alt.GeloeschtAm = c.UID, c.Name, c.Daten, c.ZuletztGesehen, nil
+			delete(k.Karten, wk)
+			k.Karten[nk] = alt
+			frisch = append(frisch[:i:i], frisch[i+1:]...)
+			break
+		}
+	}
+	return zusammen
+}
+
+// gleicherKontakt: two cards with the same name (FN, compared plain) and a
+// number (its last digits) or an e-mail in common.
+func gleicherKontakt(a, b string) bool {
+	if n := klar(vcardFeld(a, "FN")); n == "" || n != klar(vcardFeld(b, "FN")) {
+		return false
+	}
+	for _, x := range vcardWerte(a, "TEL") {
+		for _, y := range vcardWerte(b, "TEL") {
+			if gleicheEndziffern(x, y) {
+				return true
+			}
+		}
+	}
+	for _, x := range vcardWerte(a, "EMAIL") {
+		for _, y := range vcardWerte(b, "EMAIL") {
+			if x != "" && strings.EqualFold(x, y) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// vcardWerte are every value of a property, a group's (item1.TEL) too.
+func vcardWerte(daten, name string) (out []string) {
+	for _, z := range entfalten([]byte(daten)) {
+		e := eigenschaft(z)
+		if e == name || strings.HasSuffix(e, "."+name) {
+			_, w := wert(z)
+			out = append(out, strings.TrimSpace(icsText(w)))
+		}
+	}
+	return out
 }
 
 // Ausgabe is the card as the relay serves it to msgvault: as the source

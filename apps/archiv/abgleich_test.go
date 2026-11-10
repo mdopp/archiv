@@ -304,7 +304,7 @@ func TestAbgleichSaysWhatIsMissing(t *testing.T) {
 func TestTheContactsCardPerState(t *testing.T) {
 	wt := neuesWeb(t)
 	wt.oeffnen(t)
-	if body := wt.rufe("GET", "/tresor", anna, nil).Body.String(); !strings.Contains(body, saysRadicaleFehlt) {
+	if body := wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String(); !strings.Contains(body, saysRadicaleFehlt) {
 		t.Fatalf("not set up: %s", body)
 	}
 	at := neuerAbgleich(t)
@@ -315,14 +315,14 @@ func TestTheContactsCardPerState(t *testing.T) {
 	at.a.Runde(t.Context(), at.innen)
 	at.rad.setzen("google-arbeit", fakeSammlung{art: "kalender", anzeig: "Arbeit", ics: ics(vevent("a", "", "A", "x"))})
 	at.a.Runde(t.Context(), at.innen)
-	body := wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	body := wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
 	for _, want := range []string{"Kontakte und Kalender", "Google-Kalender „Arbeit“: 2 Termine, davon 1 an der Quelle gelöscht (bleiben im Archiv)", "Kontakte zuletzt abgeglichen um", "In den Terminen suchen kannst du in einem späteren Schritt", "Jetzt abgleichen"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("open page lacks %q:\n%s", want, body)
 		}
 	}
 	wt.tt.Abschliessen(t.Context(), "test")
-	body = wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	body = wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
 	if strings.Contains(body, "Termine,") || !strings.Contains(body, "Die Termine liegen im Tresor") {
 		t.Fatalf("closed page: %s", body)
 	}

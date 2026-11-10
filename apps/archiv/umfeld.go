@@ -450,6 +450,21 @@ func (u *Umfeld) Beantworten(innen Innen, x, y, art string) (Frage, error) {
 	return f, jsonImTresor(innen.umfeldAntworten(), alle)
 }
 
+// Eintragen keeps in the open vault what Homes wrote of the answer key.
+func (u *Umfeld) Eintragen(innen Innen, key string, e *Eingetragen) error {
+	u.halt.Lock()
+	defer u.halt.Unlock()
+	n := u.Netz()
+	if n == nil {
+		return errUmfeldZu
+	}
+	alle, err := n.Eintragen(key, e)
+	if err != nil {
+		return err
+	}
+	return jsonImTresor(innen.umfeldAntworten(), alle)
+}
+
 // Vergessen drops the answer about the pair key from the open vault.
 func (u *Umfeld) Vergessen(innen Innen, key string) error {
 	u.halt.Lock()

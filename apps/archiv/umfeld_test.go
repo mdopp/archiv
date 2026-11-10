@@ -488,7 +488,7 @@ func TestUmfeldSchluesselPruefen(t *testing.T) {
 	if fi, _ := os.Stat(innen.ImmichSchluessel()); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("mode %v", fi.Mode())
 	}
-	page := wt.rufe("GET", "/tresor?m=umfeld", anna, nil).Body.String()
+	page := wt.rufe("GET", "/tresor/quellen?m=umfeld", anna, nil).Body.String()
 	if !strings.Contains(page, "Immich-Schlüssel hinterlegt am") || !strings.Contains(page, esc(saysUmfeldGespeichert)) || strings.Contains(page, im.key) {
 		t.Fatalf("the vault page: %s", page)
 	}
@@ -567,7 +567,7 @@ func TestUmfeldSeite(t *testing.T) {
 	if rec := wt.rufe("POST", "/tresor/umfeld/verbergen", anna, url.Values{"id": {"p-ben"}, "art": {"alles"}}); rec.Code != 400 {
 		t.Fatalf("an unknown art: %d", rec.Code)
 	}
-	vault := wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	vault := wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
 	if !strings.Contains(vault, `href="/tresor/umfeld">Umfeld ansehen`) || !strings.Contains(vault, "Immich-Schlüssel hinterlegt am") {
 		t.Fatalf("the vault page's card:\n%s", vault)
 	}

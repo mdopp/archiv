@@ -144,15 +144,21 @@ func TestPagesPerState(t *testing.T) {
 	}
 	wt.oeffnen(t)
 	body = wt.rufe("GET", "/tresor?m=angelegt", anna, nil).Body.String()
-	for _, want := range []string{"Abschließen", "Archiv durchsuchen", "Signal-Passphrase", "Postfach eintragen", "Passphrase fehlt", "Kein Postfach eingetragen", "um 12:00", "64-stelligen Schlüssel"} {
+	for _, want := range []string{"Abschließen", "Suche in Nachrichten", "um 12:00", "/tresor/quellen", "noch nichts eingerichtet"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("offen lacks %q:\n%s", want, body)
+		}
+	}
+	body = wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
+	for _, want := range []string{"Signal-Passphrase", "Postfach eintragen", "Passphrase fehlt", "Kein Postfach eingetragen", "64-stelligen Schlüssel"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Quellen lacks %q:\n%s", want, body)
 		}
 	}
 	if rec := wt.rufe("POST", "/tresor/signal", anna, url.Values{"passphrase": {"12345 12345 12345 12345 12345 12345"}, "telefon": {"0049 151 1234567"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("signal: %d %s", rec.Code, rec.Body)
 	}
-	body = wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	body = wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
 	if strings.Contains(body, "123451234512345") || strings.Contains(body, "1511234567") {
 		t.Fatal("a stored key is shown again")
 	}
@@ -162,7 +168,7 @@ func TestPagesPerState(t *testing.T) {
 	if rec := wt.rufe("POST", "/tresor/imap", anna, url.Values{"host": {"imap.gmail.com"}, "benutzer": {"anna@example.org"}, "passwort": {"abcd efgh ijkl mnop"}}); rec.Code != http.StatusSeeOther {
 		t.Fatalf("imap: %d %s", rec.Code, rec.Body)
 	}
-	body = wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	body = wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
 	if !strings.Contains(body, "Postfach <b>anna@example.org</b> auf imap.gmail.com") || !strings.Contains(body, "ersetzt anna@example.org") || strings.Contains(body, "abcd efgh") {
 		t.Fatalf("the mail card does not name the stored mailbox, or shows the password:\n%s", body)
 	}
@@ -188,8 +194,12 @@ func TestPagesPerState(t *testing.T) {
 		t.Fatalf("abschliessen: %d", rec.Code)
 	}
 	body = wt.rufe("GET", "/", anna, nil).Body.String()
-	if !strings.Contains(body, "Archiv öffnen") || strings.Contains(body, "Signal-Passphrase (30") || !strings.Contains(body, saysSignalZu) || strings.Contains(body, "Passphrase fehlt") {
+	if !strings.Contains(body, "Archiv öffnen") || !strings.Contains(body, `href="/tresor/quellen"`) || strings.Contains(body, "Abschließen</button>") {
 		t.Fatalf("verschlossen:\n%s", body)
+	}
+	body = wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
+	if strings.Contains(body, "Signal-Passphrase (30") || !strings.Contains(body, saysSignalZu) || strings.Contains(body, "Passphrase fehlt") {
+		t.Fatalf("Quellen, verschlossen:\n%s", body)
 	}
 	if rec := wt.rufe("POST", "/tresor/signal", anna, url.Values{"passphrase": {passphrase}}); rec.Code != http.StatusLocked {
 		t.Fatalf("a key while closed: %d", rec.Code)
@@ -467,7 +477,7 @@ func TestThePageShowsWhatRunsAndHowFar(t *testing.T) {
 	wt.w.Mailholer = &Mailholer{}
 	wt.w.Mailholer.gang = Gang{Was: "anna@example.org", Quelle: "mail", Seit: time.Now(), Fertig: 2300, Gesamt: 48000, Bis: time.Date(2023, 3, 9, 0, 0, 0, 0, time.Local)}
 	wt.w.Postbote.gang = Gang{Was: "20261102T080204Z-signal.age", Quelle: "signal", Seit: time.Now(), Gesamt: 41437}
-	body := wt.rufe("GET", "/tresor", anna, nil).Body.String()
+	body := wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
 	for _, want := range []string{"Gerade in Arbeit", `<progress value=2300 max=48000>`, "2.300 von 48.000 Mails abgeholt, bisher bis März 2023", "41.437 Signal-Nachrichten ins Archiv übernehmen", "id=jetzt data-live", "id=karte-mail data-live", "new EventSource('/tresor/live')"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("lacks %q:\n%s", want, body)
@@ -575,7 +585,7 @@ func TestAPasskeyOpensTheVaultWithThePasswordItWasGiven(t *testing.T) {
 		t.Fatalf("the passkey did not open it: %d %s", rec.Code, rec.Body)
 	}
 	wt.tt.bereit(t)
-	if !strings.Contains(wt.rufe("GET", "/tresor", anna, nil).Body.String(), "Entfernen") {
+	if !strings.Contains(wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String(), "Entfernen") {
 		t.Fatal("the open page does not list the passkey")
 	}
 	wt.rufe("POST", "/tresor/passkey/weg", anna, url.Values{"id": {"cred-1"}})

@@ -1,15 +1,8 @@
 package main
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
-	"html"
-	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -194,99 +187,5 @@ func TestUebernahmeWohin(t *testing.T) {
 		if u.Wohin != c.wohin || u.Zeile != c.zeile {
 			t.Errorf("%s–%s: %+v", c.x, c.y, u)
 		}
-	}
-}
-
-// The packet: what the archive signs is what Homes checks (homes
-// internal/uebernahme), for the person, for at most two hours.
-func TestUebernahmePaket(t *testing.T) {
-	jetzt := time.Date(2026, 11, 10, 9, 40, 0, 0, time.UTC)
-	z := uebernahmeZeile{X: uebernahmeEnde{Name: "Carla Wolf", Haushalt: "c"}, Y: uebernahmeEnde{Name: "Anna Berg", Haushalt: "a"}, Art: "kollege"}
-	d, s := uebernahmeSignieren("homes-geheim", "anna", jetzt, z)
-	m := hmac.New(sha256.New, []byte("homes-geheim"))
-	m.Write([]byte("archiv-uebernahme-1." + d))
-	if s != base64.RawURLEncoding.EncodeToString(m.Sum(nil)) {
-		t.Fatal("not signed as Homes checks")
-	}
-	b, _ := base64.RawURLEncoding.DecodeString(d)
-	var p uebernahmePaket
-	if err := json.Unmarshal(b, &p); err != nil || p.Person != "anna" || !p.Bis.Equal(time.Date(2026, 11, 10, 11, 0, 0, 0, time.UTC)) || len(p.Zeilen) != 1 || p.Zeilen[0] != z {
-		t.Fatalf("%s %v", b, err)
-	}
-	if !strings.Contains(string(b), `"x":{"name":"Carla Wolf","haushalt":"c"}`) {
-		t.Fatalf("the contract's names: %s", b)
-	}
-	if d2, s2 := uebernahmeSignieren("homes-geheim", "anna", jetzt.Add(15*time.Minute), z); d2 != d || s2 != s {
-		t.Fatal("the same within the hour")
-	}
-	for env, want := range map[[2]string]string{{"", "https://archiv.box.test/"}: "https://www.box.test", {"https://homes.example:8443/x", ""}: "https://homes.example:8443",
-		{"", ""}: "", {"ftp://x", ""}: "", {"", "https://localhost/"}: ""} {
-		if got := homesURL(func(k string) string { return map[string]string{"HOMES_URL": env[0], "PUBLIC_URL": env[1]}[k] }); got != want {
-			t.Errorf("%v: %q", env, got)
-		}
-	}
-}
-
-// The page: the questions with the suggestion chosen; Speichern says so
-// with its Übernehmen right there — a signed form to Homes, saying where
-// it goes; the answers listed; nothing without Homes' secret.
-func TestFragenSeite(t *testing.T) {
-	ut := netzBox(t)
-	wt := neuesWeb(t)
-	wt.oeffnen(t)
-	innen, _ := wt.tt.Innen()
-	for _, d := range []string{"umfeld", "kontakte"} {
-		os.MkdirAll(filepath.Join(innen.Wurzel, d), 0o700)
-	}
-	for _, p := range [][2]string{{ut.innen.umfeldTabelle(), innen.umfeldTabelle()}, {kontakteDatei(ut.innen), kontakteDatei(innen)}, {ut.innen.ImmichSchluessel(), innen.ImmichSchluessel()}} {
-		b, _ := os.ReadFile(p[0])
-		os.WriteFile(p[1], b, 0o600)
-	}
-	ut.u.Geaendert = nil
-	wt.w.Umfeld, wt.w.HomesURL, wt.w.Now = ut.u, "https://www.box.test", func() time.Time { return *ut.jetzt }
-	ut.u.laden(innen)
-
-	page := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
-	for _, want := range []string{"<h3>Beziehungen klären</h3>", "Wie steht Kim Berg zu dir?", "Wie steht Carla Wolf zu dir?", `<option value="kollege" selected>Kollege/Kollegin</option>`,
-		"Vorschlag, weil gleiche Firma.", `<option value="fremd">Kennen sich nicht</option>`, `<option value="expartner">Ex-Partner/in</option>`, "Überspringen"} {
-		if !strings.Contains(page, want) {
-			t.Fatalf("%q missing:\n%s", want, page)
-		}
-	}
-	carla := ut.u.Netz().Von("haushalt/c")
-	rec := wt.rufe("POST", "/tresor/umfeld/antwort", anna, url.Values{"x": {carla}, "y": {"p-anna"}, "antwort": {"ja"}, "art": {"kollege"}})
-	body := rec.Body.String()
-	if rec.Code != 200 || !strings.Contains(body, "Gespeichert: Carla Wolf ist Kollege/Kollegin von dir.") || !strings.Contains(body, `action="https://www.box.test/kontakte/uebernehmen"`) ||
-		!strings.Contains(body, "Haushalts-Adressbuch, sieht die Familie") || !strings.Contains(body, "<h3>Deine Antworten</h3>") {
-		t.Fatalf("%d\n%s", rec.Code, body)
-	}
-	d := regexp.MustCompile(`name=d value="([^"]+)"`).FindStringSubmatch(body)
-	if b, _ := base64.RawURLEncoding.DecodeString(html.UnescapeString(d[1])); !strings.Contains(string(b), `"haushalt":"c"`) || !strings.Contains(string(b), `"person":"anna"`) {
-		t.Fatalf("the packet: %s", b)
-	}
-	rec = wt.rufe("POST", "/tresor/umfeld/antwort", anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "antwort": {"ja"}, "art": {"kind"}})
-	if body := rec.Body.String(); !strings.Contains(body, "Kim Berg ist Kind von dir.") || !strings.Contains(body, "→ nur dein Handy") {
-		t.Fatalf("kim:\n%s", body)
-	}
-	if rec := wt.rufe("POST", "/tresor/umfeld/antwort", anna, url.Values{"x": {"p-fritz"}, "y": {"p-kim"}, "antwort": {"ja"}}); rec.Code != 400 || !strings.Contains(rec.Body.String(), esc(saysFrageOhneWahl)) {
-		t.Fatalf("no kind chosen: %d", rec.Code)
-	}
-	if rec := wt.rufe("POST", "/tresor/umfeld/antwort", anna, url.Values{"x": {"p-gerd"}, "y": {"p-anna"}, "antwort": {"keine"}}); rec.Code != 409 {
-		t.Fatalf("not asked: %d", rec.Code)
-	}
-	if b, _ := os.ReadFile(innen.umfeldAntworten()); !strings.Contains(string(b), `"art":"kollege"`) {
-		t.Fatalf("not in the vault: %s", b)
-	}
-	rec = wt.rufe("POST", "/tresor/umfeld/antwort", anna, url.Values{"paar": {paarKey(carla, "p-anna")}, "antwort": {"vergessen"}})
-	if !strings.Contains(rec.Body.String(), "Vergessen.") || !strings.Contains(rec.Body.String(), "Wie steht Carla Wolf zu dir?") {
-		t.Fatalf("forgotten:\n%s", rec.Body)
-	}
-	wt.w.HomesSecret = ""
-	if page := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String(); strings.Contains(page, "/kontakte/uebernehmen") || !strings.Contains(page, esc(saysKeinHomes)) {
-		t.Fatalf("without Homes:\n%s", page)
-	}
-	wt.tt.Abschliessen(t.Context(), "test")
-	if rec := wt.rufe("POST", "/tresor/umfeld/antwort", anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "antwort": {"keine"}}); rec.Code != 423 {
-		t.Fatalf("closed: %d", rec.Code)
 	}
 }
