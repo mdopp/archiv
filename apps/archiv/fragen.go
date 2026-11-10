@@ -18,9 +18,9 @@ import (
 // from the phone books and the photos (vorschlag). The answers live only
 // in the open vault (umfeld/antworten.json); a kind becomes a relation of
 // the pair in place of the phone books', „Keine Beziehung“ and „Kennen
-// sich nicht“ are never asked again, Überspringen last. Nothing of it
-// leaves the vault except what the person takes over into Homes
-// (uebernahme.go), one tap and Homes' own confirmation.
+// sich nicht“ are never asked again, Später last. Nothing of it leaves
+// the vault except a kind the person tapped, which Homes writes at once
+// (uebernahme.go); the vault keeps what was written (Eingetragen).
 
 const (
 	fragenJe   = 5 // a tie is asked about while among either end's closest five
@@ -59,9 +59,10 @@ func kurzWort(art string) string {
 
 // antwort is the person's answer about a pair: X is Art of the other.
 type antwort struct {
-	X   string    `json:"x"`
-	Art string    `json:"art"`
-	Am  time.Time `json:"am"`
+	X           string       `json:"x"`
+	Art         string       `json:"art"`
+	Am          time.Time    `json:"am"`
+	Eingetragen *Eingetragen `json:"eingetragen,omitempty"`
 }
 
 // merkmale are what a node's contacts and Immich say for the suggestions.
@@ -291,23 +292,56 @@ func (n *Netz) Vergessen(key string) (map[string]antwort, error) {
 	return maps.Clone(n.antworten), nil
 }
 
+// Eintragen keeps in the answer about the pair what Homes wrote (nil: nothing).
+func (n *Netz) Eintragen(key string, e *Eingetragen) (map[string]antwort, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	a, da := n.antworten[key]
+	if !da {
+		return nil, errFrageWeg
+	}
+	a.Eingetragen = e
+	n.antworten[key] = a
+	return maps.Clone(n.antworten), nil
+}
+
 // Gegeben is an answer as the page lists it: the pair (X is Art of Y),
-// its key, and what the phone books already say of the two ("" nothing).
+// its key, what the phone books already say of the two ("" nothing),
+// where it would go (Karte) and what Homes wrote (nil nothing).
 type Gegeben struct {
-	Key   string
-	X, Y  Knoten
-	Ich   bool
-	Art   string
-	Am    time.Time
-	Buch  string
-	Karte Uebernahme
+	Key         string
+	X, Y        Knoten
+	Ich         bool
+	Art         string
+	Am          time.Time
+	Buch        string
+	Karte       Uebernahme
+	Eingetragen *Eingetragen
+}
+
+// Gegebenes is the answer about the pair key, as Gegebene lists it.
+func (n *Netz) Gegebenes(key string) (Gegeben, bool) {
+	gs := n.gegebene(key)
+	if key == "" || len(gs) == 0 {
+		return Gegeben{}, false
+	}
+	return gs[0], true
 }
 
 // Gegebene are the person's answers that are no Später, the newest first.
-func (n *Netz) Gegebene() (out []Gegeben) {
+func (n *Netz) Gegebene() []Gegeben { return n.gegebene("") }
+
+// gegebene are the answers, only key's when key is set.
+func (n *Netz) gegebene(nur string) (out []Gegeben) {
+	if n == nil {
+		return nil
+	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	for key, a := range n.antworten {
+		if nur != "" && key != nur {
+			continue
+		}
 		x, y, _ := strings.Cut(key, "|")
 		if a.X == y {
 			x, y = y, x
@@ -320,7 +354,7 @@ func (n *Netz) Gegebene() (out []Gegeben) {
 		if y != n.ich && x == n.ich && slices.Contains(arten, a.Art) { // „Anna ist Kind von dir“ reads better than „du bist …“
 			x, y, kx, ky, a.Art = y, x, ky, kx, cmp.Or(gegen[a.Art], a.Art)
 		}
-		g := Gegeben{Key: key, X: kx, Y: ky, Ich: y == n.ich, Art: a.Art, Am: a.Am, Buch: n.imBuch(x, y)}
+		g := Gegeben{Key: key, X: kx, Y: ky, Ich: y == n.ich, Art: a.Art, Am: a.Am, Buch: n.imBuch(x, y), Eingetragen: a.Eingetragen}
 		if slices.Contains(arten, a.Art) {
 			g.Karte = n.uebernahme(x, y, a.Art)
 		}

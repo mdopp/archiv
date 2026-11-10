@@ -143,8 +143,8 @@ arbeit_leer
 docker exec archiv test -s /run/tresor/signal-passphrase || fail "the passphrase is not inside the vault"
 [ "$(docker exec archiv stat -c %a /run/tresor/signal-passphrase)" = 600 ] || fail "the passphrase file is not 0600"
 if sudo test -e "$D/data/schluessel/signal"; then fail "the passphrase is outside the vault"; fi
-curl -fsS "${H[@]}" "$U/tresor" | grep -q "hinterlegt am" || fail "the keys are not shown as stored"
-if curl -fsS "${H[@]}" "$U/tresor" | grep -q "$PASSPHRASE"; then fail "the passphrase is shown"; fi
+curl -fsS "${H[@]}" "$U/tresor/quellen" | grep -q "hinterlegt am" || fail "the keys are not shown as stored"
+if curl -fsS "${H[@]}" "$U/tresor/quellen" | grep -q "$PASSPHRASE"; then fail "the passphrase is shown"; fi
 
 echo "Signal: a real backup, decrypted inside the vault and read by msgvault's import-signal"
 # The backup is made here with the image's own signalbackup-tools: a dummy
@@ -386,14 +386,14 @@ for _ in $(seq 30); do curl -fsS "$U2/healthz" >/dev/null 2>&1 && break; sleep 1
 code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" --data-urlencode "passwort=$PW" --data-urlencode "wiederholung=$PW" "$U2/tresor/anlegen")
 [ "$code" = 303 ] || fail2 "anlegen: $code"
 warte2() { # warte2 <seconds> <text on the page>
-  for _ in $(seq "$1"); do curl -fsS "${H[@]}" "$U2/tresor" 2>/dev/null | grep -qF "$2" && return 0; sleep 1; done
-  curl -sS "${H[@]}" "$U2/tresor" | sed -n '/karte-kontakte/,/<\/section>/p' >&2
+  for _ in $(seq "$1"); do curl -fsS "${H[@]}" "$U2/tresor/quellen" 2>/dev/null | grep -qF "$2" && return 0; sleep 1; done
+  curl -sS "${H[@]}" "$U2/tresor/quellen" | sed -n '/karte-kontakte/,/<\/section>/p' >&2
   fail2 "waited $1 s for: $2"
 }
 warte2 240 "Kontakte zuletzt abgeglichen um"
 warte2 10 "Google-Kalender „Arbeit“: 2 Termine"
 warte2 10 "Eigener Kalender „Sport“: 1 Termin"
-seite=$(curl -fsS "${H[@]}" "$U2/tresor")
+seite=$(curl -fsS "${H[@]}" "$U2/tresor/quellen"; curl -fsS "${H[@]}" "$U2/tresor") # the sources' page, and the main page's Fragen
 if grep -q "Geheim" <<<"$seite"; then fail2 "a calendar the archive may not read is on the page"; fi
 curl -fsS "${H[@]}" "$U2/api/v1/people" | jq -e '.people | length == 2' || { curl -sS "${H[@]}" "$U2/api/v1/people"; fail2 "the two contacts are not persons in msgvault"; }
 curl -fsS "${H[@]}" "$U2/api/v1/carddav/books" | jq -e '.books | length == 1 and .[0].subscribed and .[0].lookup_source and (.[0].write_target | not)' ||

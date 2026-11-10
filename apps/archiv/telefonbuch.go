@@ -141,9 +141,11 @@ func joinSome(sep string, ps ...string) string {
 }
 
 // klar is a name or an address for comparing: lower case, umlauts
-// spelled out, letters and digits only (Homes' namen.Plain).
+// spelled out (owner 2026-11-10: „Jürgen“ is „Juergen“; ä/ae, ö/oe,
+// ü/ue, ß/ss count the same), letters and digits only. Homes' namen.Plain
+// writes ä as a; nothing compares the two's output.
 func klar(s string) string {
-	r := strings.NewReplacer("ä", "a", "ö", "o", "ü", "u", "ß", "ss", "é", "e", "è", "e", "á", "a", "à", "a", "ó", "o", "í", "i", "&", "und")
+	r := strings.NewReplacer("ä", "ae", "ö", "oe", "ü", "ue", "ß", "ss", "é", "e", "è", "e", "á", "a", "à", "a", "ó", "o", "í", "i", "&", "und")
 	s = r.Replace(strings.ToLower(s))
 	var b strings.Builder
 	for _, c := range s {

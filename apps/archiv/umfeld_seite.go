@@ -134,7 +134,7 @@ func (w *Web) umfeldSchluessel(rw http.ResponseWriter, r *http.Request) {
 	if w.Geaendert != nil {
 		w.Geaendert()
 	}
-	http.Redirect(rw, r, "/tresor?m=umfeld", http.StatusSeeOther)
+	http.Redirect(rw, r, "/tresor/quellen?m=umfeld", http.StatusSeeOther)
 }
 
 // umfeldVerbergen takes a row's Ausblenden, Nicht berechnen or Zurückholen.
@@ -166,26 +166,19 @@ func (w *Web) umfeldVerbergen(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Web) umfeldGet(rw http.ResponseWriter, r *http.Request) {
-	w.umfeldSeite(rw, r, http.StatusOK, r.URL.Query().Get("mitte"), "", "")
+	w.umfeldSeite(rw, r, http.StatusOK, r.URL.Query().Get("mitte"), meldungen[r.URL.Query().Get("m")], "")
 }
 
 // umfeldSeite is the page; mitte "" puts the person (or whoever has the
-// most ties) in the middle; nach is HTML under the message (an answer's
-// Übernehmen).
-func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mitte, meldung, fehler string, nach ...string) {
+// most ties) in the middle; ?getan= shows that answer's toast.
+func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mitte, meldung, fehler string) {
 	innen, auf := w.Tresor.Innen()
 	if !auf {
 		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
 		return
 	}
 	var b strings.Builder
-	b.WriteString(`<p class=k><a href="/tresor">← Zum Tresor</a></p><h2>Umfeld</h2>`)
-	if meldung != "" {
-		fmt.Fprintf(&b, `<div class="meldung ok" role=status><p>%s</p>%s</div>`, esc(meldung), strings.Join(nach, ""))
-	}
-	if fehler != "" {
-		fmt.Fprintf(&b, `<p class="meldung fehler" role=alert>%s</p>`, esc(fehler))
-	}
+	meldungenText(&b, meldung, fehler)
 	u := w.Umfeld
 	if !u.Eingerichtet() {
 		fmt.Fprintf(&b, `<p>%s</p>`, esc(saysImmichNichtEingerichtet))
@@ -196,7 +189,7 @@ func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mit
 	b.WriteString(`<div id=umfeld-stand data-live aria-live=polite>`)
 	umfeldStandText(&b, u.Stand(), hat)
 	if !hat {
-		b.WriteString(`<p><a href="/tresor#karte-umfeld">Immich-Schlüssel eintragen</a></p>`)
+		b.WriteString(`<p><a href="/tresor/quellen#karte-umfeld">Immich-Schlüssel eintragen</a></p>`)
 	}
 	b.WriteString(`</div><div id=umfeld-netz data-live>`)
 	n := u.Netz()
@@ -207,7 +200,11 @@ func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mit
 	}
 	b.WriteString(`</div>`)
 	if n != nil {
-		w.umfeldFragen(&b, n, mitte)
+		if fs := n.Fragen(); len(fs) > 0 {
+			fmt.Fprintf(&b, `<p class=weiter-in><a href="/tresor?tab=fragen">%s beantworten</a></p>`, esc(anzahl(len(fs), "offene Frage", "offene Fragen")))
+		}
+		w.antwortenListe(&b, n, "/tresor/umfeld")
+		b.WriteString(w.toast(n, r.URL.Query().Get("getan"), "/tresor/umfeld"))
 	}
 	fmt.Fprintf(&b, `<p class=hinweis>%s</p>`, esc(saysUmfeldHinweis))
 	seite(rw, code, "Umfeld", b.String(), "")

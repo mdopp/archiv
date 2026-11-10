@@ -57,7 +57,7 @@ func TestTheSuggestionsCardAsksInPlainGerman(t *testing.T) {
 		t.Fatalf("token: %v", m)
 	}
 	rec := wt.rufe("POST", "/tresor/personen/entscheiden", anna, url.Values{"id": {"7"}, "token": {m[1]}, "antwort": {"ja"}})
-	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/tresor?m=person-ja") {
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/tresor?tab=fragen&m=person-ja") {
 		t.Fatalf("%d %s", rec.Code, rec.Header())
 	}
 	var rein map[string]string
@@ -121,7 +121,7 @@ func TestMergeTwoPersonsWithAPreview(t *testing.T) {
 	}
 	form.Set("br", "6")
 	rec = wt.rufe("POST", "/tresor/personen/zusammen", anna, form)
-	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/tresor?m=zusammen") {
+	if rec.Code != http.StatusSeeOther || !strings.HasPrefix(rec.Header().Get("Location"), "/tresor?tab=fragen&m=zusammen") {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
 	}
 	kopf := api.kopf["/api/v1/people/1/merge"]

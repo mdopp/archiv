@@ -253,7 +253,7 @@ func (w *Web) passkeyWeg(rw http.ResponseWriter, r *http.Request) {
 		w.antwort(rw, r, http.StatusInternalServerError, "", saysSpeichernFehler)
 		return
 	}
-	http.Redirect(rw, r, "/tresor?m=passkey-weg", http.StatusSeeOther)
+	http.Redirect(rw, r, "/tresor/quellen?m=passkey-weg", http.StatusSeeOther)
 }
 
 // passkeyKarte lists the passkeys while open.

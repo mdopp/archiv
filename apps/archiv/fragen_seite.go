@@ -1,30 +1,39 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 )
 
-// „Beziehungen klären“ and „Deine Antworten“ on /tresor/umfeld (archiv#27
-// step 2): the first fragenZeigen questions, each with the tie's reasons,
-// the kinds with the suggestion chosen and why, Speichern, Keine Beziehung
-// and Überspringen (Kennen sich nicht is a kind's choice, as in Homes);
-// then the answers given, each with what the phone books say of the two,
-// its Übernehmen into Homes (uebernahme.go) and Vergessen. Outside the
-// page's live blocks: a change while the person chooses never swaps a form.
+// „Wie steht X zu Y?“ (archiv#27 step 2, owner 2026-11-10: one tap): on the
+// main page's Fragen one question at a time, a card with both faces,
+// „X ist für Y …“, the kinds as chips (the suggestion marked, „mehr …“ for
+// the rest, „kennen sich nicht“), why it is suggested and where the answer
+// goes. One tap on a chip saves it in the vault and has Homes write it
+// (uebernahme.go); the page comes back with the next question and a
+// toast „✓ … eingetragen · Rückgängig“, which undoes both. Every chip is a
+// form post (no script needed); the page's script sends it in the
+// background and swaps the page in place. On /tresor/umfeld „Deine
+// Antworten“ lists every answer with Vergessen (the same undo) and, for
+// one Homes did not take, Eintragen.
 
 const (
-	fragenZeigen = 5
-
 	saysFrageWeg      = "Diese Frage gibt es nicht mehr; das Umfeld wurde inzwischen neu gerechnet."
 	saysFrageOhneWahl = "Bitte wähle zuerst, wie die beiden zueinander stehen."
-	saysUebernehmenOk = "Mit „Übernehmen“ öffnet Homes eine Seite, die zeigt, was wohin kommt; erst wenn du dort bestätigst, schreibt Homes es ins Adressbuch."
-	saysKeinHomes     = "Ins Adressbuch übernehmen geht erst, wenn Homes mit deinem Archiv verbunden ist. Sag dem Admin Bescheid."
+	saysNichtZurueck  = "Das ließ sich nicht rückgängig machen: Homes antwortet gerade nicht. Versuch es gleich noch einmal."
+	saysNichtEin      = "Homes hat es gerade nicht eingetragen. Versuch es gleich noch einmal."
+	antwortPfad       = "/tresor/umfeld/antwort"
 )
+
+// haeufig are the kinds offered first, after the suggestion.
+var haeufig = []string{"partner", "eltern", "kind", "geschwister", "freund", "kollege", "bekannt"}
 
 // duOder is a node as a sentence names it: „dir“ for the person.
 func duOder(k Knoten, ich bool) string {
@@ -34,39 +43,69 @@ func duOder(k Knoten, ich bool) string {
 	return k.Name
 }
 
-// umfeldFragen writes the questions and the answers.
-func (w *Web) umfeldFragen(b *strings.Builder, n *Netz, mitte string) {
-	if fs := n.Fragen(); len(fs) > 0 {
-		b.WriteString(`<section id=fragen><h3>Beziehungen klären</h3>`)
-		for _, f := range fs[:min(len(fs), fragenZeigen)] {
-			b.WriteString(frageKarte(n, f, mitte))
+// gesicht is a person's initials on a colour of their name.
+func gesicht(name string) string {
+	ws, kurz := strings.Fields(name), "?"
+	if len(ws) > 0 {
+		kurz = strings.ToUpper(string([]rune(ws[0])[:1]))
+	}
+	if len(ws) > 1 {
+		kurz += strings.ToUpper(string([]rune(ws[len(ws)-1])[:1]))
+	}
+	h := fnv.New32a()
+	h.Write([]byte(name))
+	return fmt.Sprintf(`<span class=av style="--h:%d" aria-hidden=true>%s</span>`, h.Sum32()%360, esc(kurz))
+}
+
+// wohinSatz says where an answer about the pair will go.
+func (w *Web) wohinSatz(u Uebernahme) (punkt, satz string) {
+	switch {
+	case u.Wohin == "" && len(u.Ohne) == 1:
+		return "grau", "bleibt in deinem Archiv: " + u.Ohne[0] + " steht in keinem Adressbuch, nur auf deinen Fotos"
+	case u.Wohin == "":
+		return "grau", "bleibt in deinem Archiv: die beiden stehen in keinem Adressbuch, nur auf deinen Fotos"
+	case !w.homesVerbunden():
+		return "grau", "bleibt vorerst in deinem Archiv: Homes ist noch nicht mit ihm verbunden"
+	case u.Wohin == wohinHaushalt:
+		return "familie", "kommt ins Adressbuch der Familie"
+	}
+	return "", "kommt nur auf dein Handy"
+}
+
+// frageKarte is the question f, of offen open ones, as one form.
+func (w *Web) frageKarte(n *Netz, f Frage, offen int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<form method=post action="%s" class="frage sofort" id=frage><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value=/tresor>`,
+		antwortPfad, esc(f.X.ID), esc(f.Y.ID))
+	fmt.Fprintf(&b, `<div class=gesichter>%s<span class=k>↔</span>%s</div><h2>%s</h2><div class=chips>`, gesicht(f.X.Name), gesicht(f.Y.Name),
+		esc(f.X.Name+" ist für "+map[bool]string{true: "dich", false: f.Y.Name}[f.Ich]+" …"))
+	var vorn []string
+	for _, a := range append([]string{f.Vorschlag}, haeufig...) {
+		if a != "" && len(vorn) < 4 && !slices.Contains(vorn, a) {
+			vorn = append(vorn, a)
 		}
-		b.WriteString(`</section>`)
 	}
-	gs := n.Gegebene()
-	if len(gs) == 0 {
-		return
+	for _, a := range vorn {
+		b.WriteString(chip(a, kurzWort(a), map[bool]string{true: " vorschlag"}[a == f.Vorschlag]))
 	}
-	b.WriteString(`<section id=antworten><h3>Deine Antworten</h3><ul class=nahe>`)
-	uebernehmbar := false
-	for _, g := range gs {
-		fmt.Fprintf(b, `<li>%s`, esc(gegebenSatz(g)))
-		if g.Buch != "" {
-			fmt.Fprintf(b, ` <span class=k>Im Telefonbuch: %s.</span>`, esc(g.Buch))
+	b.WriteString(chip(artFremd, "kennen sich nicht", "") + `<details class=mehr><summary>mehr …</summary><div class=chips>`)
+	for _, a := range arten {
+		if !slices.Contains(vorn, a) {
+			b.WriteString(chip(a, kurzWort(a), ""))
 		}
-		if g.Karte.Wohin != "" {
-			uebernehmbar = true
-		} else if slices.Contains(arten, g.Art) {
-			b.WriteString(` <span class=k>Keiner der beiden steht auf deinem Handy, und nicht beide im Haushalts-Adressbuch: übernehmen lässt sich das nicht.</span>`)
-		}
-		fmt.Fprintf(b, `%s<form method=post action="/tresor/umfeld/antwort" class=knoepfe><input type=hidden name=mitte value="%s"><input type=hidden name=paar value="%s"><button class=k name=antwort value=vergessen data-laeuft="Vergisst …">Vergessen</button></form></li>`,
-			w.uebernehmenKnopf(g.Karte), esc(mitte), esc(g.Key))
 	}
-	b.WriteString(`</ul>`)
-	if uebernehmbar {
-		fmt.Fprintf(b, `<p class=k>%s</p>`, esc(map[bool]string{true: saysUebernehmenOk, false: saysKeinHomes}[w.HomesSecret != "" && w.HomesURL != ""]))
+	b.WriteString(chip(artKeine, "keine Beziehung", "") + `</div></details></div>`)
+	if f.Weil != "" {
+		fmt.Fprintf(&b, `<p class=k>%s</p>`, esc("Vorschlag, weil "+f.Weil+"."))
 	}
-	b.WriteString(`</section>`)
+	punkt, satz := w.wohinSatz(n.Uebernahme(f.X.ID, f.Y.ID, ""))
+	fmt.Fprintf(&b, `<p class=wohin><span class="punkt %s"></span>%s</p>`, punkt, esc(satz))
+	fmt.Fprintf(&b, `<div class=fuss><button name=art value=spaeter class=leise data-laeuft="Legt es nach hinten …">Später</button><span class=k>%s</span></div></form>`, esc(anzahl(offen, "Frage", "Fragen")+" offen"))
+	return b.String()
+}
+
+func chip(art, text, klasse string) string {
+	return fmt.Sprintf(`<button name=art value=%s class="chip%s" data-laeuft="%s">%s</button>`, art, klasse, esc(text+" …"), esc(text))
 }
 
 // gegebenSatz is an answer as a sentence: „Clara ist Kind von dir.“
@@ -80,73 +119,154 @@ func gegebenSatz(g Gegeben) string {
 	return fmt.Sprintf("%s ist %s von %s.", g.X.Name, kurzWort(g.Art), duOder(g.Y, g.Ich))
 }
 
-// frageKarte is one question and its form.
-func frageKarte(n *Netz, f Frage, mitte string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<article class=frage><h4>%s</h4><p class=k>%s</p><form method=post action="/tresor/umfeld/antwort">`,
-		esc(fmt.Sprintf("Wie steht %s zu %s?", f.X.Name, duOder(f.Y, f.Ich))), esc(n.Gruende(f.Y.ID, f.Kante)))
-	fmt.Fprintf(&b, `<input type=hidden name=mitte value="%s"><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><label>%s<select name=art required><option value="">Bitte wählen</option>`,
-		esc(mitte), esc(f.X.ID), esc(f.Y.ID), esc(f.X.Name+" ist …"))
-	for _, a := range append(slices.Clone(arten), artFremd) {
-		fmt.Fprintf(&b, `<option value="%s"%s>%s</option>`, a, map[bool]string{true: " selected"}[a == f.Vorschlag], esc(artWort(a)))
+// standSatz says what became of an answer: gemerkt, eingetragen, or why not.
+func (w *Web) standSatz(g Gegeben) string {
+	switch {
+	case !slices.Contains(arten, g.Art):
+		return "gemerkt"
+	case g.Eingetragen != nil && g.Eingetragen.Wohin == wohinHandy:
+		return "eingetragen, kommt auf dein Handy"
+	case g.Eingetragen != nil:
+		return "eingetragen"
+	case g.Karte.Wohin != "" && w.homesVerbunden():
+		return "noch nicht eingetragen: Homes antwortet gerade nicht"
 	}
-	b.WriteString(`</select></label>`)
-	if f.Weil != "" {
-		fmt.Fprintf(&b, `<p class=k>%s</p>`, esc("Vorschlag, weil "+f.Weil+"."))
-	}
-	b.WriteString(`<div class=knoepfe><button name=antwort value=ja data-laeuft="Speichert …">Speichern</button>` +
-		`<button class=k name=antwort value=keine formnovalidate data-laeuft="Merkt es sich …">Keine Beziehung</button>` +
-		`<button class=k name=antwort value=spaeter formnovalidate data-laeuft="Legt es nach hinten …">Überspringen</button></div></form></article>`)
-	return b.String()
+	_, satz := w.wohinSatz(g.Karte)
+	return satz
 }
 
-// umfeldAntwort takes a question's answer (x, y, antwort ja|keine|spaeter,
-// art) or an answer's Vergessen (paar), and says how it ended; a kind
-// with its Übernehmen right there.
+// toast is „✓ … eingetragen · Rückgängig“ for the answer key; it goes
+// after ten seconds (the stylesheet), the answer stays undoable under
+// „Deine Antworten“.
+func (w *Web) toast(n *Netz, key, zurueck string) string {
+	g, ok := n.Gegebenes(key)
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf(`<div class=toast role=status><span>✓ %s · %s</span><form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s"><button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button></form></div>`,
+		esc(strings.TrimSuffix(gegebenSatz(g), ".")), esc(w.standSatz(g)), antwortPfad, esc(key), esc(zurueck))
+}
+
+// antwortenListe is „Deine Antworten“: each with what the phone books say,
+// what became of it, Eintragen when Homes has not, and Vergessen.
+func (w *Web) antwortenListe(b *strings.Builder, n *Netz, zurueck string) {
+	gs := n.Gegebene()
+	if len(gs) == 0 {
+		return
+	}
+	b.WriteString(`<section id=antworten class=karte><h2>Deine Antworten</h2><ul>`)
+	for _, g := range gs {
+		fmt.Fprintf(b, `<li class=tu><div>%s<span class=k>%s`, esc(gegebenSatz(g)), esc(w.standSatz(g)))
+		if g.Buch != "" {
+			fmt.Fprintf(b, ` · im Telefonbuch: %s`, esc(g.Buch))
+		}
+		fmt.Fprintf(b, `</span></div><form method=post action="%s" class="knoepfe sofort"><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s">`, antwortPfad, esc(g.Key), esc(zurueck))
+		if g.Eingetragen == nil && g.Karte.Wohin != "" && w.homesVerbunden() {
+			b.WriteString(`<button name=tu value=eintragen data-laeuft="Trägt ein …">Eintragen</button>`)
+		}
+		b.WriteString(`<button name=tu value=vergessen class=leise data-laeuft="Vergisst …">Vergessen</button></form></li>`)
+	}
+	b.WriteString(`</ul><p class=k>Vergessen nimmt eine Antwort zurück, auch aus dem Adressbuch, und die Frage kommt wieder.</p></section>`)
+}
+
+// zurueckNach is where an answer's form goes back to: the main page's
+// Fragen or the Umfeld page, never elsewhere.
+func zurueckNach(z string) string {
+	if strings.HasPrefix(z, "/tresor/umfeld") {
+		return "/tresor/umfeld"
+	}
+	return "/tresor"
+}
+
+func mitAnfrage(pfad string, v url.Values) string {
+	if pfad == "/tresor" {
+		v.Set("tab", "fragen")
+	}
+	return pfad + "?" + v.Encode()
+}
+
+// umfeldAntwort takes a chip (x, y, art), an answer's Vergessen or
+// Eintragen (paar, tu), and goes back where it came from with the toast.
 func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 	innen, ok := w.Tresor.Innen()
 	if !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
 	}
-	mitte, antwort := r.PostFormValue("mitte"), r.PostFormValue("antwort")
-	if antwort == "vergessen" {
-		if err := w.Umfeld.Vergessen(innen, r.PostFormValue("paar")); err != nil {
-			w.antwortFehler(rw, r, mitte, err)
+	zurueck, key := zurueckNach(r.PostFormValue("zurueck")), r.PostFormValue("paar")
+	switch r.PostFormValue("tu") {
+	case "vergessen":
+		g, da := w.Umfeld.Netz().Gegebenes(key)
+		if da && g.Eingetragen != nil {
+			if err := w.homesSchreiben(r.Context(), g.Eingetragen.Zeile, true); err != nil {
+				log.Printf("archiv: Umfeld: Rückgängig nicht an Homes: %v", err)
+				w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtZurueck)
+				return
+			}
+		}
+		if err := w.Umfeld.Vergessen(innen, key); err != nil {
+			w.antwortFehler(rw, r, zurueck, err)
 			return
 		}
-		w.umfeldSeite(rw, r, http.StatusOK, mitte, "Vergessen. Das Archiv fragt vielleicht später wieder danach.", "")
+		http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"m": {"zurueck"}}), http.StatusSeeOther)
+		return
+	case "eintragen":
+		if err := w.eintragen(r.Context(), innen, key); err != nil {
+			w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtEin)
+			return
+		}
+		http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"getan": {key}}), http.StatusSeeOther)
 		return
 	}
-	art, erlaubt := map[string]string{"ja": r.PostFormValue("art"), "keine": artKeine, "spaeter": artSpaeter}[antwort]
-	if !erlaubt || art == "" {
-		w.umfeldSeite(rw, r, http.StatusBadRequest, mitte, "", saysFrageOhneWahl)
+	art := r.PostFormValue("art")
+	if !gueltig(art) {
+		w.zurueckFehler(rw, r, zurueck, http.StatusBadRequest, saysFrageOhneWahl)
 		return
 	}
 	f, err := w.Umfeld.Beantworten(innen, r.PostFormValue("x"), r.PostFormValue("y"), art)
 	if err != nil {
-		w.antwortFehler(rw, r, mitte, err)
+		w.antwortFehler(rw, r, zurueck, err)
 		return
 	}
-	du := duOder(f.Y, f.Ich)
-	switch art {
-	case artKeine:
-		w.umfeldSeite(rw, r, http.StatusOK, mitte, "Gemerkt: keine Beziehung. Das Archiv fragt danach nicht wieder.", "")
-	case artSpaeter:
-		w.umfeldSeite(rw, r, http.StatusOK, mitte, "Übersprungen. Die Frage kommt später noch einmal.", "")
-	case artFremd:
-		w.umfeldSeite(rw, r, http.StatusOK, mitte, "Gemerkt: Die beiden kennen sich nicht. Das Archiv zeigt keine Verbindung mehr zwischen ihnen und fragt nicht wieder.", "")
-	default:
-		satz := fmt.Sprintf("Gespeichert: %s ist %s von %s. Das steht nur in deinem Tresor.", f.X.Name, kurzWort(art), du)
-		w.umfeldSeite(rw, r, http.StatusOK, mitte, satz, "", w.uebernehmenKnopf(w.Umfeld.Netz().Uebernahme(f.X.ID, f.Y.ID, art)))
+	key = paarKey(f.X.ID, f.Y.ID)
+	if art == artSpaeter {
+		http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{}), http.StatusSeeOther)
+		return
 	}
+	w.eintragen(r.Context(), innen, key) // a refusal stays visible: the toast and the list say „noch nicht eingetragen“
+	http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"getan": {key}}), http.StatusSeeOther)
 }
 
-func (w *Web) antwortFehler(rw http.ResponseWriter, r *http.Request, mitte string, err error) {
+// eintragen has Homes write the answer key, if it goes anywhere and is not
+// written yet, and keeps in the vault what was written.
+func (w *Web) eintragen(ctx context.Context, innen Innen, key string) error {
+	g, da := w.Umfeld.Netz().Gegebenes(key)
+	if !da || g.Eingetragen != nil || g.Karte.Wohin == "" || !slices.Contains(arten, g.Art) {
+		return nil
+	}
+	if err := w.homesSchreiben(ctx, g.Karte.Zeile, false); err != nil {
+		if !errors.Is(err, errKeinHomes) {
+			log.Printf("archiv: Umfeld: eine Antwort nicht an Homes: %v", err)
+		}
+		return err
+	}
+	return w.Umfeld.Eintragen(innen, key, &Eingetragen{Wohin: g.Karte.Wohin, Zeile: g.Karte.Zeile, Am: w.jetzt()})
+}
+
+// zurueckFehler shows the page the form came from with fehler.
+func (w *Web) zurueckFehler(rw http.ResponseWriter, r *http.Request, zurueck string, code int, fehler string) {
+	if zurueck == "/tresor/umfeld" {
+		w.umfeldSeite(rw, r, code, "", "", fehler)
+		return
+	}
+	w.antwort(rw, r, code, "", fehler)
+}
+
+func (w *Web) antwortFehler(rw http.ResponseWriter, r *http.Request, zurueck string, err error) {
 	if errors.Is(err, errFrageWeg) || errors.Is(err, errUmfeldZu) {
-		w.umfeldSeite(rw, r, http.StatusConflict, mitte, "", saysFrageWeg)
+		w.zurueckFehler(rw, r, zurueck, http.StatusConflict, saysFrageWeg)
 		return
 	}
 	log.Printf("archiv: Umfeld: eine Antwort nicht gespeichert: %v", err)
-	w.umfeldSeite(rw, r, http.StatusInternalServerError, mitte, "", saysUmfeldVerbergen)
+	w.zurueckFehler(rw, r, zurueck, http.StatusInternalServerError, saysUmfeldVerbergen)
 }

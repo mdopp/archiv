@@ -71,6 +71,7 @@ var meldungen = map[string]string{
 	"zusammen":    "Die beiden sind jetzt eine Person.",
 	"abgleich":    "Das Archiv gleicht deine Kontakte und Kalender jetzt ab.",
 	"umfeld":      saysUmfeldGespeichert,
+	"zurueck":     "Rückgängig gemacht. Die Frage kommt wieder.",
 }
 
 // Web is the whole HTTP side.
@@ -85,8 +86,8 @@ type Web struct {
 	Eingang     *Eingang
 	Protokoll   *Protokoll
 	Schluessel  Schluessel   // outside the vault: the import runs while it is closed
-	HomesSecret string       // ARCHIV_HOMES_SECRET (legacy ARCHIV_HAUS_SECRET): Homes' way to the restore files; signs a takeover (uebernahme.go)
-	HomesURL    string       // Homes' address, where „Übernehmen“ goes (homesURL); "" none
+	HomesSecret string       // ARCHIV_HOMES_SECRET (legacy ARCHIV_HAUS_SECRET): Homes' way to the restore files; signs what Homes writes (uebernahme.go)
+	HomesIntern string       // Homes on the box (ARCHIV_HOMES_INTERN), where an answer is written; "" none
 	Letzte      string       // /eingang/letzte
 	Archiv      http.Handler // msgvault, see archivProxy
 	Geaendert   func()
@@ -243,6 +244,10 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("GET /tresor", func(rw http.ResponseWriter, r *http.Request) {
 		w.tresorSeite(rw, r, http.StatusOK, meldungen[r.URL.Query().Get("m")], "")
 	})
+	mux.HandleFunc("GET /tresor/quellen", func(rw http.ResponseWriter, r *http.Request) {
+		w.quellenSeite(rw, r, http.StatusOK, meldungen[r.URL.Query().Get("m")], "")
+	})
+	mux.HandleFunc("GET /tresor/suche", w.suche)
 	mux.HandleFunc("GET /tresor/stand", w.stand)
 	mux.HandleFunc("GET /tresor/live", w.live)
 	mux.HandleFunc("POST /tresor/anlegen", w.anlegen)
@@ -313,8 +318,16 @@ func (w *Web) packt() string {
 	return ""
 }
 
-// antwort ends a form: back to the page with the sentence.
+// quellenFormulare are the forms on the sources' page; the others are the main page's.
+var quellenFormulare = map[string]bool{"/tresor/signal": true, "/tresor/imap": true, "/tresor/whatsapp": true, "/tresor/abgleich": true,
+	"/tresor/umfeld/schluessel": true, "/tresor/passkey/weg": true}
+
+// antwort ends a form: back to the page it came from, with the sentence.
 func (w *Web) antwort(rw http.ResponseWriter, r *http.Request, code int, meldung, fehler string) {
+	if quellenFormulare[r.URL.Path] {
+		w.quellenSeite(rw, r, code, meldung, fehler)
+		return
+	}
 	w.tresorSeite(rw, r, code, meldung, fehler)
 }
 
@@ -435,7 +448,7 @@ func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 	if w.Geaendert != nil {
 		w.Geaendert()
 	}
-	http.Redirect(rw, r, "/tresor?m=signal", http.StatusSeeOther)
+	http.Redirect(rw, r, "/tresor/quellen?m=signal", http.StatusSeeOther)
 }
 
 func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
@@ -469,7 +482,7 @@ func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
 	if w.Geaendert != nil {
 		w.Geaendert()
 	}
-	http.Redirect(rw, r, "/tresor?m=imap", http.StatusSeeOther)
+	http.Redirect(rw, r, "/tresor/quellen?m=imap", http.StatusSeeOther)
 }
 
 // whatsapp stores the key inside the vault (as Signal's passphrase):
@@ -496,7 +509,7 @@ func (w *Web) whatsapp(rw http.ResponseWriter, r *http.Request) {
 	if w.Geaendert != nil {
 		w.Geaendert()
 	}
-	http.Redirect(rw, r, "/tresor?m=whatsapp", http.StatusSeeOther)
+	http.Redirect(rw, r, "/tresor/quellen?m=whatsapp", http.StatusSeeOther)
 }
 
 // --- the page
@@ -511,59 +524,70 @@ func knopf(text, laeuft string, klasse string) string {
 	return fmt.Sprintf(`<button%s data-laeuft="%s">%s</button>`, k, esc(laeuft), esc(text))
 }
 
+// oben is a page's top bar: its title and, right, rechts (a button).
+func oben(titel, rechts string) string {
+	return `<header class=oben><h1>` + esc(titel) + `</h1>` + rechts + `</header>`
+}
+
+// meldungenText writes a form's outcome: its sentence, or its error.
+func meldungenText(b *strings.Builder, meldung, fehler string) {
+	if meldung != "" {
+		fmt.Fprintf(b, `<p class="meldung ok" role=status>%s</p>`, esc(meldung))
+	}
+	if fehler != "" {
+		fmt.Fprintf(b, `<p class="meldung fehler" role=alert>%s</p>`, esc(fehler))
+	}
+}
+
+// tresorSeite is the main page: setting the vault up, opening it, or —
+// open — the workplace (arbeitsplatz.go).
 func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, meldung, fehler string) {
 	st := w.Tresor.Stand()
 	var b strings.Builder
-	if meldung != "" {
-		fmt.Fprintf(&b, `<p class="meldung ok" role=status>%s</p>`, esc(meldung))
-	}
-	if fehler != "" {
-		fmt.Fprintf(&b, `<p class="meldung fehler" role=alert>%s</p>`, esc(fehler))
-	}
-	extra := ""
 	switch st.Zustand {
 	case Uneingerichtet:
-		b.WriteString(`<h2>Dein Nachrichten-Archiv einrichten</h2>
+		b.WriteString(oben("Dein Archiv", ""))
+		meldungenText(&b, meldung, fehler)
+		b.WriteString(`<section class=karte><h2>Einrichten</h2><div class=flaeche>
 <p>Hier landen deine Signal-Nachrichten und deine E-Mails, später auch WhatsApp: durchsuchbar und nur für dich. Alles liegt in einem Tresor, den nur dein Archiv-Passwort öffnet.</p>`)
 		fmt.Fprintf(&b, `<p class=hinweis>%s</p><p class=hinweis>%s</p>`, saysVerloren, saysAdminLiest)
 		fmt.Fprintf(&b, `<form method=post action="/tresor/anlegen" class=feld>
 <input name=konto autocomplete=username value="%s" hidden>
 <label>Archiv-Passwort<input type=password name=passwort autocomplete=new-password minlength=10 required></label>
 <label>Noch einmal<input type=password name=wiederholung autocomplete=new-password minlength=10 required></label>
-%s</form>`, esc("Archiv "+w.Person), knopf("Tresor anlegen", "Lege den Tresor an …", ""))
+%s</form></div></section>`, esc("Archiv "+w.Person), knopf("Tresor anlegen", "Lege den Tresor an …", "voll"))
 		b.WriteString(w.eingangText(false))
 	case Verschlossen:
-		b.WriteString(`<h2>Dein Archiv ist abgeschlossen</h2><div id=briefkasten data-live>` + w.briefkastenText() + `</div>`)
+		b.WriteString(oben("Dein Archiv", ""))
+		meldungenText(&b, meldung, fehler)
+		b.WriteString(`<section class=karte><h2>Abgeschlossen</h2><div class=flaeche>`)
 		if len(w.Passkeys.Liste()) > 0 {
-			b.WriteString(`<form method=post action="/tresor/oeffnen-passkey" id=mit-passkey hidden><input type=hidden name=id><input type=hidden name=prf>` + knopf("Mit Passkey öffnen", "Öffne das Archiv …", "") + `</form><p class=k id=oder-passwort hidden>oder mit dem Archiv-Passwort:</p>`)
+			b.WriteString(`<form method=post action="/tresor/oeffnen-passkey" id=mit-passkey hidden><input type=hidden name=id><input type=hidden name=prf>` + knopf("Mit Passkey öffnen", "Öffne das Archiv …", "voll") + `</form><p class=k id=oder-passwort hidden>oder mit dem Archiv-Passwort:</p>`)
 		}
 		fmt.Fprintf(&b, `<form method=post action="/tresor/oeffnen" class=feld id=mit-passwort>
 <input name=konto autocomplete=username value="%s" hidden>
 <label>Archiv-Passwort<input type=password name=passwort autocomplete=current-password required autofocus></label>
 <label class=haken id=passkey-neu hidden><input type=checkbox name=pk_neu value=1> Künftig mit Passkey öffnen (dieses Gerät fragt nach Fingerabdruck oder PIN)</label>
 <input type=hidden name=pk_id><input type=hidden name=pk_salt><input type=hidden name=pk_prf>
-%s</form>`, esc("Archiv "+w.Person), knopf("Archiv öffnen", "Öffne das Archiv …", ""))
-		fmt.Fprintf(&b, `<p class=k>%s Schlüssel ändern kannst du, wenn es offen ist.</p>`, saysAdminLiest)
+%s</form></div></section>`, esc("Archiv "+w.Person), knopf("Archiv öffnen", "Öffne das Archiv …", "voll"))
+		b.WriteString(`<div id=briefkasten data-live>` + w.briefkastenText() + `</div>`)
 		w.laeuftJetzt(&b)
-		w.signalKarte(&b, false)
-		w.mailKarte(&b, false)
-		w.smsKarte(&b)
-		w.whatsappKarte(&b)
-		w.kontakteKarte(&b, false)
+		w.quellenZeile(&b, false)
+		fmt.Fprintf(&b, `<p class=ruhig><span class="punkt grau"></span>%s</p>`, saysAdminLiest)
 	case Offen:
-		b.WriteString(`<div id=kopf data-live>`)
-		if !st.Bereit {
-			if st.Fehler != "" {
-				fmt.Fprintf(&b, `<p class="meldung fehler" role=alert>%s</p>`, esc(st.Fehler))
-			} else {
-				b.WriteString(`<h2>Dein Archiv startet …</h2><p class=k>Das dauert meist unter einer Minute. Sobald es bereit ist, erscheint hier „Archiv durchsuchen“.</p>`)
-			}
-		} else {
-			b.WriteString(`<h2>Dein Archiv ist offen</h2><p><a class=gross href="/">Archiv durchsuchen</a></p>`)
+		b.WriteString(oben("Dein Archiv", `<form method=post action="/tresor/abschliessen">`+knopf("Abschließen", "Schließe ab …", "leise")+`</form>`))
+		meldungenText(&b, meldung, fehler)
+		b.WriteString(`<div id=suche data-live>`)
+		switch {
+		case st.Bereit:
+			b.WriteString(sucheForm(""))
+		case st.Fehler != "":
+			fmt.Fprintf(&b, `<div class=achtung role=alert><p>%s</p></div>`, esc(st.Fehler))
+		default:
+			b.WriteString(`<p class=ruhig><span class=laeuft></span>Dein Archiv startet … Das dauert meist unter einer Minute; dann erscheint hier die Suche.</p>`)
 		}
-		fmt.Fprintf(&b, `<form method=post action="/tresor/abschliessen">%s</form>`, knopf("Abschließen", "Schließe ab …", "k"))
 		if !st.ZuUm.IsZero() {
-			fmt.Fprintf(&b, `<p class=k>Es schließt sich von selbst nach %s ohne Nutzung, also um %s, wenn bis dahin nichts geschieht. %s</p>`,
+			fmt.Fprintf(&b, `<p class="ruhig klein">Es schließt sich von selbst nach %s ohne Nutzung, also um %s, wenn bis dahin nichts geschieht. %s</p>`,
 				dauerText(w.Tresor.Leerlauf), st.ZuUm.Local().Format("15:04"), saysAdminLiest)
 		}
 		b.WriteString(`</div>`)
@@ -573,18 +597,10 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 			b.WriteString(w.briefkastenText())
 		}
 		b.WriteString(`</div>`)
-		w.signalKarte(&b, true)
-		w.mailKarte(&b, true)
-		w.smsKarte(&b)
-		w.whatsappKarte(&b)
-		w.kontakteKarte(&b, true)
-		w.umfeldKarte(&b)
-		if st.Bereit {
-			w.personenKarte(&b)
-		}
-		w.passkeyKarte(&b)
+		w.arbeitsplatz(&b, r, st.Bereit)
+		w.quellenZeile(&b, true)
 	}
-	seite(rw, code, "Archiv", b.String(), extra)
+	seite(rw, code, "Archiv", b.String(), "")
 }
 
 func dauerText(d time.Duration) string {
@@ -980,15 +996,24 @@ func maskiert(tel string) string {
 }
 
 // seite wraps a page: the same head, one stylesheet, one small script.
+// The main page ("Archiv") writes its own top bar; every other page gets
+// the way back to it and its title.
 func seite(rw http.ResponseWriter, code int, titel, body, extra string) {
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.Header().Set("Cache-Control", "no-store")
 	rw.WriteHeader(code)
-	fmt.Fprintf(rw, `<!doctype html><html lang=de><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>%s</title><style>%s</style>%s</head><body><header><h1><a href="/tresor">Archiv</a></h1></header><main>%s%s</main></body></html>`,
-		esc(titel), css, skript, body, extra)
+	kopf := ""
+	if titel != "Archiv" {
+		kopf = `<header class=oben><a class=zurueck href="/tresor">‹ Dein Archiv</a></header><h1>` + esc(titel) + `</h1>`
+	}
+	fmt.Fprintf(rw, `<!doctype html><html lang=de><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name=color-scheme content="dark light"><title>%s</title><style>%s</style>%s</head><body><main>%s%s%s</main></body></html>`,
+		esc(titel), css, skript, kopf, body, extra)
 }
 
-// skript: a pressed button says at once what runs (data-laeuft). The page
+// skript: a pressed button says at once what runs (data-laeuft). A form
+// marked sofort (a question's chip, Rückgängig) goes in the background and
+// the page it ends on replaces this one in place, its address without the
+// toast's; without script the same form posts and the browser follows. The page
 // is live: it listens on /tresor/live and, on a change, fetches itself and
 // swaps only the blocks marked data-live, by id — scroll position, an open
 // <details> and a half-typed field stay as they are. A block the person is
@@ -997,6 +1022,12 @@ func seite(rw http.ResponseWriter, code int, titel, body, extra string) {
 // msgvault answers.
 const skript = `<script>
 document.addEventListener('submit',function(e){var b=e.submitter||e.target.querySelector('button');if(!b||!b.dataset.laeuft)return;setTimeout(function(){b.textContent=b.dataset.laeuft;b.disabled=true;b.setAttribute('aria-busy','true')},0)});
+document.addEventListener('submit',function(e){var f=e.target,s=e.submitter;if(!f.classList.contains('sofort')||f.dataset.ohne||!window.fetch||!window.DOMParser||!window.URLSearchParams)return;e.preventDefault();
+var d=new FormData(f);if(s&&s.name)d.append(s.name,s.value);
+fetch(f.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-origin'}).then(function(r){return r.text().then(function(t){return {r:r,t:t}})}).then(function(x){
+var m=new DOMParser().parseFromString(x.t,'text/html').querySelector('main');if(!m)throw 0;document.querySelector('main').replaceWith(document.importNode(m,true));
+if(x.r.redirected){var u=new URL(x.r.url);u.searchParams.delete('getan');u.searchParams.delete('m');history.replaceState(null,'',u.pathname+u.search)}
+}).catch(function(){f.dataset.ohne=1;if(f.requestSubmit)f.requestSubmit(s);else f.submit()})});
 document.addEventListener('DOMContentLoaded',function(){
 if(!window.PublicKeyCredential||!window.fetch)return;
 ['passkey-neu','mit-passkey','oder-passwort'].forEach(function(i){var e=document.getElementById(i);if(e)e.hidden=false});
@@ -1036,36 +1067,66 @@ document.addEventListener('visibilitychange',function(){if(!document.hidden)bald
 });
 </script>`
 
+// css is Homes' look (homes internal/pages/family.go frame and
+// internal/cards): its tokens, dark first and light when the phone is; its
+// rows in cards, pills for the parts, the quiet line with a dot; phone
+// width first, 16 px at the sides, nothing wider than the screen.
 const css = `
-:root{--fg:#1d2730;--bg:#fff;--k:#5f6b78;--line:#e3e8ee;--akzent:#2b6f8f;--ausser:#b4432f;--ok:#2f7d4f;--flaeche:#f4f7f9}
-@media(prefers-color-scheme:dark){:root{--fg:#e7ecf0;--bg:#141a1f;--k:#a3aeb9;--line:#2a333c;--akzent:#7fb6d2;--ausser:#e88a77;--ok:#6cc08b;--flaeche:#1b232a}}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,sans-serif}
-header{padding:.6rem 1rem;border-bottom:1px solid var(--line)}header h1{margin:0;font-size:1.15rem}header a{color:inherit;text-decoration:none}
-main{max-width:40rem;margin:0 auto;padding:1rem}
-a{color:var(--akzent)}a.gross{font-size:1.1rem;font-weight:600}
-h2{font-size:1.25rem;margin:.4rem 0 .6rem}h3{font-size:1rem;margin:1.6rem 0 .4rem}
-.k{color:var(--k);font-size:.92rem}.ok{color:var(--ok)}
-.hinweis{padding:.6rem .8rem;border-left:3px solid var(--akzent);background:var(--flaeche);border-radius:0 8px 8px 0}
-.meldung{padding:.6rem .8rem;border-radius:8px;background:var(--flaeche)}.meldung.ok{border-left:3px solid var(--ok);color:inherit}.meldung.fehler{border-left:3px solid var(--ausser)}
-.laeuft{font-weight:500}
-form{margin:.8rem 0}.feld label{display:block;margin:.6rem 0;font-size:.95rem}
-input{display:block;font:inherit;padding:.5rem .6rem;margin-top:.2rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:inherit;width:100%;max-width:420px;box-sizing:border-box}
-button{font:inherit;padding:.55rem 1.1rem;border:1px solid var(--akzent);border-radius:8px;background:var(--akzent);color:#fff;min-height:44px}button.k{background:none;color:var(--fg);border-color:var(--line)}
-button[aria-busy=true]{opacity:.6;cursor:progress}
-section{margin-top:1.2rem;border-top:1px solid var(--line)}
-.haken{display:flex!important;gap:.5rem;align-items:flex-start}.haken input{width:auto;margin-top:.2rem}
-form.zeile{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:.3rem 0}
-section.quelle{border:1px solid var(--line);border-radius:10px;padding:.2rem 1rem .6rem;margin-top:1rem}section.quelle h3{margin-top:.8rem}
-section.jetzt{border:1px solid var(--akzent);border-radius:10px;padding:.2rem 1rem .6rem;margin-top:1rem}
-progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-color:var(--akzent)}
-.zugang{font-size:.95rem}.fehlt{color:var(--ausser);font-weight:500}
-details{margin:.4rem 0}summary{cursor:pointer;color:var(--akzent);font-weight:500;min-height:44px;display:flex;align-items:center}
-ol{padding-left:1.2rem}li{margin:.3rem 0}
-.vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:.5rem}
-.frage{border-top:1px solid var(--line);padding:.4rem 0}.frage h4{margin:.4rem 0;font-size:1rem}.frage form{margin:.4rem 0}.frage label{display:block}
-.meldung form.knoepfe,.nahe form.knoepfe{align-items:center;flex-wrap:wrap}.meldung p{margin:0 0 .4rem}
-.netzbild{display:block;width:100%;max-width:400px;height:auto;margin:1rem auto 0}.netzbild line{stroke:var(--k);stroke-linecap:round}.netzbild line.zw{stroke:var(--line);stroke-width:.6}
-.netzbild circle{fill:var(--bg);stroke:var(--akzent);stroke-width:1.5}.netzbild .mitte circle{fill:var(--akzent)}.netzbild text{fill:var(--fg);font-size:10px;text-anchor:middle}.netzbild a:focus circle,.netzbild a:hover circle{fill:var(--akzent)}
-ol.nahe,ul.nahe{padding-left:1.4rem}.nahe li{margin:.7rem 0}.nahe form.knoepfe{margin:.2rem 0 0;flex-wrap:wrap}.nahe button{min-height:36px;padding:.3rem .8rem;font-size:.92rem}
-select{display:block;font:inherit;padding:.5rem .6rem;margin-top:.2rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:inherit;width:100%;max-width:420px}
+:root{color-scheme:dark;--bg:#070709;--panel:#0c0c0e;--card:#14141a;--edge:rgba(255,255,255,.12);--line:rgba(255,255,255,.07);--ink:#f2f2f5;--muted:#9aa0ae;--faint:#6b7280;
+--accent:#f97316;--accent-soft:rgba(249,115,22,.14);--ok:#10b981;--ok-soft:rgba(16,185,129,.12);--warn:#f59e0b;--warn-soft:rgba(245,158,11,.12);--danger:#ef5350;--danger-soft:rgba(239,83,80,.12);--track:rgba(255,255,255,.15)}
+@media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#f1f5f9;--panel:#ffffff;--card:#ffffff;--edge:rgba(15,23,42,.12);--line:rgba(15,23,42,.08);--ink:#0f172a;--muted:#64748b;--faint:#94a3b8;
+--accent:#ea580c;--accent-soft:rgba(234,88,12,.10);--ok:#059669;--ok-soft:rgba(5,150,105,.10);--warn:#b45309;--warn-soft:rgba(180,83,9,.10);--danger:#dc2626;--danger-soft:rgba(220,38,38,.08);--track:rgba(15,23,42,.12)}}
+*{box-sizing:border-box}html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+main{max-width:40rem;margin:0 auto;padding:0 max(16px,env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));overflow-wrap:anywhere}
+.oben{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 6px;min-height:44px}.oben form{margin:0}
+h1{font-size:1.6rem;font-weight:700;letter-spacing:-.01em;line-height:1.2;margin:0}main>h1{margin:6px 0 4px}
+h2{font-size:.95rem;font-weight:700;margin:22px 2px 8px}h3{font-size:1rem;font-weight:700;margin:12px 0 6px}
+p{margin:12px 0}a{color:var(--accent)}.k{color:var(--muted);font-size:.9rem}.ok{color:var(--ok)}
+a.zurueck{text-decoration:none;font-weight:600;min-height:44px;display:inline-flex;align-items:center}
+button{font:inherit;font-size:.9rem;font-weight:600;color:var(--accent);background:var(--accent-soft);border:0;border-radius:999px;padding:0 16px;min-height:44px;cursor:pointer}
+button.voll{background:var(--accent);color:#fff}button.leise,button.k{background:none;color:var(--muted);font-weight:400;text-decoration:underline;padding:0 8px}
+button[disabled],button[aria-busy=true]{opacity:.6;cursor:progress}
+input,select{display:block;width:100%;max-width:100%;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:0 14px;min-height:44px;margin-top:4px}
+input[type=checkbox]{display:inline;width:auto;min-height:0;margin:.3rem 0 0}
+form{margin:12px 0}.feld label{display:block;margin:10px 0;font-size:.95rem}.haken{display:flex!important;gap:.5rem;align-items:flex-start}
+form[role=search]{display:flex;gap:8px;margin:10px 0 0}form[role=search] input{flex:1;min-width:0;margin:0;border-radius:999px;padding:0 16px}
+.unterseiten{display:flex;gap:8px;margin:18px 0 0;overflow-x:auto}.unterseiten a{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;border-radius:999px;background:var(--card);color:var(--ink);text-decoration:none;font-size:.9rem;white-space:nowrap}
+.unterseiten a[aria-current]{color:var(--accent);background:var(--accent-soft);font-weight:600}
+.anzahl{display:inline-block;min-width:1.5em;padding:0 .4em;border-radius:999px;background:var(--accent);color:var(--bg);font-size:.72rem;font-weight:700;line-height:1.5em;text-align:center}
+.karte{margin:18px 0 0}.karte ul{list-style:none;margin:0;padding:0;background:var(--card);border-radius:14px}
+.karte li{padding:11px 14px;border-top:1px solid var(--line);min-height:44px}.karte li:first-child{border-top:0}.karte li .k{display:block;font-size:.82rem}
+.karte li.tu{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.karte li.tu>div{flex:1 1 12rem}
+.flaeche,section.quelle,section.jetzt{background:var(--card);border-radius:14px;padding:4px 14px 10px;margin:14px 0 0}section.jetzt{border:1px solid var(--accent)}
+.frage{background:var(--card);border-radius:20px;padding:16px;margin:16px 0 0;display:grid;gap:12px}.frage h2{margin:0;font-size:1.2rem;line-height:1.3}.frage p{margin:0}
+.gesichter{display:flex;align-items:center;gap:10px}.av{width:52px;height:52px;flex:none;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;background:hsl(var(--h) 38% 42%)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}.chip{background:var(--panel);color:var(--ink);border:1.5px solid var(--edge);font-size:1rem;padding:0 16px}
+.chip.vorschlag{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+details.mehr{flex-basis:100%}details.mehr>summary{display:inline-flex;align-items:center;min-height:44px;padding:0 4px;color:var(--muted);cursor:pointer}details.mehr .chips{margin-top:6px}
+.wohin{display:flex;gap:8px;align-items:baseline;font-size:.9rem;color:var(--muted)}
+.fuss{display:flex;justify-content:space-between;align-items:center;gap:8px}.fuss button{margin-left:-8px}
+.naechste{height:14px;margin:-6px 14px 0;border-radius:0 0 20px 20px;background:var(--card);opacity:.5}
+.punkt{width:8px;height:8px;margin-top:.45em;border-radius:50%;background:var(--accent);flex:none;display:inline-block}.punkt.familie{background:var(--ok)}.punkt.grau{background:var(--faint)}.punkt.gelb{background:var(--warn)}
+.ruhig{display:flex;gap:8px;align-items:flex-start;margin:16px 2px 0;color:var(--muted);font-size:.9rem}.ruhig.klein{font-size:.8rem;margin-top:8px}
+div.gut{display:flex;gap:8px;align-items:flex-start;margin:16px 0 0;padding:12px 14px;background:var(--ok-soft);border-radius:14px}div.gut p{margin:0}div.gut .punkt{background:var(--ok)}
+.achtung{margin:16px 0 0;padding:12px 14px;background:var(--danger-soft);border-radius:14px}.achtung p{margin:0}
+.weiter-in{margin:16px 2px 0;font-size:.9rem}.weiter-in a{font-weight:600;text-decoration:none}.weiter-in .k{display:block;font-size:.8rem;margin-top:2px}
+a.quellen{display:flex;justify-content:space-between;gap:10px;align-items:center;min-height:52px;margin:22px 0 0;padding:10px 2px 0;border-top:1px solid var(--line);color:var(--muted);text-decoration:none;font-size:.9rem}
+a.quellen b{flex:none;font-weight:600;color:var(--ink)}a.quellen b.gut{color:var(--ok)}a.quellen b.achtung{margin:0;padding:2px 10px;color:var(--danger)}
+.leute a{display:flex;align-items:center;gap:12px;color:inherit;text-decoration:none}.leute .av{width:36px;height:36px;font-size:.8rem}.leute .wer{flex:1;min-width:0}
+.balken{width:64px;height:6px;flex:none;border-radius:3px;background:var(--track);overflow:hidden}.balken b{display:block;height:100%;background:var(--accent)}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:5;max-width:36rem;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 8px 8px 14px;border-radius:14px;background:var(--ink);color:var(--bg);font-size:.9rem;animation:weg .3s 10s forwards}
+.toast form{margin:0;flex:none}.toast button{color:var(--accent);font-weight:700;text-decoration:none}@keyframes weg{to{opacity:0;visibility:hidden}}
+.hinweis{padding:10px 12px;border-left:3px solid var(--accent);background:var(--panel);border-radius:0 10px 10px 0;font-size:.92rem}
+.meldung{padding:10px 12px;border-radius:10px;background:var(--panel)}.meldung.ok{border-left:3px solid var(--ok)}.meldung.fehler{border-left:3px solid var(--danger)}
+p.laeuft{font-weight:600}span.laeuft{flex:none;width:14px;height:14px;margin-top:.3em;border-radius:50%;border:2px solid var(--accent-soft);border-top-color:var(--accent);animation:dreht 1s linear infinite}@keyframes dreht{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){span.laeuft{animation:none;background:var(--accent)}}
+progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-color:var(--accent)}
+.zugang{font-size:.95rem}.fehlt{color:var(--danger);font-weight:600}
+details{margin:6px 0}summary{cursor:pointer;color:var(--accent);font-weight:600;min-height:44px;display:flex;align-items:center}
+ol{padding-left:1.2rem}li{margin:.3rem 0}form.zeile{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:.3rem 0}
+.vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0}
+.netzbild{display:block;width:100%;max-width:400px;height:auto;margin:1rem auto 0}.netzbild line{stroke:var(--muted);stroke-linecap:round}.netzbild line.zw{stroke:var(--line);stroke-width:.6}
+.netzbild circle{fill:var(--bg);stroke:var(--accent);stroke-width:1.5}.netzbild .mitte circle{fill:var(--accent)}.netzbild text{fill:var(--ink);font-size:10px;text-anchor:middle}.netzbild a:focus circle,.netzbild a:hover circle{fill:var(--accent)}
+ol.nahe,ul.nahe{padding-left:1.4rem}.nahe li{margin:.7rem 0}.nahe form.knoepfe{margin:.2rem 0 0}.nahe button{min-height:36px;padding:0 12px;font-size:.85rem}
 `
