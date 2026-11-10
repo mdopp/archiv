@@ -43,6 +43,7 @@ func (i Innen) ImmichSchluessel() string { return filepath.Join(i.Wurzel, "immic
 func (i Innen) Umfeld() string           { return filepath.Join(i.Wurzel, "umfeld") }            // the photos, the phone books' ties, who is hidden
 func (i Innen) umfeldTabelle() string    { return filepath.Join(i.Umfeld(), "netz.json") }
 func (i Innen) umfeldVerborgen() string  { return filepath.Join(i.Umfeld(), "verborgen.json") }
+func (i Innen) umfeldAntworten() string  { return filepath.Join(i.Umfeld(), "antworten.json") } // „Wie steht X zu Y?“, fragen.go
 
 // UmfeldStand is what the page shows of the rounds.
 type UmfeldStand struct {
@@ -69,6 +70,7 @@ type Umfeld struct {
 	Now       func() time.Time
 
 	mu    sync.Mutex
+	halt  sync.Mutex // an answer or a hiding kept and a round's new net, one at a time: neither loses the other
 	stand UmfeldStand
 	netz  *Netz // nil: closed, or nothing computed yet
 	jetzt chan struct{}
@@ -186,11 +188,13 @@ func (u *Umfeld) laden(innen Innen) {
 		}
 		return
 	}
-	n := neuesNetz(tab, verborgenLaden(innen), u.Loc, u.Now)
+	u.halt.Lock()
+	n := neuesNetz(tab, verborgenLaden(innen), antwortenLaden(innen), u.Loc, u.Now)
 	u.mu.Lock()
 	u.netz = n
 	u.stand.Am, u.stand.Fotos = tab.Geholt, len(tab.Fotos)
 	u.mu.Unlock()
+	u.halt.Unlock()
 	u.geaendert()
 }
 
@@ -212,6 +216,14 @@ func tabelleLaden(innen Innen) (netzTabelle, error) {
 func verborgenLaden(innen Innen) map[string]string {
 	out := map[string]string{}
 	if b, err := os.ReadFile(innen.umfeldVerborgen()); err == nil {
+		json.Unmarshal(b, &out)
+	}
+	return out
+}
+
+func antwortenLaden(innen Innen) map[string]antwort {
+	out := map[string]antwort{}
+	if b, err := os.ReadFile(innen.umfeldAntworten()); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -241,7 +253,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 	defer u.setzen(func(s *UmfeldStand) { s.Laeuft = false })
 
 	alt, _ := tabelleLaden(innen)
-	tab := netzTabelle{Format: netzFormat, Version: netzVersion, Geholt: alt.Geholt, Fotos: alt.Fotos, Namen: alt.Namen, Haushalt: alt.Haushalt}
+	tab := netzTabelle{Format: netzFormat, Version: netzVersion, Geholt: alt.Geholt, Fotos: alt.Fotos, Namen: alt.Namen, Haushalt: alt.Haushalt, Geb: alt.Geb}
 	im := &Immich{URL: u.URL, Key: string(trimNL(key))}
 	as, err := im.Aufnahmen(ctx, func(n int) { u.setzen(func(s *UmfeldStand) { s.Gelesen = n }) })
 	if ctx.Err() != nil {
@@ -260,7 +272,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 		}
 		log.Printf("archiv: Umfeld: Immich: %v", err)
 	} else {
-		tab.Geholt, tab.Fotos, tab.Namen = u.now(), nil, map[string]string{}
+		tab.Geholt, tab.Fotos, tab.Namen, tab.Geb = u.now(), nil, map[string]string{}, map[string]string{}
 		for _, a := range as {
 			f := netzFoto{ID: a.ID, Lat: a.Exif.Lat, Lng: a.Exif.Lng, Stadt: strings.TrimSpace(a.Exif.Stadt)}
 			f.T, _ = time.Parse(time.RFC3339Nano, a.Exif.Zeit)
@@ -271,6 +283,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 				f.Wer = append(f.Wer, p.ID)
 				if name := strings.Join(strings.Fields(p.Name), " "); name != "" {
 					tab.Namen[p.ID] = name
+					tab.Geb[p.ID] = cmp.Or(gebLesen(p.Geb), tab.Geb[p.ID])
 				}
 			}
 			if len(f.Wer) > 0 && !f.T.IsZero() {
@@ -297,9 +310,11 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 		log.Printf("archiv: Umfeld speichern: %v", serr)
 		fehler = cmp.Or(fehler, saysUmfeldSpeichern)
 	}
-	n := neuesNetz(tab, verborgenLaden(innen), u.Loc, u.Now)
+	u.halt.Lock()
+	n := neuesNetz(tab, verborgenLaden(innen), antwortenLaden(innen), u.Loc, u.Now)
 	u.mu.Lock()
 	u.netz = n
+	u.halt.Unlock()
 	u.stand.Fehler, u.stand.Hinweis, u.stand.Fotos = fehler, hinweis, len(tab.Fotos)
 	if err == nil {
 		u.stand.Am = tab.Geholt
@@ -372,7 +387,7 @@ func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) {
 	}
 	tab.Kontakte = nil
 	for _, k := range ks {
-		tab.Kontakte = append(tab.Kontakte, netzKontakt{Key: k.key, Name: k.name, Person: nachName[klar(k.name)]})
+		tab.Kontakte = append(tab.Kontakte, netzKontakt{Key: k.key, Name: k.name, Person: nachName[klar(k.name)], Family: k.family, Geb: k.geb, Strassen: k.strassen})
 	}
 	nummer, _ := u.Schluessel.Lesen(SchluesselTelefon)
 	tab.Ich = eigeneKarte(ks, func(k buchKarte) bool {
@@ -411,9 +426,41 @@ func gleicheEndziffern(a, b string) bool {
 
 // Verbergen hides id in the open vault (Aus, Nicht) or shows it again ("").
 func (u *Umfeld) Verbergen(innen Innen, id, art string) error {
+	u.halt.Lock()
+	defer u.halt.Unlock()
 	n := u.Netz()
 	if n == nil {
 		return errUmfeldZu
 	}
 	return jsonImTresor(innen.umfeldVerborgen(), n.Verbergen(id, art))
+}
+
+// Beantworten keeps the answer about x and y in the open vault (fragen.go).
+func (u *Umfeld) Beantworten(innen Innen, x, y, art string) (Frage, error) {
+	u.halt.Lock()
+	defer u.halt.Unlock()
+	n := u.Netz()
+	if n == nil {
+		return Frage{}, errUmfeldZu
+	}
+	f, alle, err := n.Beantworten(x, y, art)
+	if err != nil {
+		return f, err
+	}
+	return f, jsonImTresor(innen.umfeldAntworten(), alle)
+}
+
+// Vergessen drops the answer about the pair key from the open vault.
+func (u *Umfeld) Vergessen(innen Innen, key string) error {
+	u.halt.Lock()
+	defer u.halt.Unlock()
+	n := u.Netz()
+	if n == nil {
+		return errUmfeldZu
+	}
+	alle, err := n.Vergessen(key)
+	if err != nil {
+		return err
+	}
+	return jsonImTresor(innen.umfeldAntworten(), alle)
 }

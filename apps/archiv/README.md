@@ -523,7 +523,7 @@ Owner, 2026-11-10 (homes ADR 0002): the contact net moves from Homes
 (`internal/netz`) into the person's archive. It is computed and kept only
 inside the open vault; closed, there is no net, not even in memory.
 
-**Step 1 (this):** the person's Immich key, „Steht nahe“ and the picture.
+**Step 1:** the person's Immich key, „Steht nahe“ and the picture.
 
 - **The key.** The person makes an API key in Immich (Kontoeinstellungen →
   API-Schlüssel) with `asset.read`, `asset.view` and `person.read` and
@@ -554,8 +554,9 @@ inside the open vault; closed, there is no net, not even in memory.
   same name (Homes keeps them named alike).
 - **Kept in the vault**: `/run/tresor/umfeld/netz.json` (format
   `archiv-umfeld`, version 1: the photos' ids, times, places and persons,
-  the names, the contacts and ties, the household's cards as last read)
-  and `verborgen.json` (who is hidden). Every round reads everything
+  the names and Immich's birthdays, the contacts with their family name,
+  birthday and streets, the ties, the household's cards as last read),
+  `verborgen.json` (who is hidden) and `antworten.json` (step 2). Every round reads everything
   again and rebuilds (a merge or a rename in Immich cannot drift); Immich
   out of reach keeps the last photos.
 - **When**: at the opening, then every `UMFELD_TAKT` seconds (default an
@@ -567,9 +568,51 @@ inside the open vault; closed, there is no net, not even in memory.
   middle (`?mitte=`), „Ausblenden“ and „Nicht berechnen“ (out before any
   tie is computed), the hidden ones restorable. Closed, the locked page.
 
-Not yet (steps 2–5): the questions „Wie steht X zu Y?“, taking a
-relation over into Homes, group chats and mail threads, the pair page,
-group suggestions.
+**Step 2 (this):** „Wie steht X zu Y?“ and „Übernehmen“ into Homes.
+
+- **The questions** (`fragen.go`, Homes' `internal/netz/fragen.go` moved
+  here with its tests and the same fixture): a tie among either end's
+  closest five that no phone book and no answer names a relation for is
+  asked, the strongest first, the person second („zu dir“), with a kind
+  suggested deterministically: „Oma“/„Opa“/„Tante“/„Onkel“ in a name
+  toward the person; the same family name and address with the age gap
+  (Geschwister, Partner/in, Eltern/Kind, Großeltern/Enkel, else
+  verwandt); the same address and under 12 years apart Partner/in; the
+  same firm Kollege/Kollegin; the same street, another house Nachbar/in;
+  five photo days or more without a sign of family Freund/in. The cards
+  give N, BDAY and ADR for it, Immich the persons' `birthDate`. The
+  kinds: Partner/in, Ex-Partner/in, Eltern, Kind, Geschwister,
+  Großeltern, Enkel/in, Onkel/Tante, Neffe/Nichte, Cousin/e,
+  Schwiegereltern, Schwiegerkind, Schwager/Schwägerin, Freund/in,
+  Kollege/Kollegin, Nachbar/in, Bekannte/r, sonstige verwandt, and
+  „Kennen sich nicht“ (the tie leaves the net); „Keine Beziehung“ is never
+  asked again, „Überspringen“ comes last.
+- **The answers** are kept only in the vault,
+  `/run/tresor/umfeld/antworten.json` (0600): a kind becomes the pair's
+  relation in the net in place of the phone books' („Kind (von dir
+  angegeben)“). „Deine Antworten“ lists them, with what the phone books
+  already say of the two and „Vergessen“.
+- **Übernehmen** (`uebernahme.go`): the archive writes no address book.
+  A kind's answer carries a form that posts a signed packet to Homes
+  (`HOMES_URL` + `/kontakte/uebernehmen`); Homes shows each line and
+  where it goes, and writes only after the person confirms on Homes' own
+  page. Where it goes: both ends in the household book → both household
+  cards, each naming the other by UID („Haushalts-Adressbuch, sieht die
+  Familie“); otherwise → only the person's own phone, on each end that is
+  a phone contact, by name („nur dein Handy“); neither → nothing to take
+  over. A household card never gets a name from the phone or the photos;
+  the packet carries a household UID only when both ends have one.
+- **The packet** (version 1, the contract with Homes):
+  `d = base64url(JSON {"person", "bis", "zeilen": [{"x": {"name",
+  "haushalt"?, "handy"?}, "y": {…}, "art"}]})`, `s =
+  base64url(HMAC-SHA256(ARCHIV_HOMES_SECRET, "archiv-uebernahme-1." +
+  d))`, both without padding; `x` is `art` of `y`. Homes takes it only
+  from the login `person`, checks `s` with that person's archive secret
+  and refuses it after `bis` (at most two hours). It travels in a POST
+  body, never in a URL.
+
+Not yet (steps 3–7): group chats and mail threads, the pair page, group
+suggestions, derived relations, the family tree.
 
 ## Status for laib
 
@@ -622,6 +665,7 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | stop | `TimeoutStopSec` ≥ 90: closing stops msgvault (≤ 30 s) and unmounts |
 | Radicale (contacts, calendars) | `RADICALE_URL=http://host.containers.internal:5232` (Radicale's root, no path), `RADICALE_USER=archiv-<person>`, and that account's password as a file: `Secret=<the instance's ARCHIV_RADICALE_PASSWORD>,type=mount,target=radicale-password` (read from `RADICALE_PASSWORD_FILE`, default `/run/secrets/radicale-password`; never an environment variable). Without `RADICALE_URL` and `RADICALE_USER` the page says the box has not set it up. Optional: `KONTAKTE_TAKT` (s, default 10800), `KONTAKTE_RELAIS_PORT` (default 18443, inside the container only). |
 | Immich (Umfeld) | `IMMICH_URL=http://host.containers.internal:2283` (Immich's root; `uses: [immich]`). The key is the person's own, entered on the page, never the template's. Optional: `UMFELD_TAKT` (s, default 3600). |
+| Homes (Übernehmen) | `HOMES_URL=https://www.<domain>` (Homes' public address, where „Übernehmen“ posts); without it the address is `PUBLIC_URL`'s with `www` for its first label. The packet is signed with `ARCHIV_HOMES_SECRET`; without that secret there is no „Übernehmen“. |
 | Radicale account and rights | an LLDAP account `archiv-<person>` per instance (seeded like `kalender`, its password the instance's generated secret), and in `templates/radicale/pre-start`'s rights, **right after `[root]`** (before every `user: .+`/`(.+)` section): `[archiv-home]` user `archiv-(.+)`, collection `{0}`, permissions `R`; `[archiv-lesen]` user `archiv-(.+)`, collection `{0}/(handy-kontakte\|google-(?!kontakte(/\|$))[^/]+\|privat-[^/]+)(/.*)?`, permissions `r`; `[archiv-sonst-nichts]` user `archiv-.+`, collection `.*`, permissions empty. `integration.sh` runs these rights in a real Radicale. For Umfeld (archiv#27) the account also reads `homes/haushalt-kontakte` (read only; the laib template change and its ADR 0029 amendment bring that right); until then the archive gets 403 there and the page says the household book is missing. |
 | backup | do not quiesce by stopping the unit (that locks the vault); while open, a snapshot catches a live SQLite in ciphertext — the restore is only as good as that moment. |
 

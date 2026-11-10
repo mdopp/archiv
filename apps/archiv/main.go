@@ -89,7 +89,7 @@ func main() {
 	if os.Getenv("IMMICH_URL") != "" && um.URL == "" {
 		log.Printf("archiv: IMMICH_URL %q ist keine http(s)-Adresse: Umfeld aus", os.Getenv("IMMICH_URL"))
 	}
-	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HomesSecret: homesSecret(os.Getenv),
+	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HomesSecret: homesSecret(os.Getenv), HomesURL: homesURL(os.Getenv),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
 		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}, Umfeld: um}
 

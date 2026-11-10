@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -30,6 +31,9 @@ type buchKarte struct {
 	emails   []string
 	tels     []string
 	rel      [][2]string
+	family   string   // N's first part, for the suggestions (fragen.go)
+	geb      string   // BDAY as JJJJ-MM-TT; "" none or without a year
+	strassen []string // each ADR's street without its number, with its postcode: a neighbour's
 }
 
 // vcardZeile is one content line: its group, name (upper case), parameters
@@ -192,8 +196,15 @@ func karteAus(buch string, zeilen []vcardZeile) (buchKarte, bool) {
 			k.name = strings.Join(strings.Fields(v), " ")
 		case "ORG":
 			k.firma = strings.TrimSpace(vTeile(z.wert)[0])
+		case "N":
+			k.family = strings.TrimSpace(vTeile(z.wert)[0])
+		case "BDAY":
+			k.geb = gebLesen(v)
 		case "ADR":
 			p := append(vTeile(z.wert), make([]string, 7)...)
+			if s := strasse(p[2]); s != "" && strings.TrimSpace(p[5]) != "" {
+				k.strassen = append(k.strassen, s+"|"+strings.TrimSpace(p[5]))
+			}
 			a := joinSome(", ", p[0], p[1], p[2], joinSome(" ", p[5], p[3]), p[4], p[6])
 			if a == "" {
 				continue
@@ -224,6 +235,29 @@ func karteAus(buch string, zeilen []vcardZeile) (buchKarte, bool) {
 	k.key = buch + uid
 	k.rel = relationen(zeilen)
 	return k, true
+}
+
+// gebLesen is a BDAY as JJJJ-MM-TT; "" for one without a year or unread.
+func gebLesen(v string) string {
+	d, _, _ := strings.Cut(strings.TrimSpace(v), "T")
+	for _, l := range []string{"20060102", "2006-01-02"} {
+		if t, err := time.Parse(l, d); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return ""
+}
+
+// strasse is a street compared without its house number: „Gartenweg 2“
+// and „Gartenweg 7“ are one street.
+func strasse(s string) string {
+	var ws []string
+	for _, w := range strings.Fields(s) {
+		if !strings.ContainsFunc(w, unicode.IsDigit) {
+			ws = append(ws, w)
+		}
+	}
+	return klar(strings.Join(ws, ""))
 }
 
 // android are Android's relation types (ContactsContract.CommonDataKinds.Relation).
