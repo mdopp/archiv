@@ -95,7 +95,11 @@ func (n *Netz) kategorieVon(id string) (kat string, gesagt bool) {
 // mitglieder are the group's members as shown nodes, by name; n.mu is held.
 func (n *Netz) mitglieder(g netzGespraech) (out []Knoten) {
 	for _, key := range g.Wer {
-		if id := n.von[key]; id != "" && n.sichtbar(id) && !slices.ContainsFunc(out, func(k Knoten) bool { return k.ID == id }) {
+		id := n.von[key]
+		if n.selbst[id] {
+			id = n.ich
+		}
+		if id != "" && n.sichtbar(id) && !slices.ContainsFunc(out, func(k Knoten) bool { return k.ID == id }) {
 			out = append(out, n.knoten[id])
 		}
 	}

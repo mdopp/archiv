@@ -179,3 +179,47 @@ func TestGruppeEinTipp(t *testing.T) {
 		t.Fatal("Rückgängig went to Homes")
 	}
 }
+
+// The person herself is never on „Steht dir nahe“ nor asked about but as
+// „du“ (owner 2026-11-11: „Michael Dopp“ was the list's first): neither
+// her other cards (the same name with umlauts alike, a number or an
+// address of her own card) nor an Immich person named as she is. In
+// another's list she shows as „Du“.
+func TestSelbstNieNahe(t *testing.T) {
+	ks := []buchKarte{
+		{key: "haushalt/j", name: "Jürgen Groß", tels: []string{"0170 1234567"}, emails: []string{"j@x.de"}},
+		{key: "privat/j", name: "Juergen Gross"},
+		{key: "privat/p", name: "Papa", tels: []string{"+49 170 1234567"}},
+		{key: "privat/e", name: "J.", emails: []string{" J@X.de"}},
+		{key: "privat/o", name: "Otto", tels: []string{"0171 7654321"}},
+	}
+	if got := selbstKarten(ks, "haushalt/j"); !slices.Equal(got, []string{"privat/j", "privat/p", "privat/e"}) {
+		t.Fatalf("her cards: %v", got)
+	}
+
+	jetzt := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	tag := func(d int) time.Time { return jetzt.Add(-time.Duration(d) * 24 * time.Hour) }
+	st := netzTabelle{Namen: map[string]string{"p-m1": "Michael Dopp", "p-m2": "Michael Dopp", "p-a": "Anna Dopp"}, Ich: "haushalt/m", IchAuch: []string{"privat/michi"},
+		Kontakte: []netzKontakt{{Key: "haushalt/m", Name: "Michael Dopp", Person: "p-m1"}, {Key: "privat/michi", Name: "Michi"}, {Key: "haushalt/a", Name: "Anna Dopp", Person: "p-a"}},
+		Fest:     []festBand{{A: "privat/michi", B: "haushalt/a", Art: bandAdresse}, {A: "haushalt/m", B: "haushalt/a", Art: bandAdresse}},
+		Fotos: []netzFoto{{ID: "1", T: tag(10), Wer: []string{"p-m1", "p-m2", "p-a"}}, {ID: "2", T: tag(20), Wer: []string{"p-m1", "p-m2", "p-a"}},
+			{ID: "3", T: tag(30), Wer: []string{"p-m2", "p-a"}}}}
+	n := neuesNetz(st, nil, nil, time.UTC, func() time.Time { return jetzt })
+	if n.Ich() != "p-m1" {
+		t.Fatalf("ich: %q", n.Ich())
+	}
+	if got := namenVon(n.Nahe("p-m1", 10)); !slices.Equal(got, []string{"Anna Dopp"}) {
+		t.Fatalf("Steht dir nahe: %v", got)
+	}
+	anna := n.Nahe("p-a", 10)
+	if len(anna) != 1 || anna[0].Mit.ID != "p-m1" || n.Anzeige(anna[0].Mit) != "Du" {
+		t.Fatalf("Anna's list: %v", namenVon(anna))
+	}
+	for _, f := range n.Fragen() {
+		for _, k := range []Knoten{f.X, f.Y} {
+			if k.ID == "p-m2" || k.ID == n.Von("privat/michi") {
+				t.Fatalf("a question about her other self: %v", fragenVon(n.Fragen()))
+			}
+		}
+	}
+}

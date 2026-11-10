@@ -433,8 +433,36 @@ func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) []buch
 			return slices.ContainsFunc(k.tels, func(t string) bool { return gleicheEndziffern(t, string(nummer)) })
 		})
 	}
+	tab.IchAuch = selbstKarten(ks, tab.Ich)
 	tab.Fest = append(gruppen(ks), beziehungen(ks)...)
 	return ks
+}
+
+// selbstKarten are the keys of the other cards that are the person's too
+// (owner 2026-11-11: she was „Steht nahe“'s first): the same name
+// (umlauts alike), or a number or an address of her own card.
+func selbstKarten(ks []buchKarte, ich string) (out []string) {
+	i := slices.IndexFunc(ks, func(k buchKarte) bool { return k.key == ich })
+	if i < 0 {
+		return nil
+	}
+	eigen := ks[i]
+	for _, k := range ks {
+		if k.key == ich {
+			continue
+		}
+		gleich := klar(k.name) == klar(eigen.name) ||
+			slices.ContainsFunc(k.tels, func(t string) bool {
+				return slices.ContainsFunc(eigen.tels, func(e string) bool { return gleicheEndziffern(t, e) })
+			}) ||
+			slices.ContainsFunc(k.emails, func(m string) bool {
+				return slices.ContainsFunc(eigen.emails, func(e string) bool { return strings.EqualFold(strings.TrimSpace(m), strings.TrimSpace(e)) })
+			})
+		if gleich {
+			out = append(out, k.key)
+		}
+	}
+	return out
 }
 
 // eigeneKarte is the first card that is the person's, a household card

@@ -306,12 +306,15 @@ func (n *Netz) familienkreis() map[string]bool {
 // with or without a tie. n.mu is held.
 func (n *Netz) offen() (out []Frage) {
 	offenesPaar := func(a, b string) bool { // shown, no answer but Später, no relation in a phone book
-		return a != b && n.sichtbar(a) && n.sichtbar(b) && !n.imBuchBeziehung(a, b) &&
+		return a != b && n.fragbar(a) && n.fragbar(b) && !n.imBuchBeziehung(a, b) &&
 			cmp.Or(n.antworten[paarKey(a, b)].Art, artSpaeter) == artSpaeter
 	}
 	gesehen := map[string]bool{}
 	for _, a := range n.abgeleitete() {
 		x, y, art := a.X, a.Y, a.Art
+		if !n.fragbar(x) || !n.fragbar(y) {
+			continue
+		}
 		if x == n.ich { // „Wie steht Carla zu dir?“
 			x, y, art = y, x, cmp.Or(gegen[art], art)
 		}

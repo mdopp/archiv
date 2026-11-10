@@ -586,8 +586,15 @@ inside the open vault; closed, there is no net, not even in memory.
 - **Pages**: the vault page's card „Umfeld“ (the key, how far the round
   is, what is missing) and `/tresor/umfeld`: „Steht dir nahe“, a radial
   picture and the ranked list with the reasons, any person into the
-  middle (`?mitte=`), „Ausblenden“ and „Nicht berechnen“ (out before any
-  tie is computed), the hidden ones restorable. Closed, the locked page.
+  middle (`?mitte=`), the hidden ones restorable. Each row of the list is
+  the person, a link to its detail; „Ausblenden“ and „Nicht berechnen“
+  (out before any tie is computed) are only there, big and apart, each
+  with a Rückgängig toast (owner 2026-11-11: „gefährlich platziert, dicke
+  Finger“). The person herself is never on her list nor asked about but
+  as „du“, nor are her other selves: a card with her name (umlauts
+  alike), her number or her address (`ich_auch` in `netz.json`), and an
+  Immich person named as she is; in another's list she shows as „Du“.
+  Closed, the locked page.
 
 **Step 2 (this):** „Wie steht X zu Y?“, one tap into the address books.
 

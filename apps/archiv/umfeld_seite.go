@@ -18,7 +18,7 @@ import (
 // default), the closest in rings by strength, thin lines for the ties
 // among them, each a link that puts it in the middle; under it the same
 // as a ranked list with the reasons (the phone's and the screen reader's
-// way), each with Ausblenden and Nicht berechnen; then the hidden ones,
+// way), each a link to its detail, where Ausblenden and Nicht berechnen are; then the hidden ones,
 // restorable. Only while the vault is open; closed, the locked page.
 
 const (
@@ -26,7 +26,7 @@ const (
 
 	saysUmfeldGespeichert = "Gespeichert. Das Archiv liest jetzt deine Fotos aus Immich und rechnet dein Umfeld; bei vielen Fotos dauert das ein paar Minuten."
 	saysUmfeldVerbergen   = "Das ließ sich nicht speichern. Versuch es gleich noch einmal."
-	saysUmfeldHinweis     = "Das Archiv zählt, an wie vielen Tagen zwei Menschen zusammen auf deinen Fotos sind; ein Tag an einem Ort zählt einmal, ein großes Gruppenfoto wenig, Altes weniger als Neues. Dazu kommt, was die Telefonbücher sagen: dieselbe Adresse, dieselbe Firma, eine eingetragene Beziehung. „Nicht berechnen“ nimmt jemanden ganz heraus, etwa Freunde der Kinder. Alles liegt in deinem Tresor; nur du siehst diese Seite, und nur solange dein Archiv offen ist."
+	saysUmfeldHinweis     = "Das Archiv zählt, an wie vielen Tagen zwei Menschen zusammen auf deinen Fotos sind; ein Tag an einem Ort zählt einmal, ein großes Gruppenfoto wenig, Altes weniger als Neues. Dazu kommt, was die Telefonbücher sagen: dieselbe Adresse, dieselbe Firma, eine eingetragene Beziehung. „Nicht berechnen“ (bei der Person selbst) nimmt jemanden ganz heraus, etwa Freunde der Kinder. Alles liegt in deinem Tresor; nur du siehst diese Seite, und nur solange dein Archiv offen ist."
 )
 
 // umfeldKarte is the card on the open vault page.
@@ -145,8 +145,7 @@ func (w *Web) umfeldVerbergen(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, art, mitte := r.PostFormValue("id"), r.PostFormValue("art"), r.PostFormValue("mitte")
-	gesagt := map[string]string{verbergenAus: "%s ist ausgeblendet. Unter „Ausgeblendet“ lässt es sich zurückholen.",
-		verbergenNicht: "%s wird nicht mehr berechnet, auch nicht in den Verbindungen der anderen.", "": "%s ist wieder da."}
+	gesagt := map[string]string{verbergenAus: "%s ausgeblendet", verbergenNicht: "%s wird nicht mehr berechnet", "": "%s ist wieder da."}
 	satz, erlaubt := gesagt[art]
 	n := w.Umfeld.Netz()
 	if !erlaubt || id == "" || n == nil {
@@ -162,7 +161,18 @@ func (w *Web) umfeldVerbergen(rw http.ResponseWriter, r *http.Request) {
 	if !bekannt {
 		k.Name = id
 	}
-	w.umfeldSeite(rw, r, http.StatusOK, mitte, fmt.Sprintf(satz, k.Name), "")
+	if art == "" {
+		w.umfeldSeite(rw, r, http.StatusOK, id, fmt.Sprintf(satz, k.Name), "")
+		return
+	}
+	// hidden: back to the person in the middle, with Rückgängig for ten seconds (owner 2026-11-11: never for good on one tap)
+	w.umfeldSeiteMit(rw, r, http.StatusOK, "", "", "", verbergenToast(id, fmt.Sprintf(satz, k.Name)))
+}
+
+// verbergenToast is „✓ Ben Berg ausgeblendet · Rückgängig“: Rückgängig shows id again.
+func verbergenToast(id, satz string) string {
+	return fmt.Sprintf(`<div class=toast role=status><span>✓ %s</span><form method=post action="/tresor/umfeld/verbergen"><input type=hidden name=id value="%s"><input type=hidden name=art value=""><button data-laeuft="Holt zurück …">Rückgängig</button></form></div>`,
+		esc(satz), esc(id))
 }
 
 func (w *Web) umfeldGet(rw http.ResponseWriter, r *http.Request) {
@@ -172,6 +182,11 @@ func (w *Web) umfeldGet(rw http.ResponseWriter, r *http.Request) {
 // umfeldSeite is the page; mitte "" puts the person (or whoever has the
 // most ties) in the middle; ?getan= shows that answer's toast.
 func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mitte, meldung, fehler string) {
+	w.umfeldSeiteMit(rw, r, code, mitte, meldung, fehler, "")
+}
+
+// umfeldSeiteMit is umfeldSeite with a toast (Ausblenden's Rückgängig).
+func (w *Web) umfeldSeiteMit(rw http.ResponseWriter, r *http.Request, code int, mitte, meldung, fehler, toast string) {
 	innen, auf := w.Tresor.Innen()
 	if !auf {
 		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
@@ -206,6 +221,7 @@ func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mit
 		w.antwortenListe(&b, n, "/tresor/umfeld")
 		gruppenListe(&b, n, "/tresor/umfeld")
 		b.WriteString(w.toast(n, r.URL.Query().Get("getan"), "/tresor/umfeld"))
+		b.WriteString(toast)
 	}
 	fmt.Fprintf(&b, `<p class=hinweis>%s</p>`, esc(saysUmfeldHinweis))
 	seite(rw, code, "Umfeld", b.String(), "")
@@ -226,6 +242,9 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 		b.WriteString(`<p class=k>Noch keine Verbindungen: Ein Paar zählt, sobald es an zwei Tagen zusammen auf deinen Fotos ist oder die Telefonbücher etwas über die beiden sagen.</p>`)
 	case !ok || len(vs) == 0:
 		b.WriteString(`<p class=k>Zu dieser Person gibt es noch keine Verbindung.</p>`)
+		if ok && mitte != ich {
+			b.WriteString(umfeldAktionen(mitte))
+		}
 	default:
 		titel := "Steht dir nahe"
 		if mitte != ich {
@@ -236,6 +255,9 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 			b.WriteString(`<p class=k>Deine eigene Karte hat das Archiv in den Telefonbüchern nicht gefunden (es sucht die E-Mail deines Immich-Kontos und deine Nummer); in der Mitte steht deshalb, wer die meisten Verbindungen hat.</p>`)
 		} else if mitte != ich {
 			fmt.Fprintf(b, `<p class=k><a href="%s">Wieder dich in die Mitte</a></p>`, esc(umfeldMitte(ich)))
+		}
+		if mitte != ich {
+			b.WriteString(umfeldAktionen(mitte))
 		}
 		b.WriteString(umfeldBild(n, k, vs))
 		b.WriteString(umfeldListe(n, k, vs))
@@ -259,17 +281,29 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 // umfeldMitte is the address that puts id in the middle.
 func umfeldMitte(id string) string { return "/tresor/umfeld?" + url.Values{"mitte": {id}}.Encode() }
 
-// umfeldListe is the ranked list: each its name (to the middle), its
-// reasons and its two buttons.
+// umfeldListe is the ranked list: each row the person, its name and its
+// reasons, one link to its detail (it in the middle). No action on the
+// row (owner 2026-11-11: „gefährlich platziert, dicke Finger“): Ausblenden
+// and Nicht berechnen are in the detail (umfeldAktionen).
 func umfeldListe(n *Netz, mitte Knoten, vs []Verbindung) string {
 	var b strings.Builder
 	b.WriteString(`<ol class=nahe>`)
 	for _, v := range vs {
-		fmt.Fprintf(&b, `<li><a href="%s">%s</a> <span class=k>%s</span>%s</li>`, esc(umfeldMitte(v.Mit.ID)), esc(v.Mit.Name),
-			esc(n.Gruende(mitte.ID, v.Kante)), umfeldKnoepfe(mitte.ID, v.Mit.ID, verbergenAus, verbergenNicht))
+		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a></li>`, esc(umfeldMitte(v.Mit.ID)), esc(n.Anzeige(v.Mit)),
+			esc(n.Gruende(mitte.ID, v.Kante)))
 	}
 	b.WriteString(`</ol>`)
 	return b.String()
+}
+
+// umfeldAktionen are a person's two actions in its detail: big targets,
+// apart, each with Rückgängig after it (verbergenToast).
+func umfeldAktionen(id string) string {
+	knopf := func(art, text, laeuft, klasse string) string {
+		return `<form method=post action="/tresor/umfeld/verbergen"><input type=hidden name=id value="` + esc(id) + `"><button` + klasse + ` name=art value="` + art + `" data-laeuft="` + esc(laeuft) + `">` + esc(text) + `</button></form>`
+	}
+	return `<div class=aktionen>` + knopf(verbergenAus, "Ausblenden", "Blendet aus …", "") + knopf(verbergenNicht, "Nicht berechnen", "Nimmt heraus …", " class=leise") +
+		`</div><p class=k>Ausblenden zeigt die Person nicht mehr; Nicht berechnen nimmt sie auch aus den Verbindungen der anderen. Beides lässt sich zurückholen.</p>`
 }
 
 // umfeldKnoepfe is a row's form: a button per art, posted with id.

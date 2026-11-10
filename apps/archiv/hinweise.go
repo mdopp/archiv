@@ -407,7 +407,9 @@ func (n *Netz) knotenVon(t gespraechsTeilnehmer, ks []buchKarte) string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	for _, key := range teilnehmerKarten(t, ks) {
-		if id := n.von[key]; id != "" && n.sichtbar(id) {
+		if id := n.von[key]; n.selbst[id] {
+			return n.ich
+		} else if id != "" && n.sichtbar(id) {
 			return id
 		}
 	}

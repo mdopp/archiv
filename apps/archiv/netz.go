@@ -92,6 +92,7 @@ type netzTabelle struct {
 	Kontakte []netzKontakt     `json:"kontakte"`
 	Fest     []festBand        `json:"fest"`
 	Ich      string            `json:"ich,omitempty"`      // the person's own contact
+	IchAuch  []string          `json:"ich_auch,omitempty"` // other cards that are the person's too (selbstKarten)
 	Haushalt []string          `json:"haushalt,omitempty"` // the household book's cards as last read
 	Geb      map[string]string `json:"geb,omitempty"`      // Immich's birthDate, by named person
 	// Gespraeche are msgvault's group chats and mail threads, matched to
@@ -148,6 +149,10 @@ type Netz struct {
 	gruppen     map[string]gruppenAntwort
 	gelesen     map[string]gelesen
 	hinweise    map[string]paarHinweis
+	// selbst are the person's own node and the nodes that are her too: a
+	// card of hers (IchAuch), an Immich person or a card named as she is
+	// (umlauts alike). None is ever in „Steht nahe“ or a question but as „du“.
+	selbst map[string]bool
 }
 
 // neuesNetz builds the net of st with the hidden ones and the answers.
@@ -216,6 +221,7 @@ func (n *Netz) bauen() {
 		n.knoten[id], n.von[k.Key] = kn, id
 	}
 	n.ich = n.von[n.st.Ich]
+	n.selbstBauen()
 	alle := map[[2]string]*Kante{}
 	for key, p := range n.fotoPaare(nicht) {
 		if len(p.tage) >= netzMinTage {
@@ -307,6 +313,45 @@ func (n *Netz) festDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
 	}
 }
 
+// selbstBauen finds the nodes that are the person (selbst); n.mu is held or n is new.
+func (n *Netz) selbstBauen() {
+	n.selbst = map[string]bool{}
+	if n.ich == "" {
+		return
+	}
+	n.selbst[n.ich] = true
+	namen := map[string]bool{klar(n.knoten[n.ich].Name): true}
+	for _, k := range n.st.Kontakte {
+		if k.Key == n.st.Ich {
+			namen[klar(k.Name)] = true
+		}
+	}
+	for _, key := range n.st.IchAuch {
+		if id := n.von[key]; id != "" {
+			n.selbst[id] = true
+		}
+	}
+	for id, k := range n.knoten {
+		if namen[klar(k.Name)] {
+			n.selbst[id] = true
+		}
+	}
+}
+
+// fragbar: id is shown and not one of the person's other selves (the
+// person herself is, as „du“); n.mu is held.
+func (n *Netz) fragbar(id string) bool {
+	return n.sichtbar(id) && (!n.selbst[id] || id == n.ich)
+}
+
+// Anzeige is a node's name as a list shows it: „Du“ for the person.
+func (n *Netz) Anzeige(k Knoten) string {
+	if k.ID != "" && k.ID == n.Ich() {
+		return "Du"
+	}
+	return k.Name
+}
+
 // Verbindung is a tie as seen from one end: the other, and the tie.
 type Verbindung struct {
 	Mit   Knoten
@@ -330,7 +375,7 @@ func (n *Netz) Nahe(id string, k int) []Verbindung {
 	var out []Verbindung
 	for _, e := range n.kanten[id] {
 		other := andererVon(e, id)
-		if n.verborgen[other] == "" && n.verborgen[id] == "" {
+		if n.verborgen[other] == "" && n.verborgen[id] == "" && (!n.selbst[other] || other == n.ich) { // her other cards never; herself as „Du“ (Anzeige)
 			out = append(out, Verbindung{n.knoten[other], *e})
 		}
 	}
