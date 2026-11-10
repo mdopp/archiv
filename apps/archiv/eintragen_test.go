@@ -107,9 +107,9 @@ func TestEinTipp(t *testing.T) {
 	carla := n.Von("haushalt/c")
 
 	page := wt.rufe("GET", "/tresor", anna, nil).Body.String()
-	for _, want := range []string{`<h1>Dein Archiv</h1>`, `action="/tresor/abschliessen"`, `action="/tresor/suche"`, `aria-current=page>Fragen <span class=anzahl>4</span>`,
-		`href="/tresor?tab=nahe"`, `href="/tresor?tab=stammbaum"`, `class="frage sofort"`, "Fritz Kurz ist für Kim Berg …", `name=art value=fremd class="chip"`,
-		"kennen sich nicht", "<summary>mehr …</summary>", `name=art value=expartner`, "kommt nur auf dein Handy", "Später", "4 Fragen offen",
+	for _, want := range []string{`<h1>Dein Archiv</h1>`, `action="/tresor/abschliessen"`, `action="/tresor/suche"`, `aria-current=page>Fragen <span class=anzahl>5</span>`,
+		`href="/tresor?tab=nahe"`, `href="/tresor?tab=stammbaum"`, `class="frage sofort"`, "Fritz Kurz ist für Ben Berg …", "Vorschlag, weil du und Fritz Kurz Geschwister seid und du und Ben Berg Partner seid.", `name=art value=fremd class="chip"`,
+		"kennen sich nicht", "<summary>mehr …</summary>", `name=art value=expartner`, "kommt nur auf dein Handy", "Später", "5 Fragen offen",
 		`<a class=quellen id=quellen-zeile data-live href="/tresor/quellen">`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
@@ -122,7 +122,7 @@ func TestEinTipp(t *testing.T) {
 	// a household pair: both household cards, by UID
 	ziel, page := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {carla}, "y": {"p-anna"}, "art": {"kollege"}, "zurueck": {"/tresor"}}))
 	if !strings.HasPrefix(ziel, "/tresor?") || !strings.Contains(ziel, "tab=fragen") || !strings.Contains(page, "✓ Carla Wolf ist Kollege/Kollegin von dir · eingetragen") ||
-		!strings.Contains(page, `<button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button>`) || !strings.Contains(page, "Fritz Kurz ist für Kim Berg …") {
+		!strings.Contains(page, `<button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button>`) || !strings.Contains(page, "Fritz Kurz ist für Ben Berg …") {
 		t.Fatalf("after the tap: %s\n%s", ziel, page)
 	}
 	ps := homes.genommen()
@@ -141,7 +141,7 @@ func TestEinTipp(t *testing.T) {
 	if ps := homes.genommen(); len(ps) != 2 || !ps[1].Weg || ps[1].Zeilen[0] != ps[0].Zeilen[0] {
 		t.Fatalf("Rückgängig at Homes: %+v", ps)
 	}
-	if !strings.Contains(page, "Rückgängig gemacht. Die Frage kommt wieder.") || !strings.Contains(page, "<span class=anzahl>4</span>") {
+	if !strings.Contains(page, "Rückgängig gemacht. Die Frage kommt wieder.") || !strings.Contains(page, "<span class=anzahl>5</span>") {
 		t.Fatalf("after Rückgängig: %s\n%s", ziel, page)
 	}
 	if b, _ := os.ReadFile(innen.umfeldAntworten()); strings.Contains(string(b), "kollege") {
@@ -153,9 +153,12 @@ func TestEinTipp(t *testing.T) {
 	if ps := homes.genommen(); len(ps) != 3 || ps[2].Zeilen[0].X.Handy != "urn:uuid:k2" || ps[2].Zeilen[0].Y.Haushalt != "" || ps[2].Zeilen[0].X.Haushalt != "" {
 		t.Fatalf("the phone's line: %+v", ps[len(ps)-1])
 	}
-	if !strings.Contains(page, "✓ Fritz Kurz ist Freund/in von Kim Berg · eingetragen, kommt auf dein Handy") || !strings.Contains(page, "Ben Berg ist für Kim Berg …") {
+	if !strings.Contains(page, "✓ Fritz Kurz ist Freund/in von Kim Berg · eingetragen, kommt auf dein Handy") || !strings.Contains(page, "Fritz Kurz ist für Ben Berg …") {
 		t.Fatalf("after the phone's tap:\n%s", page)
 	}
+
+	// the derived question first (Fritz is Anna's sibling, Anna Ben's partner); put back, the next comes
+	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-fritz"}, "y": {"p-ben"}, "art": {"spaeter"}, "zurueck": {"/tresor"}}))
 
 	// only on photos: the card says it stays, and nothing goes to Homes
 	if !strings.Contains(page, "bleibt in deinem Archiv: Kim Berg steht in keinem Adressbuch, nur auf deinen Fotos") {
@@ -202,7 +205,7 @@ func TestEinTippOhneHomes(t *testing.T) {
 		t.Fatalf("the vault: %s", b)
 	}
 	umfeld := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
-	if !strings.Contains(umfeld, "<h2>Deine Antworten</h2>") || !strings.Contains(umfeld, `<button name=tu value=eintragen`) || !strings.Contains(umfeld, "3 offene Fragen beantworten") {
+	if !strings.Contains(umfeld, "<h2>Deine Antworten</h2>") || !strings.Contains(umfeld, `<button name=tu value=eintragen`) || !strings.Contains(umfeld, "4 offene Fragen beantworten") {
 		t.Fatalf("Deine Antworten:\n%s", umfeld)
 	}
 	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {key}, "tu": {"eintragen"}, "zurueck": {"/tresor/umfeld"}}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), esc(saysNichtEin)) {

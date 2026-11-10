@@ -21,19 +21,21 @@ func fragenVon(fs []Frage) (out []string) {
 
 // A tie without a relation is asked about, the person second („zu dir“);
 // none where a phone book names a relation (Anna–Ben, Anna–Fritz), none
-// about a hidden person; the strongest first.
+// about a hidden person; the strongest first, after the derived ones
+// (Fritz is Anna's sibling, Anna Ben's partner: Fritz is Ben's Schwager).
 func TestFragenOhneBeziehung(t *testing.T) {
 	ut := netzBox(t)
 	n := ut.u.Netz()
 	fs := n.Fragen()
-	if got := fragenVon(fs); !slices.Equal(got, []string{"Fritz Kurz>Kim Berg=", "Ben Berg>Kim Berg=", "Kim Berg>Anna Berg=", "Carla Wolf>Anna Berg=kollege"}) {
+	if got := fragenVon(fs); !slices.Equal(got, []string{"Fritz Kurz>Ben Berg=schwager", "Fritz Kurz>Kim Berg=", "Ben Berg>Kim Berg=", "Kim Berg>Anna Berg=", "Carla Wolf>Anna Berg=kollege"}) {
 		t.Fatalf("the questions: %v", got)
 	}
-	if !fs[2].Ich || fs[1].Ich || fs[3].Weil != "gleiche Firma" {
+	if !fs[0].Abgeleitet || fs[0].Weil != "du und Fritz Kurz Geschwister seid und du und Ben Berg Partner seid" || fs[1].Abgeleitet ||
+		!fs[3].Ich || fs[2].Ich || fs[4].Weil != "gleiche Firma" {
 		t.Fatalf("%+v", fs)
 	}
 	ut.u.Verbergen(ut.innen, "p-kim", verbergenAus)
-	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Carla Wolf>Anna Berg=kollege"}) {
+	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Fritz Kurz>Ben Berg=schwager", "Carla Wolf>Anna Berg=kollege"}) {
 		t.Fatalf("kim hidden: %v", got)
 	}
 }
@@ -60,7 +62,7 @@ func TestBeantworten(t *testing.T) {
 	if _, err := u.Beantworten(ut.innen, "p-gerd", "p-anna", "freund"); err != errFrageWeg {
 		t.Fatalf("gerd, one day only: %v", err)
 	}
-	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Fritz Kurz>Kim Berg=", "Carla Wolf>Anna Berg=kollege"}) {
+	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Fritz Kurz>Kim Berg=onkel", "Fritz Kurz>Ben Berg=schwager", "Carla Wolf>Anna Berg=kollege"}) {
 		t.Fatalf("after the answers: %v", got)
 	}
 	if _, err := u.Beantworten(ut.innen, "p-anna", "p-ben", "partner"); err != errFrageWeg {
@@ -74,7 +76,7 @@ func TestBeantworten(t *testing.T) {
 	again := &Umfeld{URL: u.URL, Loc: time.UTC, Now: u.Now}
 	again.laden(ut.innen)
 	for _, m := range []*Netz{u.Netz(), again.Netz()} {
-		if got := fragenVon(m.Fragen()); len(got) != 2 || !strings.Contains(m.Gruende("p-kim", m.Nahe("p-kim", 10)[0].Kante), "Mutter/Vater (von dir angegeben)") {
+		if got := fragenVon(m.Fragen()); len(got) != 3 || !strings.Contains(m.Gruende("p-kim", m.Nahe("p-kim", 10)[0].Kante), "Mutter/Vater (von dir angegeben)") {
 			t.Fatalf("kept: %v", got)
 		}
 	}
@@ -87,7 +89,7 @@ func TestBeantworten(t *testing.T) {
 		}
 		return nil
 	})
-	if err := again.Vergessen(ut.innen, paarKey("p-anna", "p-kim")); err != nil || len(again.Netz().Fragen()) != 3 {
+	if err := again.Vergessen(ut.innen, paarKey("p-anna", "p-kim")); err != nil || len(again.Netz().Fragen()) != 4 {
 		t.Fatalf("forgotten: %v %v", err, fragenVon(again.Netz().Fragen()))
 	}
 }

@@ -264,6 +264,25 @@ curl -fsS "${H[@]}" "$U/tresor/stand" | jq '.letzter_import, .letztes_paket'
 # 2 from before, 2 from Signal, 2 new from the first packet; the packet of a.xml brings nothing twice; 2 mails under their own account
 curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 8 and .active_messages == 8 and .total_accounts == 3 and .total_attachments >= 1' || { curl -fsS "${H[@]}" "$U/api/v1/stats"; fail "the packets did not arrive as they should (or duplicated)"; }
 
+echo "Umfeld (archiv#27 step 3): the archive's statement for group chats and mail threads, against the real msgvault's views"
+docker exec archiv archiv umfeld-gespraeche -sql >"$D/gespraeche.json"
+curl -s -o /dev/null "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/gespraeche.json" "$U/api/v1/query?fresh=true" # builds the analytics after the imports
+gespraeche=""
+for _ in $(seq 60); do
+  code=$(curl -s -o "$D/gespraeche-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/gespraeche.json" "$U/api/v1/query")
+  [ "$code" = 400 ] && { cat "$D/gespraeche-antwort.json"; fail "msgvault refuses the statement"; }
+  if [ "$code" = 200 ]; then
+    gespraeche=$(docker exec -i archiv archiv umfeld-gespraeche <"$D/gespraeche-antwort.json") || fail "the answer does not read: $gespraeche"
+    grep -q "^chat " <<<"$gespraeche" && grep -q "^mail " <<<"$gespraeche" && break
+  fi
+  sleep 2
+done
+echo "$gespraeche"
+# the MMS of three (Ben, the owner, a third) is a group; the SMS with Anna (two) is none; Ben's two mails to Anna are threads of two
+grep -qx "chat 3 1 false Familie" <<<"$gespraeche" || { cat "$D/gespraeche-antwort.json"; fail "the MMS group of three is not a group chat"; }
+if grep -q '^chat 2 ' <<<"$gespraeche"; then fail "a chat of two counted as a group"; fi
+grep -q "^mail 2 [12] false$" <<<"$gespraeche" || { cat "$D/gespraeche-antwort.json"; fail "Ben's mails to Anna are no thread of two"; }
+
 docker stop -t 90 archiv >/dev/null
 docker logs archiv >"$D/log" 2>&1
 grep -q "abgeschlossen (Container hält an)" "$D/log" || fail "stopping the container did not close the vault"

@@ -73,12 +73,16 @@ type merkmale struct {
 }
 
 // Frage is „Wie steht X zu Y?“; Ich: Y is the person. Vorschlag is the
-// kind suggested ("" none), Weil why.
+// kind suggested ("" none), Weil why. Abgeleitet: the kind follows from
+// relations already known (abgeleitet.go), Weil names them; such a pair
+// may have no tie (Kante then holds only A and B).
 type Frage struct {
 	X, Y            Knoten
 	Ich             bool
 	Kante           Kante
 	Vorschlag, Weil string
+	Abgeleitet      bool
+	regel           int
 }
 
 var errFrageWeg = errors.New("Umfeld: diese Frage gibt es nicht mehr")
@@ -152,8 +156,8 @@ func gesagtGrund(mitte string, f festBand) string {
 	return kurzWort(art) + " (von dir angegeben)"
 }
 
-// Fragen are the open questions, the strongest tie first, the skipped
-// last; none about a hidden person.
+// Fragen are the open questions: the derived ones first (abgeleitet.go),
+// then the strongest tie first, the skipped last; none about a hidden person.
 func (n *Netz) Fragen() []Frage {
 	if n == nil {
 		return nil
@@ -174,8 +178,18 @@ func (n *Netz) offen() (out []Frage) {
 				cmp.Or(n.antworten[paarKey(k.A, k.B)].Art, artSpaeter) == artSpaeter
 		}
 	}
+	abg := n.abgeleitete()
+	abgeleitet := map[string]bool{}
+	for _, a := range abg {
+		x, y, art := a.X, a.Y, a.Art
+		if x == n.ich { // „Wie steht Carla zu dir?“
+			x, y, art = y, x, cmp.Or(gegen[art], art)
+		}
+		abgeleitet[paarKey(x, y)] = true
+		out = append(out, Frage{X: n.knoten[x], Y: n.knoten[y], Ich: y == n.ich, Kante: n.kanteZwischen(x, y), Vorschlag: art, Weil: a.Weil, Abgeleitet: true, regel: a.regel})
+	}
 	for k, ja := range gefragt {
-		if ja {
+		if ja && !abgeleitet[paarKey(k.A, k.B)] {
 			x, y := k.A, k.B
 			if x == n.ich {
 				x, y = y, x
@@ -190,10 +204,28 @@ func (n *Netz) offen() (out []Frage) {
 		}
 		return 0
 	}
+	abgeleitetZuerst := func(f Frage) int {
+		if f.Abgeleitet {
+			return 0
+		}
+		return 1
+	}
 	slices.SortFunc(out, func(a, b Frage) int {
-		return cmp.Or(cmp.Compare(spaeter(a), spaeter(b)), cmp.Compare(b.Kante.Rang, a.Kante.Rang), strings.Compare(paarKey(a.X.ID, a.Y.ID), paarKey(b.X.ID, b.Y.ID)))
+		return cmp.Or(cmp.Compare(spaeter(a), spaeter(b)), cmp.Compare(abgeleitetZuerst(a), abgeleitetZuerst(b)), cmp.Compare(a.regel, b.regel),
+			cmp.Compare(b.Kante.Rang, a.Kante.Rang), strings.Compare(paarKey(a.X.ID, a.Y.ID), paarKey(b.X.ID, b.Y.ID)))
 	})
 	return out
+}
+
+// kanteZwischen is the tie of x and y; one with only A and B when there
+// is none. n.mu is held.
+func (n *Netz) kanteZwischen(x, y string) Kante {
+	for _, k := range n.kanten[x] {
+		if andererVon(k, x) == y {
+			return *k
+		}
+	}
+	return Kante{A: min(x, y), B: max(x, y)}
 }
 
 // rufnamen are a name's first words that say the relation to the person.

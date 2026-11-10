@@ -25,8 +25,9 @@ import (
 // vault drops the net from memory.
 //
 // It reads, never writes: Immich (search/metadata, api-keys/me,
-// users/me), the archive's own contact store (handy-kontakte) and, through
-// the archive's Radicale login, the household book homes/haushalt-kontakte.
+// users/me), the archive's own contact store (handy-kontakte), through
+// the archive's Radicale login the household book homes/haushalt-kontakte,
+// and msgvault's group chats and mail threads (gespraeche.go).
 
 const (
 	netzFormat             = "archiv-umfeld"
@@ -58,9 +59,10 @@ type UmfeldStand struct {
 
 // Umfeld runs the rounds and holds the net while the vault is open.
 type Umfeld struct {
-	URL        string     // IMMICH_URL; "" not set up
-	Radicale   *Radicale  // for the household book; nil: not set up
-	Schluessel Schluessel // the person's own number (outside), to find their card
+	URL        string       // IMMICH_URL; "" not set up
+	Radicale   *Radicale    // for the household book; nil: not set up
+	Msgvault   *MsgvaultAPI // the group chats and mail threads (gespraeche.go); nil: not read
+	Schluessel Schluessel   // the person's own number (outside), to find their card
 	// Takt is UMFELD_TAKT. A round is not Tresor.Arbeit: hourly rounds
 	// would keep the vault from ever closing by idleness (LEERLAUF, 2 h);
 	// a round cut short by the closing ends with its context.
@@ -253,7 +255,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 	defer u.setzen(func(s *UmfeldStand) { s.Laeuft = false })
 
 	alt, _ := tabelleLaden(innen)
-	tab := netzTabelle{Format: netzFormat, Version: netzVersion, Geholt: alt.Geholt, Fotos: alt.Fotos, Namen: alt.Namen, Haushalt: alt.Haushalt, Geb: alt.Geb}
+	tab := netzTabelle{Format: netzFormat, Version: netzVersion, Geholt: alt.Geholt, Fotos: alt.Fotos, Namen: alt.Namen, Haushalt: alt.Haushalt, Geb: alt.Geb, Gespraeche: alt.Gespraeche}
 	im := &Immich{URL: u.URL, Key: string(trimNL(key))}
 	as, err := im.Aufnahmen(ctx, func(n int) { u.setzen(func(s *UmfeldStand) { s.Gelesen = n }) })
 	if ctx.Err() != nil {
@@ -299,7 +301,11 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 	if ctx.Err() != nil {
 		return
 	}
-	u.telefonbuch(innen, &tab, email)
+	ks := u.telefonbuch(innen, &tab, email)
+	u.gespraeche(ctx, &tab, ks)
+	if ctx.Err() != nil {
+		return
+	}
 	if tab.Ich == "" && err != nil { // Immich out of reach: its e-mail found the person's card last time
 		tab.Ich = alt.Ich
 	}
@@ -359,8 +365,9 @@ func (u *Umfeld) haushalt(ctx context.Context, tab *netzTabelle) string {
 // with its Immich person (the one of the same name on the most photos;
 // Homes gives each contact the person of its name), and finds the
 // person's own card: the one with the Immich account's e-mail, else the
-// one with their number; the household's first.
-func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) {
+// one with their number; the household's first. It answers the cards read,
+// for matching the chats' and mails' participants.
+func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) []buchKarte {
 	var ks []buchKarte
 	for _, text := range tab.Haushalt {
 		ks = append(ks, kartenLesen("haushalt/", text)...)
@@ -399,6 +406,7 @@ func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) {
 		})
 	}
 	tab.Fest = append(gruppen(ks), beziehungen(ks)...)
+	return ks
 }
 
 // eigeneKarte is the first card that is the person's, a household card
