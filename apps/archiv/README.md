@@ -590,28 +590,47 @@ inside the open vault; closed, there is no net, not even in memory.
 
 **Step 2 (this):** „Wie steht X zu Y?“, one tap into the address books.
 
-- **The questions** (`fragen.go`, Homes' `internal/netz/fragen.go` moved
-  here with its tests and the same fixture): a tie among either end's
-  closest five that no phone book and no answer names a relation for is
-  asked, the strongest first, the person second („zu dir“), with a kind
-  suggested deterministically: „Oma“/„Opa“/„Tante“/„Onkel“ in a name
-  toward the person; the same family name and address with the age gap
-  (Geschwister, Partner/in, Eltern/Kind, Großeltern/Enkel, else
-  verwandt); the same address and under 12 years apart Partner/in; the
-  same firm Kollege/Kollegin; the same street, another house Nachbar/in;
-  five photo days or more without a sign of family Freund/in. The cards
-  give N, BDAY and ADR for it, Immich the persons' `birthDate`. The
-  kinds: Partner/in, Ex-Partner/in, Eltern, Kind, Geschwister,
-  Großeltern, Enkel/in, Onkel/Tante, Neffe/Nichte, Cousin/e,
-  Schwiegereltern, Schwiegerkind, Schwager/Schwägerin, Freund/in,
-  Kollege/Kollegin, Nachbar/in, Bekannte/r, sonstige verwandt, and
-  „Kennen sich nicht“ (the tie leaves the net); „Keine Beziehung“ is never
-  asked again, „Später“ comes last. On the main page one at a time: both
-  faces (initials), „X ist für Y …“, four kinds as chips (the suggestion
-  marked), „kennen sich nicht“, „mehr …“ for the rest, why it is
-  suggested, and where the answer goes („kommt ins Adressbuch der
-  Familie“, „kommt nur auf dein Handy“, or „bleibt in deinem Archiv“ with
-  the reason: a person only on photos cannot be written).
+- **The questions** (`fragen.go`; owner 2026-11-11, „Das sind verdammt
+  viele Fragen“): only what points to family is asked. Photo days, group
+  chats and mail threads together are enough for „kennen sich“: a tie on
+  „Steht nahe“ with its reasons, never a question and never written to
+  an address book — so a Freund/in, Kollege/Kollegin or Nachbar/in
+  between two people is not asked. Asked are, in this order: pairs with
+  the person („du“); the derived relations (step 6); the family circle
+  (the person, her relatives — answered or a phone book's relation, from
+  relative to relative — and everyone with the family name of one of
+  them, each pair, tie or not); then two others of the same family name
+  (umlauts alike), or whose shared address suggests family, with a tie.
+  A tie needs two photo days, something a phone book says, or two
+  conversations; weaker is never asked. Within each group a derived one
+  first, then the strongest tie. A kind is suggested deterministically:
+  „Oma“/„Opa“/„Tante“/„Onkel“ in a name toward the person; the same
+  family name and address with the age gap (Geschwister, Partner/in,
+  Eltern/Kind, Großeltern/Enkel, else verwandt); the same address and
+  under 12 years apart Partner/in; the same firm Kollege/Kollegin; the
+  same street, another house Nachbar/in; five photo days or more without
+  a sign of family Freund/in. The cards give N, BDAY and ADR for it,
+  Immich the persons' `birthDate`. The kinds: Partner/in, Ex-Partner/in,
+  Eltern, Kind, Geschwister, Großeltern, Enkel/in, Onkel/Tante,
+  Neffe/Nichte, Cousin/e, Schwiegereltern, Schwiegerkind,
+  Schwager/Schwägerin, Freund/in, Kollege/Kollegin, Nachbar/in,
+  Bekannte/r, sonstige verwandt, and „Kennen sich nicht“ (the tie leaves
+  the net); „Keine Beziehung“ is never asked again, „Später“ comes last.
+- **A portion per visit**: the tab shows at most ten („Fragen 10“, on
+  the card „noch 10 zum Nachbessern“), less what was answered since the
+  visit began; never the backlog. A visit begins when the person comes
+  to the page from outside (a link, a bookmark: the browser's
+  `Sec-Fetch-Site` is not `same-origin`) and with the first page after
+  the vault opened; the archive's own links, answers and live updates
+  stay in it. „Später“ puts a question behind the portion. Done: „Alles
+  nachgebessert für jetzt.“ and a quiet „weitere Fragen“ (`?mehr=1`, one
+  at a time, „Genug für jetzt“ to stop).
+- On the main page one at a time: both faces (initials), „X ist für Y
+  …“, four kinds as chips (the suggestion marked), „kennen sich nicht“,
+  „mehr …“ for the rest, why it is suggested, and where the answer goes
+  („kommt ins Adressbuch der Familie“, „kommt nur auf dein Handy“, or
+  „bleibt in deinem Archiv“ with the reason: a person only on photos
+  cannot be written).
 - **The answers** are kept only in the vault,
   `/run/tresor/umfeld/antworten.json` (0600): a kind becomes the pair's
   relation in the net in place of the phone books' („Kind (von dir
@@ -677,16 +696,27 @@ inside the open vault; closed, there is no net, not even in memory.
 **Step 6:** derived relations (`abgeleitet.go`).
 
 - From what is known — answers and the phone books' relations — follow
-  likely relations, never set on their own: each is a „Wie steht X zu
-  Y?“ with the kind chosen and its reason („weil Anna und Ben Partner
-  sind und Carla Bens Kind ist“), before the plain suggestions. Partner
-  of a parent → Eltern (a step-family: a question, not a fact); a shared
-  parent → Geschwister; parent of a parent → Großeltern; sibling of a
-  parent → Onkel/Tante; child of an uncle or aunt → Cousin/e; parent of
-  a partner → Schwiegereltern; sibling of a partner or partner of a
-  sibling → Schwager/Schwägerin. A pair with an answer („Keine“
-  included) or a phone book's relation is never asked; a derived
-  relation derives further only once answered; „Überspringen“ comes last.
+  likely relations: partner of a parent → Eltern; a shared parent →
+  Geschwister; parent of a parent → Großeltern; sibling of a parent →
+  Onkel/Tante; child of an uncle or aunt → Cousin/e; parent of a partner
+  → Schwiegereltern; sibling of a partner or partner of a sibling →
+  Schwager/Schwägerin.
+- **By definition, with the answer** (owner 2026-11-11): what an answer
+  makes follow by definition (Großeltern, Onkel/Tante, Cousin/e,
+  Schwiegereltern, Schwager/Schwägerin, and what follows from those) is
+  written in the same tap, each line by the same address-book rules,
+  kept in the vault as from that answer (`aus`, `weil`). The toast shows
+  the chain („✓ Hedwig ist Mutter/Vater von Uwe · daraus: weil …, ist
+  Hedwig Schwiegereltern von Silke“); one Rückgängig takes the answer and
+  its chain back, from Homes and the vault. A step-family (partner of a
+  parent) and half-siblings (a shared parent) stay questions, the kind
+  chosen and the chain as the reason, as does anything the phone books
+  alone derive.
+- An answer is never written over: a derivation that says otherwise, or
+  two that disagree, is a question („…; du hattest „Freund/in“
+  angegeben“), asked once — the answer to it keeps what the derivation
+  said (`trotz`). A pair with a phone book's relation is never asked;
+  „Später“ comes last.
 - Names compare with umlauts spelled out (`klar`): „Jürgen Groß“ is
   „Juergen Gross“, case and accents aside.
 

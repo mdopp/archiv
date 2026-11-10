@@ -158,9 +158,10 @@ func TestAbgeleitetNieWieder(t *testing.T) {
 }
 
 // A derivation from a derivation only after its source is answered:
-// Anna is likely Carla's parent, so likely Emil's grandparent — asked
-// only once the person said Anna is Carla's mother. An answer is a
-// source as a phone book's relation is.
+// Anna is likely Carla's parent, so Emil's grandparent — and once the
+// person said Anna is Carla's mother, that follows by definition and is
+// written with her answer, not asked. An answer is a source as a phone
+// book's relation is; what the phone books alone derive stays a question.
 func TestAbgeleitetErstNachAntwort(t *testing.T) {
 	n := buchNetz("", [][3]string{{"h/anna", "h/ben", "Partner"}, {"h/ben", "h/carla", "Kind"}, {"h/carla", "h/emil", "Sohn"}}, nil)
 	want := []string{
@@ -174,12 +175,13 @@ func TestAbgeleitetErstNachAntwort(t *testing.T) {
 	if err != nil || !f.Abgeleitet {
 		t.Fatalf("%+v %v", f, err)
 	}
-	want = []string{
-		"Anna>Emil=grosseltern: Carla Annas Kind ist und Emil Carlas Kind ist",
-		"Ben>Emil=grosseltern: Carla Bens Kind ist und Emil Carlas Kind ist",
-	}
+	want = []string{"Ben>Emil=grosseltern: Carla Bens Kind ist und Emil Carlas Kind ist"}
 	if got := abgeleitetVon(n.Fragen()); !slices.Equal(got, want) {
 		t.Fatalf("after the answer:\n got %q\nwant %q", got, want)
+	}
+	if d := n.Gefolgerte(paarKey("h/anna", "h/carla")); len(d) != 1 || d[0].X.Name != "Anna" || d[0].Y.Name != "Emil" || d[0].Art != "grosseltern" ||
+		d[0].Weil != "Carla Annas Kind ist und Emil Carlas Kind ist" {
+		t.Fatalf("followed: %+v", d)
 	}
 }
 

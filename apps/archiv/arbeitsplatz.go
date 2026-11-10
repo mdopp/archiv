@@ -21,15 +21,20 @@ const (
 	saysStammbaumSpaeter = "Der Stammbaum kommt in einem späteren Schritt. Er wächst aus deinen Antworten unter „Fragen“."
 	saysUmfeldNochNicht  = "Fragen stellt dein Archiv, sobald es aus deinen Fotos weiß, wer wem nahe steht."
 	saysKeineFragen      = "Gerade gibt es keine offenen Fragen. Neue kommen, wenn das Archiv dein Umfeld neu rechnet."
+	saysNachgebessert    = "Alles nachgebessert für jetzt."
 )
 
 // tabs are the workplace's parts, in their order: path value, word.
 var tabs = [][2]string{{"fragen", "Fragen"}, {"nahe", "Steht nahe"}, {"stammbaum", "Stammbaum"}}
 
-// arbeitsplatz writes the tabs and the chosen one (?tab=, Fragen by default).
+// arbeitsplatz writes the tabs and the chosen one (?tab=, Fragen by
+// default). Fragen shows the visit's portion (Netz.Portion) and counts
+// only it, never the backlog; when it is done, a calm line and „weitere
+// Fragen“ (?mehr=1) for whoever wants more, one at a time.
 func (w *Web) arbeitsplatz(b *strings.Builder, r *http.Request, bereit bool) {
 	n := w.Umfeld.Netz()
-	fs := n.Fragen()
+	fs, weitere := n.Portion(w.Umfeld.Besuch(neuerBesuch(r)))
+	mehr := r.URL.Query().Get("mehr") != ""
 	tab := r.URL.Query().Get("tab")
 	b.WriteString(`<nav class=unterseiten aria-label=Bereiche>`)
 	for i, t := range tabs {
@@ -51,13 +56,17 @@ func (w *Web) arbeitsplatz(b *strings.Builder, r *http.Request, bereit bool) {
 		w.umfeldFehlt(b)
 	case tab == "nahe":
 		naheListe(b, n)
-	case len(fs) == 0:
-		fmt.Fprintf(b, `<div class=gut><span class=punkt></span><p>%s</p></div>`, esc(saysKeineFragen))
-	default:
-		b.WriteString(w.frageKarte(n, fs[0], len(fs)))
+	case len(fs) > 0:
+		b.WriteString(w.frageKarte(n, fs[0], len(fs), false))
 		if len(fs) > 1 {
 			b.WriteString(`<div class=naechste aria-hidden=true></div>`)
 		}
+	case mehr && len(weitere) > 0:
+		b.WriteString(w.frageKarte(n, weitere[0], 0, true))
+	case len(weitere) > 0:
+		fmt.Fprintf(b, `<div class=gut><span class=punkt></span><p>%s</p></div><p class=weiter-in><a class=leise href="/tresor?tab=fragen&amp;mehr=1">weitere Fragen</a></p>`, esc(saysNachgebessert))
+	default:
+		fmt.Fprintf(b, `<div class=gut><span class=punkt></span><p>%s</p></div>`, esc(saysKeineFragen))
 	}
 	if tab != "fragen" {
 		return
@@ -69,6 +78,13 @@ func (w *Web) arbeitsplatz(b *strings.Builder, r *http.Request, bereit bool) {
 	if bereit {
 		w.personenKarte(b)
 	}
+}
+
+// neuerBesuch: the person came to the page from outside — a link, a
+// bookmark, the address typed — not from the archive's own pages, its
+// answers or its live updates (the browser's Sec-Fetch headers).
+func neuerBesuch(r *http.Request) bool {
+	return r.Header.Get("Sec-Fetch-Mode") == "navigate" && r.Header.Get("Sec-Fetch-Site") != "" && r.Header.Get("Sec-Fetch-Site") != "same-origin"
 }
 
 // umfeldFehlt says why there is no net yet, and what to do.

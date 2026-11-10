@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -97,89 +98,104 @@ func (wt *webTest) folgen(t *testing.T, rec *httptest.ResponseRecorder) (string,
 // One tap (owner 2026-11-10): the main page asks one question, its kinds
 // as chips with the suggestion marked, and says where the answer goes. A
 // chip is a plain form post (no script needed): it saves the answer in the
-// vault and Homes writes it at once, server to server, signed for anna;
-// the page comes back with the next question and „✓ … eingetragen ·
-// Rückgängig“; Rückgängig takes it back from Homes and the vault. A
-// person only on photos stays in the archive, and the card says so.
+// vault and Homes writes it at once, server to server, signed for anna,
+// with what follows from it by definition (owner 2026-11-11); the page
+// comes back with the next question and „✓ … eingetragen · daraus: …
+// · Rückgängig“; one Rückgängig takes all of it back from Homes and the
+// vault. The tab counts only the visit's portion, never the backlog;
+// Später puts a question behind it; when it is done, „Alles nachgebessert
+// für jetzt“ and a quiet „weitere Fragen“.
 func TestEinTipp(t *testing.T) {
-	wt, ut, homes, innen := eintragenBox(t)
-	n := ut.u.Netz()
-	carla := n.Von("haushalt/c")
+	wt, _, homes, innen := eintragenBox(t)
 
 	page := wt.rufe("GET", "/tresor", anna, nil).Body.String()
-	for _, want := range []string{`<h1>Dein Archiv</h1>`, `action="/tresor/abschliessen"`, `action="/tresor/suche"`, `aria-current=page>Fragen <span class=anzahl>5</span>`,
-		`href="/tresor?tab=nahe"`, `href="/tresor?tab=stammbaum"`, `class="frage sofort"`, "Fritz Kurz ist für Ben Berg …", "Vorschlag, weil du und Fritz Kurz Geschwister seid und du und Ben Berg Partner seid.", `name=art value=fremd class="chip"`,
-		"kennen sich nicht", "<summary>mehr …</summary>", `name=art value=expartner`, "kommt nur auf dein Handy", "Später", "5 Fragen offen",
-		`<a class=quellen id=quellen-zeile data-live href="/tresor/quellen">`} {
+	for _, want := range []string{`<h1>Dein Archiv</h1>`, `action="/tresor/abschliessen"`, `action="/tresor/suche"`, `aria-current=page>Fragen <span class=anzahl>4</span>`,
+		`href="/tresor?tab=nahe"`, `href="/tresor?tab=stammbaum"`, `class="frage sofort"`, "Kim Berg ist für dich …", `name=art value=fremd class="chip"`,
+		"kennen sich nicht", "<summary>mehr …</summary>", `name=art value=expartner`, "kommt nur auf dein Handy",
+		"Später", "noch 4 zum Nachbessern", `<a class=quellen id=quellen-zeile data-live href="/tresor/quellen">`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}
 	}
-	if strings.Contains(page, "Signal-Passphrase (30") || strings.Contains(page, "Carla Wolf ist für") {
-		t.Fatal("the main page shows a source's setup, or more than one question")
+	if strings.Contains(page, "Signal-Passphrase (30") || strings.Contains(page, "Fritz Kurz ist für") || strings.Contains(page, "offen</span>") {
+		t.Fatal("the main page shows a source's setup, more than one question, or the backlog")
 	}
 
-	// a household pair: both household cards, by UID
-	ziel, page := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {carla}, "y": {"p-anna"}, "art": {"kollege"}, "zurueck": {"/tresor"}}))
-	if !strings.HasPrefix(ziel, "/tresor?") || !strings.Contains(ziel, "tab=fragen") || !strings.Contains(page, "✓ Carla Wolf ist Kollege/Kollegin von dir · eingetragen") ||
-		!strings.Contains(page, `<button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button>`) || !strings.Contains(page, "Fritz Kurz ist für Ben Berg …") {
+	// a phone contact: only the phone, and what follows by definition with it (Fritz, Anna's sibling, is Kim's uncle)
+	ziel, page := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"kind"}, "zurueck": {"/tresor"}}))
+	if !strings.HasPrefix(ziel, "/tresor?") || !strings.Contains(ziel, "tab=fragen") ||
+		!strings.Contains(page, "✓ Kim Berg ist Kind von dir · eingetragen, kommt auf dein Handy · daraus: weil du und Fritz Kurz Geschwister seid und Kim Berg dein Kind ist, ist Fritz Kurz Onkel/Tante von Kim Berg") ||
+		!strings.Contains(page, `<button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button>`) || !strings.Contains(page, "Ben Berg ist für Kim Berg …") ||
+		!strings.Contains(page, "<span class=anzahl>2</span>") || !strings.Contains(page, "bleibt in deinem Archiv: Kim Berg steht in keinem Adressbuch, nur auf deinen Fotos") {
 		t.Fatalf("after the tap: %s\n%s", ziel, page)
 	}
 	ps := homes.genommen()
-	if len(ps) != 1 || ps[0].Person != "anna" || ps[0].Weg || len(ps[0].Nonce) != 32 || ps[0].Zeilen[0] != (uebernahmeZeile{X: uebernahmeEnde{Name: "Carla Wolf", Haushalt: "c"}, Y: uebernahmeEnde{Name: "Anna Berg", Haushalt: "a"}, Art: "kollege"}) {
+	if len(ps) != 2 || ps[0].Person != "anna" || ps[0].Weg || len(ps[0].Nonce) != 32 || ps[0].Zeilen[0] != (uebernahmeZeile{X: uebernahmeEnde{Name: "Kim Berg"}, Y: uebernahmeEnde{Name: "Anna Berg", Handy: "k1"}, Art: "kind"}) ||
+		ps[1].Zeilen[0] != (uebernahmeZeile{X: uebernahmeEnde{Name: "Fritz Kurz", Handy: "urn:uuid:k2"}, Y: uebernahmeEnde{Name: "Kim Berg"}, Art: "onkel"}) {
 		t.Fatalf("Homes got: %+v", ps)
 	}
 	if h := homes.header[0]; h.Get(proxyHeader) != "" || h.Get("Remote-User") != "" || h.Get("Cookie") != "" {
 		t.Fatalf("the archive sent a browser's or the proxy's headers: %v", h)
 	}
-	if b, _ := os.ReadFile(innen.umfeldAntworten()); !strings.Contains(string(b), `"art":"kollege"`) || !strings.Contains(string(b), `"eingetragen":{"wohin":"haushalt"`) {
+	if b, _ := os.ReadFile(innen.umfeldAntworten()); !strings.Contains(string(b), `"art":"onkel"`) || !strings.Contains(string(b), `"aus":"p-anna|p-kim"`) || !strings.Contains(string(b), `"eingetragen":{"wohin":"handy"`) {
 		t.Fatalf("the vault: %s", b)
 	}
 
-	// Rückgängig: Homes takes the same line back, the vault forgets, the question is back
-	ziel, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {paarKey(carla, "p-anna")}, "tu": {"vergessen"}, "zurueck": {"/tresor"}}))
-	if ps := homes.genommen(); len(ps) != 2 || !ps[1].Weg || ps[1].Zeilen[0] != ps[0].Zeilen[0] {
+	// one Rückgängig: Homes takes both lines back, the vault forgets both, the question is back
+	ziel, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {paarKey("p-kim", "p-anna")}, "tu": {"vergessen"}, "zurueck": {"/tresor"}}))
+	if ps := homes.genommen(); len(ps) != 4 || !ps[2].Weg || !ps[3].Weg || !slices.ContainsFunc(ps[2:], func(p uebernahmePaket) bool { return p.Zeilen[0] == ps[0].Zeilen[0] }) ||
+		!slices.ContainsFunc(ps[2:], func(p uebernahmePaket) bool { return p.Zeilen[0] == ps[1].Zeilen[0] }) {
 		t.Fatalf("Rückgängig at Homes: %+v", ps)
 	}
-	if !strings.Contains(page, "Rückgängig gemacht. Die Frage kommt wieder.") || !strings.Contains(page, "<span class=anzahl>5</span>") {
+	if !strings.Contains(page, "Rückgängig gemacht. Die Frage kommt wieder.") || !strings.Contains(page, "<span class=anzahl>4</span>") {
 		t.Fatalf("after Rückgängig: %s\n%s", ziel, page)
 	}
-	if b, _ := os.ReadFile(innen.umfeldAntworten()); strings.Contains(string(b), "kollege") {
+	if b, _ := os.ReadFile(innen.umfeldAntworten()); strings.Contains(string(b), "kind") || strings.Contains(string(b), "onkel") {
 		t.Fatalf("still in the vault: %s", b)
 	}
 
-	// a phone contact: only the phone
-	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-fritz"}, "y": {"p-kim"}, "art": {"freund"}, "zurueck": {"/tresor"}}))
-	if ps := homes.genommen(); len(ps) != 3 || ps[2].Zeilen[0].X.Handy != "urn:uuid:k2" || ps[2].Zeilen[0].Y.Haushalt != "" || ps[2].Zeilen[0].X.Haushalt != "" {
-		t.Fatalf("the phone's line: %+v", ps[len(ps)-1])
+	// Später: nothing to Homes, the question waits behind the portion, the next comes
+	ziel, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"spaeter"}, "zurueck": {"/tresor"}}))
+	if ziel != "/tresor?tab=fragen" || !strings.Contains(page, "Fritz Kurz ist für Ben Berg …") || !strings.Contains(page, "<span class=anzahl>3</span>") || strings.Contains(page, "Kim Berg ist für") ||
+		!strings.Contains(page, "Vorschlag, weil du und Fritz Kurz Geschwister seid und du und Ben Berg Partner seid.") {
+		t.Fatalf("Später: %s\n%s", ziel, page)
 	}
-	if !strings.Contains(page, "✓ Fritz Kurz ist Freund/in von Kim Berg · eingetragen, kommt auf dein Handy") || !strings.Contains(page, "Fritz Kurz ist für Ben Berg …") {
-		t.Fatalf("after the phone's tap:\n%s", page)
-	}
-
-	// the derived question first (Fritz is Anna's sibling, Anna Ben's partner); put back, the next comes
-	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-fritz"}, "y": {"p-ben"}, "art": {"spaeter"}, "zurueck": {"/tresor"}}))
-
-	// only on photos: the card says it stays, and nothing goes to Homes
-	if !strings.Contains(page, "bleibt in deinem Archiv: Kim Berg steht in keinem Adressbuch, nur auf deinen Fotos") {
-		t.Fatalf("the photo-only card:\n%s", page)
-	}
-	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-ben"}, "y": {"p-kim"}, "art": {"eltern"}, "zurueck": {"/tresor"}}))
-	if len(homes.genommen()) != 3 || !strings.Contains(page, "✓ Ben Berg ist Mutter/Vater von Kim Berg · bleibt in deinem Archiv") {
-		t.Fatalf("photo-only written: %d\n%s", len(homes.genommen()), page)
+	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-fritz"}, "y": {"p-ben"}, "art": {"schwager"}, "zurueck": {"/tresor"}}))
+	if len(homes.genommen()) != 5 || !strings.Contains(page, "✓ Fritz Kurz ist Schwager/Schwägerin von Ben Berg · eingetragen, kommt auf dein Handy") || !strings.Contains(page, "Fritz Kurz ist für Kim Berg …") {
+		t.Fatalf("Schwager:\n%s", page)
 	}
 
-	// Später and kennen sich nicht: nothing to Homes
-	if ziel, _ := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"spaeter"}, "zurueck": {"/tresor"}})); ziel != "/tresor?tab=fragen" {
-		t.Fatalf("Später: %s", ziel)
+	// kennen sich nicht, keine Beziehung: nothing to Homes; the portion is done, calmly, and nothing counts on
+	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-fritz"}, "y": {"p-kim"}, "art": {"fremd"}, "zurueck": {"/tresor"}}))
+	if !strings.Contains(page, "✓ Fritz Kurz und Kim Berg kennen sich nicht · gemerkt") || !strings.Contains(page, "die letzte zum Nachbessern") {
+		t.Fatalf("fremd:\n%s", page)
 	}
+	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-ben"}, "y": {"p-kim"}, "art": {"keine"}, "zurueck": {"/tresor"}}))
+	if !strings.Contains(page, esc(saysNachgebessert)) || !strings.Contains(page, `<a class=leise href="/tresor?tab=fragen&amp;mehr=1">weitere Fragen</a>`) ||
+		strings.Contains(page, "class=anzahl") || strings.Contains(page, `class="frage sofort"`) {
+		t.Fatalf("the portion done:\n%s", page)
+	}
+
+	// weitere Fragen: one beyond the portion, with a way out instead of a count; the answer goes on there
+	page = wt.rufe("GET", "/tresor?tab=fragen&mehr=1", anna, nil).Body.String()
+	if !strings.Contains(page, "Kim Berg ist für dich …") || !strings.Contains(page, `<input type=hidden name=mehr value=1>`) || !strings.Contains(page, ">Genug für jetzt</a>") ||
+		strings.Contains(page, "class=anzahl") || strings.Contains(page, "zum Nachbessern</span>") {
+		t.Fatalf("weitere Fragen:\n%s", page)
+	}
+	ziel, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"kind"}, "mehr": {"1"}, "zurueck": {"/tresor"}}))
+	if !strings.Contains(ziel, "mehr=1") || len(homes.genommen()) != 6 || !strings.Contains(page, "✓ Kim Berg ist Kind von dir · eingetragen, kommt auf dein Handy</span>") || !strings.Contains(page, esc(saysKeineFragen)) {
+		t.Fatalf("beyond the portion (Fritz and Kim answered „kennen sich nicht“: no uncle follows): %s %d\n%s", ziel, len(homes.genommen()), page)
+	}
+
 	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "zurueck": {"/tresor"}}); rec.Code != 400 || !strings.Contains(rec.Body.String(), esc(saysFrageOhneWahl)) {
 		t.Fatalf("no chip: %d", rec.Code)
 	}
-	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-gerd"}, "y": {"p-anna"}, "art": {"keine"}}); rec.Code != 409 {
-		t.Fatalf("not asked: %d", rec.Code)
+	for _, x := range []string{"p-gerd", "haushalt/c"} { // one photo day; the same firm only: they know each other, no question
+		if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"x": {x}, "y": {"p-anna"}, "art": {"keine"}}); rec.Code != 409 {
+			t.Fatalf("%s not asked: %d", x, rec.Code)
+		}
 	}
-	if len(homes.genommen()) != 3 || homes.falsche != 0 {
+	if len(homes.genommen()) != 6 || homes.falsche != 0 {
 		t.Fatalf("Homes: %d taken, %d refused", len(homes.genommen()), homes.falsche)
 	}
 	wt.tt.Abschliessen(t.Context(), "test")
@@ -188,43 +204,79 @@ func TestEinTipp(t *testing.T) {
 	}
 }
 
+// A visit is a portion (owner 2026-11-11): what was put back (Später)
+// waits for the next visit — coming to the page from outside, not the
+// archive's own links, answers or live updates.
+func TestBesuch(t *testing.T) {
+	wt, ut, _, _ := eintragenBox(t)
+	draussen := maps.Clone(anna)
+	draussen["Sec-Fetch-Mode"], draussen["Sec-Fetch-Site"] = "navigate", "none"
+	innen := maps.Clone(draussen)
+	innen["Sec-Fetch-Site"] = "same-origin"
+	wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"spaeter"}, "zurueck": {"/tresor"}}))
+	*ut.jetzt = ut.jetzt.Add(time.Minute)
+	for _, hdr := range []map[string]string{anna, innen} {
+		if page := wt.rufe("GET", "/tresor?tab=fragen", hdr, nil).Body.String(); !strings.Contains(page, "<span class=anzahl>3</span>") || strings.Contains(page, "Kim Berg ist für dich") {
+			t.Fatalf("the same visit:\n%s", page)
+		}
+	}
+	if page := wt.rufe("GET", "/tresor", draussen, nil).Body.String(); !strings.Contains(page, "<span class=anzahl>4</span>") || !strings.Contains(page, "noch 4 zum Nachbessern") {
+		t.Fatalf("a new visit:\n%s", page)
+	}
+	u := &Umfeld{Now: func() time.Time { return *ut.jetzt }}
+	erst := u.Besuch(false)
+	*ut.jetzt = ut.jetzt.Add(time.Hour)
+	if u.Besuch(false) != erst || u.Besuch(true) == erst {
+		t.Fatal("a visit lasts until a new one")
+	}
+	u.vergessen()
+	if u.Besuch(false) != *ut.jetzt {
+		t.Fatal("the vault closed: the next page begins a visit")
+	}
+}
+
 // Homes down: the answer stays in the vault, the toast says it is not
 // written, „Deine Antworten“ offers Eintragen, which writes once Homes is
 // back; a Rückgängig Homes did not take leaves both as they were. Without
 // Homes the card says the answer stays in the archive for now.
 func TestEinTippOhneHomes(t *testing.T) {
-	wt, ut, homes, innen := eintragenBox(t)
-	carla := ut.u.Netz().Von("haushalt/c")
-	key := paarKey(carla, "p-anna")
+	wt, _, homes, innen := eintragenBox(t)
+	key := paarKey("p-kim", "p-anna")
 	homes.kaputt = true
-	_, page := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {carla}, "y": {"p-anna"}, "art": {"kollege"}, "zurueck": {"/tresor"}}))
-	if !strings.Contains(page, "✓ Carla Wolf ist Kollege/Kollegin von dir · noch nicht eingetragen: Homes antwortet gerade nicht") {
+	_, page := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"kind"}, "zurueck": {"/tresor"}}))
+	if !strings.Contains(page, "✓ Kim Berg ist Kind von dir · noch nicht eingetragen: Homes antwortet gerade nicht · daraus:") {
 		t.Fatalf("Homes down:\n%s", page)
 	}
-	if b, _ := os.ReadFile(innen.umfeldAntworten()); !strings.Contains(string(b), "kollege") || strings.Contains(string(b), "eingetragen") {
+	if b, _ := os.ReadFile(innen.umfeldAntworten()); !strings.Contains(string(b), "kind") || strings.Contains(string(b), "eingetragen") {
 		t.Fatalf("the vault: %s", b)
 	}
 	umfeld := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
-	if !strings.Contains(umfeld, "<h2>Deine Antworten</h2>") || !strings.Contains(umfeld, `<button name=tu value=eintragen`) || !strings.Contains(umfeld, "4 offene Fragen beantworten") {
+	if !strings.Contains(umfeld, "<h2>Deine Antworten</h2>") || !strings.Contains(umfeld, `<button name=tu value=eintragen`) || !strings.Contains(umfeld, "2 Fragen zum Nachbessern") {
 		t.Fatalf("Deine Antworten:\n%s", umfeld)
 	}
 	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {key}, "tu": {"eintragen"}, "zurueck": {"/tresor/umfeld"}}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), esc(saysNichtEin)) {
 		t.Fatalf("Eintragen while down: %d", rec.Code)
 	}
 	homes.kaputt = false
-	ziel, umfeld := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {key}, "tu": {"eintragen"}, "zurueck": {"/tresor/umfeld"}}))
-	if !strings.HasPrefix(ziel, "/tresor/umfeld?") || len(homes.genommen()) != 1 || !strings.Contains(umfeld, "· eingetragen</span>") || strings.Contains(umfeld, "value=eintragen") {
-		t.Fatalf("Eintragen: %s %d\n%s", ziel, len(homes.genommen()), umfeld)
+	for i, k := range []string{key, paarKey("p-fritz", "p-kim")} {
+		ziel, umfeld := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {k}, "tu": {"eintragen"}, "zurueck": {"/tresor/umfeld"}}))
+		if !strings.HasPrefix(ziel, "/tresor/umfeld?") || len(homes.genommen()) != i+1 || strings.Count(umfeld, ">eingetragen, kommt auf dein Handy</span>") != i+1 {
+			t.Fatalf("Eintragen %s: %s %d\n%s", k, ziel, len(homes.genommen()), umfeld)
+		}
+	}
+	if umfeld := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String(); strings.Contains(umfeld, "value=eintragen") {
+		t.Fatal("still offered after both were written")
 	}
 	homes.kaputt = true
 	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {key}, "tu": {"vergessen"}, "zurueck": {"/tresor"}}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), esc(saysNichtZurueck)) {
 		t.Fatalf("Rückgängig while down: %d", rec.Code)
 	}
-	if b, _ := os.ReadFile(innen.umfeldAntworten()); !strings.Contains(string(b), "kollege") {
+	if b, _ := os.ReadFile(innen.umfeldAntworten()); !strings.Contains(string(b), "kind") || !strings.Contains(string(b), "onkel") {
 		t.Fatalf("forgotten though Homes kept it: %s", b)
 	}
+	wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-ben"}, "y": {"p-kim"}, "art": {"spaeter"}, "zurueck": {"/tresor"}}))
 	wt.w.HomesIntern = ""
-	if page := wt.rufe("GET", "/tresor", anna, nil).Body.String(); !strings.Contains(page, "bleibt vorerst in deinem Archiv: Homes ist noch nicht mit ihm verbunden") {
+	if page := wt.rufe("GET", "/tresor", anna, nil).Body.String(); !strings.Contains(page, "Fritz Kurz ist für Ben Berg …") || !strings.Contains(page, "bleibt vorerst in deinem Archiv: Homes ist noch nicht mit ihm verbunden") {
 		t.Fatalf("without Homes:\n%s", page)
 	}
 }
@@ -329,5 +381,56 @@ func TestJuergenIstJuergen(t *testing.T) {
 	}
 	if !gleicherKontakt(karteMit("a", "Jürgen Burger", "TEL:0151 12345678\r\n"), karteMit("b", "JUERGEN BURGER", "TEL:+49 151 12345678\r\n")) {
 		t.Fatal("the contact match tells Jürgen from Juergen")
+	}
+}
+
+// The Kranz family in one tap (owner 2026-11-11): Hedwig is Uwe's
+// mother; with it Homes writes that she is Silke's mother-in-law — all
+// three household cards — and Lena's grandmother, who is only on Uwe's
+// phone, so that line goes only to the phone. The toast shows the chain;
+// one Rückgängig takes all three back.
+func TestKetteEinTipp(t *testing.T) {
+	wt, ut, homes, innen := eintragenBox(t)
+	tab := netzTabelle{Format: netzFormat, Version: netzVersion, Namen: map[string]string{}, Ich: "haushalt/a",
+		Kontakte: []netzKontakt{{Key: "haushalt/a", Name: "Anna Berg"}, {Key: "haushalt/h", Name: "Hedwig Kranz"}, {Key: "haushalt/u", Name: "Uwe Kranz"},
+			{Key: "haushalt/s", Name: "Silke Kranz"}, {Key: "privat/l", Name: "Lena Kranz"}},
+		Fest: []festBand{{A: "haushalt/u", B: "haushalt/s", Art: bandBeziehung, Wie: beziehungsWort("Ehefrau")}, {A: "haushalt/u", B: "privat/l", Art: bandBeziehung, Wie: beziehungsWort("Tochter")},
+			{A: "haushalt/h", B: "haushalt/u", Art: bandAdresse}}}
+	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+		t.Fatal(err)
+	}
+	ut.u.laden(innen)
+	ziel, page := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"haushalt/h"}, "y": {"haushalt/u"}, "art": {"eltern"}, "zurueck": {"/tresor"}}))
+	want := "✓ Hedwig Kranz ist Mutter/Vater von Uwe Kranz · eingetragen" +
+		" · daraus: weil Uwe Kranz Hedwig Kranz’ Kind ist und Uwe Kranz und Silke Kranz Partner sind, ist Hedwig Kranz Schwiegereltern von Silke Kranz" +
+		" · daraus: weil Uwe Kranz Hedwig Kranz’ Kind ist und Lena Kranz Uwe Kranz’ Kind ist, ist Hedwig Kranz Großeltern von Lena Kranz"
+	if !strings.Contains(page, esc(want)) {
+		t.Fatalf("the chain's toast: %s\n%s", ziel, page)
+	}
+	ps := homes.genommen()
+	var zeilen []uebernahmeZeile
+	for _, p := range ps {
+		zeilen = append(zeilen, p.Zeilen...)
+	}
+	h := uebernahmeEnde{Name: "Hedwig Kranz", Haushalt: "h"}
+	for _, z := range []uebernahmeZeile{
+		{X: h, Y: uebernahmeEnde{Name: "Uwe Kranz", Haushalt: "u"}, Art: "eltern"},
+		{X: h, Y: uebernahmeEnde{Name: "Silke Kranz", Haushalt: "s"}, Art: "schwiegereltern"},
+		{X: uebernahmeEnde{Name: "Hedwig Kranz"}, Y: uebernahmeEnde{Name: "Lena Kranz", Handy: "l"}, Art: "grosseltern"}, // the household card never names Lena
+	} {
+		if !slices.Contains(zeilen, z) {
+			t.Errorf("Homes did not get %+v: %+v", z, zeilen)
+		}
+	}
+	if len(zeilen) != 3 {
+		t.Fatalf("Homes got %d lines", len(zeilen))
+	}
+	wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {paarKey("haushalt/h", "haushalt/u")}, "tu": {"vergessen"}, "zurueck": {"/tresor"}}))
+	ps = homes.genommen()
+	if len(ps) != 6 || !ps[3].Weg || !ps[4].Weg || !ps[5].Weg {
+		t.Fatalf("one Rückgängig, the whole chain at Homes: %+v", ps)
+	}
+	if b, _ := os.ReadFile(innen.umfeldAntworten()); string(b) != "{}" {
+		t.Fatalf("the vault keeps: %s", b)
 	}
 }

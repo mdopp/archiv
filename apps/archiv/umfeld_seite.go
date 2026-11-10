@@ -200,8 +200,8 @@ func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mit
 	}
 	b.WriteString(`</div>`)
 	if n != nil {
-		if fs := n.Fragen(); len(fs) > 0 {
-			fmt.Fprintf(&b, `<p class=weiter-in><a href="/tresor?tab=fragen">%s beantworten</a></p>`, esc(anzahl(len(fs), "offene Frage", "offene Fragen")))
+		if jetzt, _ := n.Portion(u.Besuch(false)); len(jetzt) > 0 {
+			fmt.Fprintf(&b, `<p class=weiter-in><a href="/tresor?tab=fragen">%s</a></p>`, esc(anzahl(len(jetzt), "Frage", "Fragen")+" zum Nachbessern"))
 		}
 		w.antwortenListe(&b, n, "/tresor/umfeld")
 		b.WriteString(w.toast(n, r.URL.Query().Get("getan"), "/tresor/umfeld"))

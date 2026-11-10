@@ -11,11 +11,14 @@ import (
 // Partner sind und ein Kind haben, sind wahrscheinlich beide Eltern …
 // gleiche Eltern, wahrscheinlich Geschwister“). From what is known — the
 // person's answers and the relations the phone books name (RELATED) —
-// follow likely relations of other pairs. None is ever set on its own:
-// each becomes a „Wie steht X zu Y?“ with the kind chosen and the reason
-// („weil Anna und Ben Partner sind und Carla Bens Kind ist“), asked before
-// the plain suggestions. A step-family is why: Ben's partner need not be
-// Carla's mother.
+// follow likely relations of other pairs. Each is a „Wie steht X zu Y?“
+// with the kind chosen and the reason („weil Anna und Ben Partner sind
+// und Carla Bens Kind ist“), asked before the plain suggestions — unless
+// an answer just made it follow by definition (definitorisch; owner
+// 2026-11-11): then it is written with that answer (fragen.go, folgern)
+// and goes when it goes. A step-family is why the first two rules stay
+// questions: Ben's partner need not be Carla's mother, a shared parent
+// may make half-siblings.
 //
 // The rules (X is the kind of Y):
 //
@@ -29,9 +32,10 @@ import (
 //	partner of a sibling            → Schwager/Schwägerin
 //
 // Only what is known derives: a derived relation becomes a source once
-// the person answered it, never before. A pair with an answer (Keine and
-// Kennen sich nicht included) or a relation in a phone book is never
-// asked; one put back (Überspringen) is asked last, as a plain question.
+// the person answered it (or it followed from an answer), never before.
+// A pair with a relation in a phone book is never asked, one with an
+// answer only when a rule that holds by definition says otherwise
+// (Konflikt), once; one put back (Später) is asked last.
 
 // The relations the rules read, each as „X is <rel> of Y“.
 const (
@@ -63,8 +67,15 @@ type bekannt struct {
 // reason without its „weil“.
 type Abgeleitet struct {
 	X, Y, Art, Weil string
-	regel           int // the rule's place, for the order
+	regel           int  // the rule's place, for the order
+	Konflikt        bool // an answer or another rule says otherwise
 }
+
+// definitorisch: the rule holds by definition (owner 2026-11-11), so an
+// answer takes it with it (folgern): Großeltern, Onkel/Tante, Cousin/e,
+// Schwiegereltern, Schwager/Schwägerin. A partner of a parent (a
+// step-family) and a shared parent (half-siblings) stay questions.
+func definitorisch(regel int) bool { return regel >= 3 }
 
 // bekannte are the relations known among the shown nodes: an answer is
 // the pair's relation in place of the phone books'; n.mu is held.
@@ -138,18 +149,37 @@ func (n *Netz) abgeleitete() []Abgeleitet {
 		}
 	}
 	gefunden := map[string]Abgeleitet{}
+	// von is art (x of y) as seen from z, one of the two
+	von := func(z, x, art string) string {
+		if z == x {
+			return art
+		}
+		return cmp.Or(gegen[art], art)
+	}
 	vorschlagen := func(regel int, x, y, art, weil string) {
 		key := paarKey(x, y)
-		if x == y || bekanntePaare[key] || n.imBuchBeziehung(x, y) {
+		a, da := n.antworten[key]
+		beantwortet := da && a.Art != artSpaeter
+		if x == y || !beantwortet && (bekanntePaare[key] || n.imBuchBeziehung(x, y)) {
 			return
 		}
-		if a, da := n.antworten[key]; da && a.Art != artSpaeter {
-			return
+		konflikt := false
+		if beantwortet { // a kind answered otherwise, by a rule that holds by definition: asked once more
+			if gesehen := von(a.X, x, art); !definitorisch(regel) || !slices.Contains(arten, a.Art) || a.Art == gesehen || a.Trotz == gesehen {
+				return
+			}
+			konflikt = true
 		}
-		if alt, da := gefunden[key]; da && alt.regel <= regel {
-			return
+		if alt, da := gefunden[key]; da {
+			anders := alt.Art != von(alt.X, x, art)
+			if alt.regel <= regel {
+				alt.Konflikt = alt.Konflikt || anders
+				gefunden[key] = alt
+				return
+			}
+			konflikt = konflikt || anders || alt.Konflikt
 		}
-		gefunden[key] = Abgeleitet{X: x, Y: y, Art: art, Weil: weil, regel: regel}
+		gefunden[key] = Abgeleitet{X: x, Y: y, Art: art, Weil: weil, regel: regel, Konflikt: konflikt}
 	}
 	s := n.saetze()
 	for _, b := range slices.Sorted(maps.Keys(partner)) {

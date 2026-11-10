@@ -71,11 +71,26 @@ type Umfeld struct {
 	Loc       *time.Location
 	Now       func() time.Time
 
-	mu    sync.Mutex
-	halt  sync.Mutex // an answer or a hiding kept and a round's new net, one at a time: neither loses the other
-	stand UmfeldStand
-	netz  *Netz // nil: closed, or nothing computed yet
-	jetzt chan struct{}
+	mu     sync.Mutex
+	halt   sync.Mutex // an answer or a hiding kept and a round's new net, one at a time: neither loses the other
+	stand  UmfeldStand
+	netz   *Netz // nil: closed, or nothing computed yet
+	jetzt  chan struct{}
+	besuch time.Time // when the person's visit began, for its portion of questions (Netz.Portion)
+}
+
+// Besuch is when the person's visit began: a new one with neu (she came
+// to the page from outside), and the first page after the vault opened.
+func (u *Umfeld) Besuch(neu bool) time.Time {
+	if u == nil {
+		return time.Time{}
+	}
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	if neu || u.besuch.IsZero() {
+		u.besuch = u.now()
+	}
+	return u.besuch
 }
 
 func (u *Umfeld) now() time.Time {
@@ -175,7 +190,7 @@ func (u *Umfeld) Lauf(ctx context.Context, innen Innen) {
 // vergessen: the vault closes, the net leaves memory (the time stays, for the status).
 func (u *Umfeld) vergessen() {
 	u.mu.Lock()
-	u.netz = nil
+	u.netz, u.besuch = nil, time.Time{}
 	u.stand = UmfeldStand{Am: u.stand.Am}
 	u.mu.Unlock()
 	u.geaendert()

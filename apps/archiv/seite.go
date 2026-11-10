@@ -1110,7 +1110,7 @@ details.mehr{flex-basis:100%}details.mehr>summary{display:inline-flex;align-item
 .ruhig{display:flex;gap:8px;align-items:flex-start;margin:16px 2px 0;color:var(--muted);font-size:.9rem}.ruhig.klein{font-size:.8rem;margin-top:8px}
 div.gut{display:flex;gap:8px;align-items:flex-start;margin:16px 0 0;padding:12px 14px;background:var(--ok-soft);border-radius:14px}div.gut p{margin:0}div.gut .punkt{background:var(--ok)}
 .achtung{margin:16px 0 0;padding:12px 14px;background:var(--danger-soft);border-radius:14px}.achtung p{margin:0}
-.weiter-in{margin:16px 2px 0;font-size:.9rem}.weiter-in a{font-weight:600;text-decoration:none}.weiter-in .k{display:block;font-size:.8rem;margin-top:2px}
+.weiter-in{margin:16px 2px 0;font-size:.9rem}.weiter-in a{font-weight:600;text-decoration:none}.weiter-in a.leise{font-weight:400;color:var(--muted)}.weiter-in .k{display:block;font-size:.8rem;margin-top:2px}
 a.quellen{display:flex;justify-content:space-between;gap:10px;align-items:center;min-height:52px;margin:22px 0 0;padding:10px 2px 0;border-top:1px solid var(--line);color:var(--muted);text-decoration:none;font-size:.9rem}
 a.quellen b{flex:none;font-weight:600;color:var(--ink)}a.quellen b.gut{color:var(--ok)}a.quellen b.achtung{margin:0;padding:2px 10px;color:var(--danger)}
 .leute a{display:flex;align-items:center;gap:12px;color:inherit;text-decoration:none}.leute .av{width:36px;height:36px;font-size:.8rem}.leute .wer{flex:1;min-width:0}

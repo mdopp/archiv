@@ -108,13 +108,20 @@ type Knoten struct {
 // Kante is a tie: Staerke for the picture, Rang for the order; Tage the
 // distinct photo days and Seit the first one's year (0 none); Fest what
 // the phone books say; Chats the group chats both are in and Mails the
-// messages of the mail threads both are in (gespraeche.go).
+// messages of the mail threads both are in, Faeden how many threads
+// (gespraeche.go).
 type Kante struct {
-	A, B          string
-	Staerke, Rang float64
-	Tage, Seit    int
-	Fest          []festBand
-	Chats, Mails  int
+	A, B                 string
+	Staerke, Rang        float64
+	Tage, Seit           int
+	Fest                 []festBand
+	Chats, Mails, Faeden int
+}
+
+// belegt: the tie has the evidence a tie needs to show at all: two photo
+// days, something a phone book or the person says, or two conversations.
+func (k *Kante) belegt() bool {
+	return k.Tage >= netzMinTage || len(k.Fest) > 0 || k.Chats+k.Faeden >= gespraecheMin
 }
 
 // Netz is the person's contact net, built from a table.
