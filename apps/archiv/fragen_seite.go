@@ -72,11 +72,23 @@ func (w *Web) wohinSatz(u Uebernahme) (punkt, satz string) {
 	return "", "kommt nur auf dein Handy"
 }
 
-// frageKarte is the question f, of offen open ones, as one form.
-func (w *Web) frageKarte(n *Netz, f Frage, offen int) string {
+// nochZu is the portion's rest, the card's footer: „noch 3 zum Nachbessern“.
+func nochZu(rest int) string {
+	if rest == 1 {
+		return "die letzte zum Nachbessern"
+	}
+	return fmt.Sprintf("noch %d zum Nachbessern", rest)
+}
+
+// frageKarte is the question f as one form: of the visit's portion with
+// rest left in it, or (mehr) one beyond it, with a way out, no count.
+func (w *Web) frageKarte(n *Netz, f Frage, rest int, mehr bool) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `<form method=post action="%s" class="frage sofort" id=frage><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value=/tresor>`,
 		antwortPfad, esc(f.X.ID), esc(f.Y.ID))
+	if mehr {
+		b.WriteString(`<input type=hidden name=mehr value=1>`)
+	}
 	fmt.Fprintf(&b, `<div class=gesichter>%s<span class=k>↔</span>%s</div><h2>%s</h2><div class=chips>`, gesicht(f.X.Name), gesicht(f.Y.Name),
 		esc(f.X.Name+" ist für "+map[bool]string{true: "dich", false: f.Y.Name}[f.Ich]+" …"))
 	var vorn []string
@@ -100,7 +112,11 @@ func (w *Web) frageKarte(n *Netz, f Frage, offen int) string {
 	}
 	punkt, satz := w.wohinSatz(n.Uebernahme(f.X.ID, f.Y.ID, ""))
 	fmt.Fprintf(&b, `<p class=wohin><span class="punkt %s"></span>%s</p>`, punkt, esc(satz))
-	fmt.Fprintf(&b, `<div class=fuss><button name=art value=spaeter class=leise data-laeuft="Legt es nach hinten …">Später</button><span class=k>%s</span></div></form>`, esc(anzahl(offen, "Frage", "Fragen")+" offen"))
+	fuss := `<span class=k>` + esc(nochZu(rest)) + `</span>`
+	if mehr {
+		fuss = `<a class=k href="/tresor?tab=fragen">Genug für jetzt</a>`
+	}
+	fmt.Fprintf(&b, `<div class=fuss><button name=art value=spaeter class=leise data-laeuft="Legt es nach hinten …">Später</button>%s</div></form>`, fuss)
 	return b.String()
 }
 
@@ -110,11 +126,15 @@ func chip(art, text, klasse string) string {
 
 // gegebenSatz is an answer as a sentence: „Clara ist Kind von dir.“
 func gegebenSatz(g Gegeben) string {
-	switch g.Art {
-	case artKeine:
-		return fmt.Sprintf("%s und %s: keine Beziehung.", g.X.Name, duOder(g.Y, g.Ich))
-	case artFremd:
-		return fmt.Sprintf("%s und %s kennen sich nicht.", g.X.Name, duOder(g.Y, g.Ich))
+	switch {
+	case g.Art == artKeine && g.Ich:
+		return fmt.Sprintf("Du und %s: keine Beziehung.", g.X.Name)
+	case g.Art == artKeine:
+		return fmt.Sprintf("%s und %s: keine Beziehung.", g.X.Name, g.Y.Name)
+	case g.Art == artFremd && g.Ich:
+		return fmt.Sprintf("Du kennst %s nicht.", g.X.Name)
+	case g.Art == artFremd:
+		return fmt.Sprintf("%s und %s kennen sich nicht.", g.X.Name, g.Y.Name)
 	}
 	return fmt.Sprintf("%s ist %s von %s.", g.X.Name, kurzWort(g.Art), duOder(g.Y, g.Ich))
 }
@@ -135,16 +155,21 @@ func (w *Web) standSatz(g Gegeben) string {
 	return satz
 }
 
-// toast is „✓ … eingetragen · Rückgängig“ for the answer key; it goes
+// toast is „✓ … eingetragen · Rückgängig“ for the answer key, with the
+// chain of what followed from it („daraus: weil …, ist …“); it goes
 // after ten seconds (the stylesheet), the answer stays undoable under
-// „Deine Antworten“.
+// „Deine Antworten“. One Rückgängig takes back the answer and its chain.
 func (w *Web) toast(n *Netz, key, zurueck string) string {
 	g, ok := n.Gegebenes(key)
 	if !ok {
 		return ""
 	}
-	return fmt.Sprintf(`<div class=toast role=status><span>✓ %s · %s</span><form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s"><button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button></form></div>`,
-		esc(strings.TrimSuffix(gegebenSatz(g), ".")), esc(w.standSatz(g)), antwortPfad, esc(key), esc(zurueck))
+	text := strings.TrimSuffix(gegebenSatz(g), ".") + " · " + w.standSatz(g)
+	for _, d := range n.Gefolgerte(key) {
+		text += " · daraus: weil " + d.Weil + ", ist " + d.X.Name + " " + kurzWort(d.Art) + " von " + duOder(d.Y, d.Ich)
+	}
+	return fmt.Sprintf(`<div class=toast role=status><span>✓ %s</span><form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s"><button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button></form></div>`,
+		esc(text), antwortPfad, esc(key), esc(zurueck))
 }
 
 // antwortenListe is „Deine Antworten“: each with what the phone books say,
@@ -194,28 +219,31 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	zurueck, key := zurueckNach(r.PostFormValue("zurueck")), r.PostFormValue("paar")
+	weiter := func(v url.Values) string { // „weitere Fragen“ goes on with the next one beyond today's
+		if r.PostFormValue("mehr") == "1" && zurueck == "/tresor" {
+			v.Set("mehr", "1")
+		}
+		return mitAnfrage(zurueck, v)
+	}
 	switch r.PostFormValue("tu") {
 	case "vergessen":
-		g, da := w.Umfeld.Netz().Gegebenes(key)
-		if da && g.Eingetragen != nil {
-			if err := w.homesSchreiben(r.Context(), g.Eingetragen.Zeile, true); err != nil {
-				log.Printf("archiv: Umfeld: Rückgängig nicht an Homes: %v", err)
-				w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtZurueck)
-				return
-			}
+		if err := w.ausHomes(r.Context(), innen, key); err != nil {
+			log.Printf("archiv: Umfeld: Rückgängig nicht an Homes: %v", err)
+			w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtZurueck)
+			return
 		}
 		if err := w.Umfeld.Vergessen(innen, key); err != nil {
 			w.antwortFehler(rw, r, zurueck, err)
 			return
 		}
-		http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"m": {"zurueck"}}), http.StatusSeeOther)
+		http.Redirect(rw, r, weiter(url.Values{"m": {"zurueck"}}), http.StatusSeeOther)
 		return
 	case "eintragen":
 		if err := w.eintragen(r.Context(), innen, key); err != nil {
 			w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtEin)
 			return
 		}
-		http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"getan": {key}}), http.StatusSeeOther)
+		http.Redirect(rw, r, weiter(url.Values{"getan": {key}}), http.StatusSeeOther)
 		return
 	}
 	art := r.PostFormValue("art")
@@ -223,18 +251,31 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		w.zurueckFehler(rw, r, zurueck, http.StatusBadRequest, saysFrageOhneWahl)
 		return
 	}
-	f, err := w.Umfeld.Beantworten(innen, r.PostFormValue("x"), r.PostFormValue("y"), art)
+	x, y := r.PostFormValue("x"), r.PostFormValue("y")
+	if g, da := w.Umfeld.Netz().Gegebenes(paarKey(x, y)); da && g.Eingetragen != nil && art != artSpaeter { // a conflict answered anew: the old line leaves Homes first
+		if err := w.homesSchreiben(r.Context(), g.Eingetragen.Zeile, true); err != nil {
+			log.Printf("archiv: Umfeld: eine alte Antwort nicht aus Homes: %v", err)
+			w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtEin)
+			return
+		}
+		w.Umfeld.Eintragen(innen, g.Key, nil)
+	}
+	f, err := w.Umfeld.Beantworten(innen, x, y, art)
 	if err != nil {
 		w.antwortFehler(rw, r, zurueck, err)
 		return
 	}
 	key = paarKey(f.X.ID, f.Y.ID)
 	if art == artSpaeter {
-		http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{}), http.StatusSeeOther)
+		http.Redirect(rw, r, weiter(url.Values{}), http.StatusSeeOther)
 		return
 	}
-	w.eintragen(r.Context(), innen, key) // a refusal stays visible: the toast and the list say „noch nicht eingetragen“
-	http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"getan": {key}}), http.StatusSeeOther)
+	// a refusal stays visible: the toast and the list say „noch nicht eingetragen“
+	w.eintragen(r.Context(), innen, key)
+	for _, d := range w.Umfeld.Netz().Gefolgerte(key) {
+		w.eintragen(r.Context(), innen, d.Key)
+	}
+	http.Redirect(rw, r, weiter(url.Values{"getan": {key}}), http.StatusSeeOther)
 }
 
 // eintragen has Homes write the answer key, if it goes anywhere and is not
@@ -251,6 +292,29 @@ func (w *Web) eintragen(ctx context.Context, innen Innen, key string) error {
 		return err
 	}
 	return w.Umfeld.Eintragen(innen, key, &Eingetragen{Wohin: g.Karte.Wohin, Zeile: g.Karte.Zeile, Am: w.jetzt()})
+}
+
+// ausHomes takes back from Homes what it wrote of the answer key and of
+// what followed from it, each marked as taken back in the vault at once,
+// so a second try after a failure sends only what is left.
+func (w *Web) ausHomes(ctx context.Context, innen Innen, key string) error {
+	n := w.Umfeld.Netz()
+	gs := n.Gefolgerte(key)
+	if g, da := n.Gegebenes(key); da {
+		gs = append(gs, g)
+	}
+	for _, g := range gs {
+		if g.Eingetragen == nil {
+			continue
+		}
+		if err := w.homesSchreiben(ctx, g.Eingetragen.Zeile, true); err != nil {
+			return err
+		}
+		if err := w.Umfeld.Eintragen(innen, g.Key, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // zurueckFehler shows the page the form came from with fehler.

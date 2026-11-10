@@ -340,7 +340,7 @@ func (n *Netz) gespraecheDazu(alle map[[2]string]*Kante, nicht map[string]bool) 
 		}
 		add := min(s.s, gespraechDeckel)
 		k.Staerke, k.Rang = k.Staerke+add, k.Rang+add
-		k.Chats, k.Mails = s.chats, s.mails
+		k.Chats, k.Mails, k.Faeden = s.chats, s.mails, s.faeden
 	}
 }
 
