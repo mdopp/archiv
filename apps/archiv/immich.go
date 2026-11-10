@@ -139,6 +139,7 @@ type immichAufnahme struct {
 		ID        string `json:"id"`
 		Name      string `json:"name"`
 		Versteckt bool   `json:"isHidden"`
+		Geb       string `json:"birthDate"` // JJJJ-MM-TT, "" none
 	} `json:"people"`
 }
 

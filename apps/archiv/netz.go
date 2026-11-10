@@ -60,11 +60,15 @@ type netzFoto struct {
 }
 
 // netzKontakt is a contact of the phone books: its key (haushalt/<uid>,
-// privat/<uid>), name and Immich person ("" none).
+// privat/<uid>), name and Immich person ("" none); for the suggestions
+// (fragen.go) its family name, birthday and streets.
 type netzKontakt struct {
-	Key    string `json:"k"`
-	Name   string `json:"n"`
-	Person string `json:"p,omitempty"`
+	Key      string   `json:"k"`
+	Name     string   `json:"n"`
+	Person   string   `json:"p,omitempty"`
+	Family   string   `json:"f,omitempty"`
+	Geb      string   `json:"g,omitempty"`
+	Strassen []string `json:"s,omitempty"`
 }
 
 // festBand is a phone-book tie between two contacts' keys; for a
@@ -74,6 +78,8 @@ type festBand struct {
 	B   string `json:"b"`
 	Art string `json:"art"`
 	Wie string `json:"wie,omitempty"`
+	// Gesagt: the person's answer (fragen.go), A and B nodes, Wie a kind
+	Gesagt bool `json:"-"`
 }
 
 // netzTabelle is what a round read, kept in the vault.
@@ -87,6 +93,7 @@ type netzTabelle struct {
 	Fest     []festBand        `json:"fest"`
 	Ich      string            `json:"ich,omitempty"`      // the person's own contact
 	Haushalt []string          `json:"haushalt,omitempty"` // the household book's cards as last read
+	Geb      map[string]string `json:"geb,omitempty"`      // Immich's birthDate, by named person
 }
 
 // Knoten is a person: an Immich person (ID its id) or a contact without
@@ -112,18 +119,23 @@ type Netz struct {
 
 	mu        sync.Mutex
 	st        netzTabelle
-	verborgen map[string]string // by node: Aus or Nicht
+	verborgen map[string]string  // by node: Aus or Nicht
+	antworten map[string]antwort // by pair (paarKey): the person's answers, fragen.go
+	merkmale  map[string]merkmale
 	knoten    map[string]Knoten
 	von       map[string]string // node by contact key
 	kanten    map[string][]*Kante
 	ich       string
 }
 
-// neuesNetz builds the net of st with the hidden ones.
-func neuesNetz(st netzTabelle, verborgen map[string]string, loc *time.Location, now func() time.Time) *Netz {
-	n := &Netz{Loc: loc, Now: now, st: st, verborgen: maps.Clone(verborgen)}
+// neuesNetz builds the net of st with the hidden ones and the answers.
+func neuesNetz(st netzTabelle, verborgen map[string]string, antworten map[string]antwort, loc *time.Location, now func() time.Time) *Netz {
+	n := &Netz{Loc: loc, Now: now, st: st, verborgen: maps.Clone(verborgen), antworten: maps.Clone(antworten)}
 	if n.verborgen == nil {
 		n.verborgen = map[string]string{}
+	}
+	if n.antworten == nil {
+		n.antworten = map[string]antwort{}
 	}
 	if n.st.Namen == nil {
 		n.st.Namen = map[string]string{}
@@ -185,6 +197,8 @@ func (n *Netz) bauen() {
 		}
 	}
 	n.festDazu(alle, nicht)
+	n.gesagtDazu(alle, nicht)
+	n.merkmaleBauen()
 	for _, k := range alle {
 		n.kanten[k.A], n.kanten[k.B] = append(n.kanten[k.A], k), append(n.kanten[k.B], k)
 	}
@@ -407,6 +421,8 @@ func (n *Netz) Gruende(mitte string, k Kante) string {
 	defer n.mu.Unlock()
 	for _, f := range k.Fest {
 		switch {
+		case f.Gesagt:
+			out = append(out, gesagtGrund(mitte, f))
 		case f.Art == bandAdresse:
 			out = append(out, "gleiche Adresse")
 		case f.Art == bandFirma:

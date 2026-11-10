@@ -170,8 +170,9 @@ func (w *Web) umfeldGet(rw http.ResponseWriter, r *http.Request) {
 }
 
 // umfeldSeite is the page; mitte "" puts the person (or whoever has the
-// most ties) in the middle.
-func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mitte, meldung, fehler string) {
+// most ties) in the middle; nach is HTML under the message (an answer's
+// Übernehmen).
+func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mitte, meldung, fehler string, nach ...string) {
 	innen, auf := w.Tresor.Innen()
 	if !auf {
 		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
@@ -180,7 +181,7 @@ func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mit
 	var b strings.Builder
 	b.WriteString(`<p class=k><a href="/tresor">← Zum Tresor</a></p><h2>Umfeld</h2>`)
 	if meldung != "" {
-		fmt.Fprintf(&b, `<p class="meldung ok" role=status>%s</p>`, esc(meldung))
+		fmt.Fprintf(&b, `<div class="meldung ok" role=status><p>%s</p>%s</div>`, esc(meldung), strings.Join(nach, ""))
 	}
 	if fehler != "" {
 		fmt.Fprintf(&b, `<p class="meldung fehler" role=alert>%s</p>`, esc(fehler))
@@ -205,6 +206,9 @@ func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mit
 		b.WriteString(`<p class=k>Noch kein Umfeld. Sobald das Archiv deine Fotos gelesen hat, erscheint es hier.</p>`)
 	}
 	b.WriteString(`</div>`)
+	if n != nil {
+		w.umfeldFragen(&b, n, mitte)
+	}
 	fmt.Fprintf(&b, `<p class=hinweis>%s</p>`, esc(saysUmfeldHinweis))
 	seite(rw, code, "Umfeld", b.String(), "")
 }

@@ -85,7 +85,8 @@ type Web struct {
 	Eingang     *Eingang
 	Protokoll   *Protokoll
 	Schluessel  Schluessel   // outside the vault: the import runs while it is closed
-	HomesSecret string       // ARCHIV_HOMES_SECRET (legacy ARCHIV_HOMES_SECRET): Homes' way to the restore files
+	HomesSecret string       // ARCHIV_HOMES_SECRET (legacy ARCHIV_HAUS_SECRET): Homes' way to the restore files; signs a takeover (uebernahme.go)
+	HomesURL    string       // Homes' address, where „Übernehmen“ goes (homesURL); "" none
 	Letzte      string       // /eingang/letzte
 	Archiv      http.Handler // msgvault, see archivProxy
 	Geaendert   func()
@@ -94,6 +95,7 @@ type Web struct {
 	Abgleich    *Abgleich      // contacts and calendars from Radicale (nil: not set up)
 	Personen    *Personenkarte // „Ist das dieselbe Person?“
 	Umfeld      *Umfeld        // who stands close to whom (nil: not set up)
+	Now         func() time.Time
 }
 
 type sitzungArt int
@@ -259,6 +261,7 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("GET /tresor/umfeld", w.umfeldGet)
 	mux.HandleFunc("POST /tresor/umfeld/schluessel", w.umfeldSchluessel)
 	mux.HandleFunc("POST /tresor/umfeld/verbergen", w.umfeldVerbergen)
+	mux.HandleFunc("POST /tresor/umfeld/antwort", w.umfeldAntwort)
 	return mux
 }
 
@@ -1059,6 +1062,8 @@ progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-colo
 details{margin:.4rem 0}summary{cursor:pointer;color:var(--akzent);font-weight:500;min-height:44px;display:flex;align-items:center}
 ol{padding-left:1.2rem}li{margin:.3rem 0}
 .vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:.5rem}
+.frage{border-top:1px solid var(--line);padding:.4rem 0}.frage h4{margin:.4rem 0;font-size:1rem}.frage form{margin:.4rem 0}.frage label{display:block}
+.meldung form.knoepfe,.nahe form.knoepfe{align-items:center;flex-wrap:wrap}.meldung p{margin:0 0 .4rem}
 .netzbild{display:block;width:100%;max-width:400px;height:auto;margin:1rem auto 0}.netzbild line{stroke:var(--k);stroke-linecap:round}.netzbild line.zw{stroke:var(--line);stroke-width:.6}
 .netzbild circle{fill:var(--bg);stroke:var(--akzent);stroke-width:1.5}.netzbild .mitte circle{fill:var(--akzent)}.netzbild text{fill:var(--fg);font-size:10px;text-anchor:middle}.netzbild a:focus circle,.netzbild a:hover circle{fill:var(--akzent)}
 ol.nahe,ul.nahe{padding-left:1.4rem}.nahe li{margin:.7rem 0}.nahe form.knoepfe{margin:.2rem 0 0;flex-wrap:wrap}.nahe button{min-height:36px;padding:.3rem .8rem;font-size:.92rem}
