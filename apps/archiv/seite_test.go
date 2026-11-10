@@ -96,6 +96,8 @@ func TestEveryPostRouteAnswers(t *testing.T) {
 		"/tresor/abgleich":             {},
 		"/tresor/personen/entscheiden": {"id": {"7"}, "token": {"t"}, "antwort": {"ja"}},
 		"/tresor/personen/zusammen":    {"a": {"1"}, "b": {"2"}},
+		"/tresor/umfeld/schluessel":    {"schluessel": {"kurz"}},
+		"/tresor/umfeld/verbergen":     {"id": {"p-x"}, "art": {"aus"}},
 	}
 	for _, zustand := range []string{"uneingerichtet", "offen", "verschlossen"} {
 		wt := neuesWeb(t)

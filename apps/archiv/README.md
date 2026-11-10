@@ -517,6 +517,60 @@ The status file gets `abgleich.{eingerichtet, kontakte_am, kalender_am,
 fehler}` (times and a sentence, no names, no counts); a refused Radicale
 login is a yellow finding.
 
+## Umfeld: who stands close to whom (archiv#27)
+
+Owner, 2026-11-10 (homes ADR 0002): the contact net moves from Homes
+(`internal/netz`) into the person's archive. It is computed and kept only
+inside the open vault; closed, there is no net, not even in memory.
+
+**Step 1 (this):** the person's Immich key, „Steht nahe“ and the picture.
+
+- **The key.** The person makes an API key in Immich (Kontoeinstellungen →
+  API-Schlüssel) with `asset.read`, `asset.view` and `person.read` and
+  pastes it on the vault page under „Umfeld“. The archive asks Immich
+  (`GET /api/api-keys/me`) and stores it only if those rights are there,
+  else it names the missing ones in German. It lives in the vault,
+  `/run/tresor/immich-schluessel` (0600), like the WhatsApp key; never in
+  `/data`, argv, the environment or a log. Immich's address comes from
+  the box (`IMMICH_URL`); without it the page says Umfeld is not set up.
+- **What is read** (`umfeld.go`), only reading: every photo of the key's
+  account with at least one person (`POST /api/search/metadata`,
+  `withExif`, `withPeople`, 500 a page, `dateTimeOriginal`; a photo
+  without it is skipped); the e-mail of the account (`/api/users/me`, if
+  the key may: it finds the person's own card, else their number does);
+  the phone's book from the archive's contact store (cards deleted on the
+  phone left out); and the household book `homes/haushalt-kontakte`
+  through the archive's Radicale login (refused until Radicale's rights
+  allow it: the page says so and the net is made without it).
+- **The net** (`netz.go`, `telefonbuch.go`: Homes' numbers, its tests
+  ported with the same fixture, the ties pinned to six places). A photo
+  day in a cell of about 1 km is one event; a pair counts 1/(n−1) of it,
+  halved every 4 years, plus 0.15 per year they meet in; the rank divides
+  by how often both appear at all (hub); a tie from photos alone shows
+  from two days on. The phone books add the same address (1.5, groups up
+  to 12), the same company (0.4, up to 30) and a relation (3): vCard 4
+  `RELATED`, iOS `X-ABRELATEDNAMES` with its `X-ABLabel`, Android
+  `X-ANDROID-CUSTOM` relation rows. A contact is the Immich person of the
+  same name (Homes keeps them named alike).
+- **Kept in the vault**: `/run/tresor/umfeld/netz.json` (format
+  `archiv-umfeld`, version 1: the photos' ids, times, places and persons,
+  the names, the contacts and ties, the household's cards as last read)
+  and `verborgen.json` (who is hidden). Every round reads everything
+  again and rebuilds (a merge or a rename in Immich cannot drift); Immich
+  out of reach keeps the last photos.
+- **When**: at the opening, then every `UMFELD_TAKT` seconds (default an
+  hour), and at once after a new key. A round does not hold the vault
+  open (an hourly round would outlast `LEERLAUF`); the closing ends it.
+- **Pages**: the vault page's card „Umfeld“ (the key, how far the round
+  is, what is missing) and `/tresor/umfeld`: „Steht dir nahe“, a radial
+  picture and the ranked list with the reasons, any person into the
+  middle (`?mitte=`), „Ausblenden“ and „Nicht berechnen“ (out before any
+  tie is computed), the hidden ones restorable. Closed, the locked page.
+
+Not yet (steps 2–5): the questions „Wie steht X zu Y?“, taking a
+relation over into Homes, group chats and mail threads, the pair page,
+group suggestions.
+
 ## Status for laib
 
 `/data/laib-status.json` (outside the vault, nothing secret): `at`,
@@ -525,7 +579,8 @@ login is a yellow finding.
 `briefkasten.{wartend, aeltestes}` (packets waiting for the opening),
 `letztes_paket.<quelle>.{am, sicherung, paket, nachrichten, anhaenge}`,
 `letzter_import.<quelle>.{am, datei, zahlen{sms,mms,anrufe,anhaenge,mails}, anzahl}`,
-`letzter_fehler{am, quelle, datei, satz}`, `packt`, `liefert`
+`letzter_fehler{am, quelle, datei, satz}`, `packt`, `liefert`, `umfeld_am`
+(when the net was last computed: a time, nothing of the net)
 (`zahlen.signal`, `zahlen.whatsapp`: new messages of a direct import).
 Findings (gelb): packets waiting more than three days while the archive is
 not open („Dein Archiv ist seit … zu, X Pakete mit neuen Nachrichten
@@ -566,7 +621,8 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | status | `status: file: ${DATA_DIR}/archiv/<person>/laib-status.json` |
 | stop | `TimeoutStopSec` ≥ 90: closing stops msgvault (≤ 30 s) and unmounts |
 | Radicale (contacts, calendars) | `RADICALE_URL=http://host.containers.internal:5232` (Radicale's root, no path), `RADICALE_USER=archiv-<person>`, and that account's password as a file: `Secret=<the instance's ARCHIV_RADICALE_PASSWORD>,type=mount,target=radicale-password` (read from `RADICALE_PASSWORD_FILE`, default `/run/secrets/radicale-password`; never an environment variable). Without `RADICALE_URL` and `RADICALE_USER` the page says the box has not set it up. Optional: `KONTAKTE_TAKT` (s, default 10800), `KONTAKTE_RELAIS_PORT` (default 18443, inside the container only). |
-| Radicale account and rights | an LLDAP account `archiv-<person>` per instance (seeded like `kalender`, its password the instance's generated secret), and in `templates/radicale/pre-start`'s rights, **right after `[root]`** (before every `user: .+`/`(.+)` section): `[archiv-home]` user `archiv-(.+)`, collection `{0}`, permissions `R`; `[archiv-lesen]` user `archiv-(.+)`, collection `{0}/(handy-kontakte\|google-(?!kontakte(/\|$))[^/]+\|privat-[^/]+)(/.*)?`, permissions `r`; `[archiv-sonst-nichts]` user `archiv-.+`, collection `.*`, permissions empty. `integration.sh` runs these rights in a real Radicale. |
+| Immich (Umfeld) | `IMMICH_URL=http://host.containers.internal:2283` (Immich's root; `uses: [immich]`). The key is the person's own, entered on the page, never the template's. Optional: `UMFELD_TAKT` (s, default 3600). |
+| Radicale account and rights | an LLDAP account `archiv-<person>` per instance (seeded like `kalender`, its password the instance's generated secret), and in `templates/radicale/pre-start`'s rights, **right after `[root]`** (before every `user: .+`/`(.+)` section): `[archiv-home]` user `archiv-(.+)`, collection `{0}`, permissions `R`; `[archiv-lesen]` user `archiv-(.+)`, collection `{0}/(handy-kontakte\|google-(?!kontakte(/\|$))[^/]+\|privat-[^/]+)(/.*)?`, permissions `r`; `[archiv-sonst-nichts]` user `archiv-.+`, collection `.*`, permissions empty. `integration.sh` runs these rights in a real Radicale. For Umfeld (archiv#27) the account also reads `homes/haushalt-kontakte` (read only; the laib template change and its ADR 0029 amendment bring that right); until then the archive gets 403 there and the page says the household book is missing. |
 | backup | do not quiesce by stopping the unit (that locks the vault); while open, a snapshot catches a live SQLite in ciphertext — the restore is only as good as that moment. |
 
 ## Limits, honestly

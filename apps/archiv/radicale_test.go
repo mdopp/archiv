@@ -28,6 +28,7 @@ type fakeRadicale struct {
 	mu       sync.Mutex
 	sammlung map[string]fakeSammlung // name -> collection in /anna/
 	karten   map[string]string       // handy-kontakte: file name -> vCard
+	haushalt map[string]string       // homes/haushalt-kontakte: file name -> vCard; nil: the account may not read it (403)
 	methoden []string
 	auth     []string // the user of each request
 }
@@ -112,23 +113,30 @@ func (f *fakeRadicale) serve(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		var b strings.Builder
-		b.WriteString(`<?xml version='1.0' encoding='utf-8'?>` + "\n" + `<multistatus xmlns="DAV:" xmlns:CR="urn:ietf:params:xml:ns:carddav">`)
-		namen := make([]string, 0, len(f.karten))
-		for n := range f.karten {
-			namen = append(namen, n)
-		}
-		sort.Strings(namen)
-		for _, n := range namen {
-			fmt.Fprintf(&b, `<response><href>/anna/handy-kontakte/%s</href><propstat><prop><getetag>"1"</getetag><CR:address-data>%s</CR:address-data></prop><status>HTTP/1.1 200 OK</status></propstat></response>`, n, xmlText(f.karten[n]))
-		}
-		b.WriteString(`</multistatus>`)
-		w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-		w.WriteHeader(http.StatusMultiStatus)
-		io.WriteString(w, b.String())
+		buchAntwort(w, r.URL.Path, f.karten)
+	case r.Method == "REPORT" && r.URL.Path == "/homes/haushalt-kontakte/" && f.haushalt != nil:
+		buchAntwort(w, r.URL.Path, f.haushalt)
 	default:
 		http.Error(w, "nicht in diesem Fake", http.StatusForbidden)
 	}
+}
+
+// buchAntwort answers a REPORT addressbook-query with every card.
+func buchAntwort(w http.ResponseWriter, pfad string, karten map[string]string) {
+	var b strings.Builder
+	b.WriteString(`<?xml version='1.0' encoding='utf-8'?>` + "\n" + `<multistatus xmlns="DAV:" xmlns:CR="urn:ietf:params:xml:ns:carddav">`)
+	namen := make([]string, 0, len(karten))
+	for n := range karten {
+		namen = append(namen, n)
+	}
+	sort.Strings(namen)
+	for _, n := range namen {
+		fmt.Fprintf(&b, `<response><href>%s%s</href><propstat><prop><getetag>"1"</getetag><CR:address-data>%s</CR:address-data></prop><status>HTTP/1.1 200 OK</status></propstat></response>`, pfad, n, xmlText(karten[n]))
+	}
+	b.WriteString(`</multistatus>`)
+	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	w.WriteHeader(http.StatusMultiStatus)
+	io.WriteString(w, b.String())
 }
 
 // radicale gives an archive client for the fake, its password in a file.
