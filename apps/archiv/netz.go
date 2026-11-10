@@ -94,6 +94,9 @@ type netzTabelle struct {
 	Ich      string            `json:"ich,omitempty"`      // the person's own contact
 	Haushalt []string          `json:"haushalt,omitempty"` // the household book's cards as last read
 	Geb      map[string]string `json:"geb,omitempty"`      // Immich's birthDate, by named person
+	// Gespraeche are msgvault's group chats and mail threads, matched to
+	// the contacts (gespraeche.go); kept as last read while msgvault is busy.
+	Gespraeche []netzGespraech `json:"gespraeche,omitempty"`
 }
 
 // Knoten is a person: an Immich person (ID its id) or a contact without
@@ -104,12 +107,14 @@ type Knoten struct {
 
 // Kante is a tie: Staerke for the picture, Rang for the order; Tage the
 // distinct photo days and Seit the first one's year (0 none); Fest what
-// the phone books say.
+// the phone books say; Chats the group chats both are in and Mails the
+// messages of the mail threads both are in (gespraeche.go).
 type Kante struct {
 	A, B          string
 	Staerke, Rang float64
 	Tage, Seit    int
 	Fest          []festBand
+	Chats, Mails  int
 }
 
 // Netz is the person's contact net, built from a table.
@@ -197,6 +202,7 @@ func (n *Netz) bauen() {
 		}
 	}
 	n.festDazu(alle, nicht)
+	n.gespraecheDazu(alle, nicht)
 	n.gesagtDazu(alle, nicht)
 	n.merkmaleBauen()
 	for _, k := range alle {
@@ -411,12 +417,13 @@ func (n *Netz) Verbergen(id, art string) map[string]string {
 }
 
 // Gruende are the tie's reasons as seen from mitte: the photo days and
-// since when, then what the phone books say.
+// since when, the group chats and mails, then what the phone books say.
 func (n *Netz) Gruende(mitte string, k Kante) string {
 	var out []string
 	if k.Tage > 0 {
 		out = append(out, fmt.Sprintf("%s auf deinen Fotos seit %d", anzahlT(k.Tage, "Tag", "Tage"), k.Seit))
 	}
+	out = append(out, gespraechGruende(k)...)
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	for _, f := range k.Fest {

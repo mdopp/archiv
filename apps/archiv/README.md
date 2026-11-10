@@ -645,6 +645,51 @@ inside the open vault; closed, there is no net, not even in memory.
   came through the public route. It goes from the archive's container to
   Homes' own port on the box, never through a browser.
 
+**Step 3:** group chats and mail threads as sources (`gespraeche.go`).
+
+- **What is read**, while the vault is open and msgvault answers: one
+  read-only statement through msgvault's `POST /api/v1/query` (its
+  analytics views: `conversations`, `conversation_participants`,
+  `messages`, `message_recipients`, `participants`). A group chat is a
+  WhatsApp, Signal or MMS conversation of 3 to 30 members, a mail thread
+  one of 2 to 10 addresses among From, To and Cc. A thread with a
+  `List-Id` or a bulk sender (`noreply`, `newsletter`, `info`, …) is left
+  out. msgvault still building its analytics (202, 503) or closed: the
+  round keeps the conversations read last.
+- **Who**: a participant is a contact by their number (last nine digits)
+  or address (case aside) on a card of the phone books; one matching no
+  card, or cards of differently named contacts (a shared landline), is
+  left out, never made a person. `netz.json` keeps per conversation only
+  the matched cards' keys, its size, message count, last time and a
+  chat's title (for the group suggestions of step 5); no number, no
+  address, no subject.
+- **Weights**: each conversation counts for each pair in it 2 (chat) or
+  0.5 (mail) over size−1, halved every 4 years since its last message; a
+  pair gets at most 2 from chats and mail together (below a phone book's
+  relation, 3), added to strength and rank. A tie from chats and mail
+  alone shows from two conversations on. The reasons say „in 3
+  Gruppen-Chats“, „12 Mails zusammen“ (the messages of the threads both
+  are in).
+- `archiv umfeld-gespraeche -sql` prints the statement as msgvault's
+  request body; `archiv umfeld-gespraeche < antwort.json` reads an answer
+  as a round does (`integration.sh` runs both against the real msgvault).
+
+**Step 6:** derived relations (`abgeleitet.go`).
+
+- From what is known — answers and the phone books' relations — follow
+  likely relations, never set on their own: each is a „Wie steht X zu
+  Y?“ with the kind chosen and its reason („weil Anna und Ben Partner
+  sind und Carla Bens Kind ist“), before the plain suggestions. Partner
+  of a parent → Eltern (a step-family: a question, not a fact); a shared
+  parent → Geschwister; parent of a parent → Großeltern; sibling of a
+  parent → Onkel/Tante; child of an uncle or aunt → Cousin/e; parent of
+  a partner → Schwiegereltern; sibling of a partner or partner of a
+  sibling → Schwager/Schwägerin. A pair with an answer („Keine“
+  included) or a phone book's relation is never asked; a derived
+  relation derives further only once answered; „Überspringen“ comes last.
+- Names compare with umlauts spelled out (`klar`): „Jürgen Groß“ is
+  „Juergen Gross“, case and accents aside.
+
 Not yet (steps 3–7): group chats and mail threads, the pair page, group
 suggestions, derived relations, the family tree.
 

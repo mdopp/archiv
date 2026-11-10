@@ -24,6 +24,7 @@ import (
 //	GET  /api/v1/participants/{id}                             who an observed address is (display_label, identifiers)
 //	GET  /api/v1/people, /api/v1/people/{id}, …/identities, …/profile  the saved persons
 //	POST /api/v1/people/{id}/merge                             If-Match: both revisions, Idempotency-Key
+//	POST /api/v1/query                                         {"sql": …}, read only: the Umfeld's chats and threads (gespraeche.go)
 type MsgvaultAPI struct {
 	Port   int
 	Key    func() string // Tresor.APIKey: "" while closed or starting
