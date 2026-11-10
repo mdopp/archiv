@@ -239,16 +239,37 @@ const reportAdressbuch = `<?xml version="1.0" encoding="utf-8"?>
 
 // AdressbuchHolen reads every card of handy-kontakte (one REPORT).
 func (r *Radicale) AdressbuchHolen(ctx context.Context) ([]QuellKarte, error) {
-	resp, err := r.anfrage(ctx, "REPORT", r.Home()+adressbuchName+"/", "1", []byte(reportAdressbuch), nil)
+	karten, err := r.BuchHolen(ctx, r.Home()+adressbuchName+"/")
+	if errors.Is(err, errBuchVerboten) {
+		return nil, errRadicaleAnmeldung
+	}
+	return karten, err
+}
+
+var (
+	errBuchVerboten = errors.New("Radicale: kein Leserecht für dieses Adressbuch")
+	errBuchFehlt    = errors.New("Radicale: dieses Adressbuch gibt es nicht")
+)
+
+// BuchHolen reads every card of the address book at pfad (one REPORT):
+// the person's handy-kontakte, or the household's book, which the
+// archive's account may only read once Radicale's rights let it
+// (errBuchVerboten until then; errBuchFehlt when there is none).
+func (r *Radicale) BuchHolen(ctx context.Context, pfad string) ([]QuellKarte, error) {
+	name := path.Base(strings.TrimSuffix(pfad, "/"))
+	resp, err := r.anfrage(ctx, "REPORT", pfad, "1", []byte(reportAdressbuch), nil)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusForbidden {
-		return nil, errRadicaleAnmeldung
-	}
-	if resp.StatusCode != http.StatusMultiStatus {
-		return nil, fmt.Errorf("Radicale REPORT %s: %s", adressbuchName, resp.Status)
+	switch resp.StatusCode {
+	case http.StatusMultiStatus:
+	case http.StatusForbidden:
+		return nil, fmt.Errorf("%w (%s)", errBuchVerboten, name)
+	case http.StatusNotFound:
+		return nil, fmt.Errorf("%w (%s)", errBuchFehlt, name)
+	default:
+		return nil, fmt.Errorf("Radicale REPORT %s: %s", name, resp.Status)
 	}
 	var ms struct {
 		Responses []struct {
@@ -262,7 +283,7 @@ func (r *Radicale) AdressbuchHolen(ctx context.Context) ([]QuellKarte, error) {
 		} `xml:"DAV: response"`
 	}
 	if err := xml.NewDecoder(io.LimitReader(resp.Body, 256<<20)).Decode(&ms); err != nil {
-		return nil, fmt.Errorf("Radicale REPORT %s: %w", adressbuchName, err)
+		return nil, fmt.Errorf("Radicale REPORT %s: %w", name, err)
 	}
 	var out []QuellKarte
 	for _, a := range ms.Responses {

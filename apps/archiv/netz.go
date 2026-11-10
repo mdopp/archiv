@@ -1,0 +1,431 @@
+package main
+
+import (
+	"cmp"
+	"fmt"
+	"maps"
+	"math"
+	"slices"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// The net: who stands close to whom, and through what (archiv#27; moved
+// here from Homes' internal/netz, homes ADR 0002, with the same numbers).
+// It holds the ties among all the people in the person's photos, not
+// only the person's own, and lives only in the open vault (umfeld.go).
+//
+// A photo day at one place is an event; a pair counts once per event,
+// less in a big group (1/(n-1)), less the longer ago (half-life
+// netzHalbwert), a little more for each year they meet in. A tie from
+// photos alone shows from two days on. The order divides by how often
+// both appear at all (hub), so a child on every photo is not close to all.
+// The phone books add the same address, the same company and a relation
+// a phone wrote (telefonbuch.go).
+
+const (
+	netzHalbwert  = 4 * 365.25 * 24 * time.Hour
+	netzJahrBonus = 0.15  // per distinct year a pair meets in
+	netzZelle     = 0.009 // a place cell, in degrees of latitude: about 1 km
+	netzMinTage   = 2     // a tie from photos shows from this many days on
+)
+
+// The kinds of phone-book tie, and what each adds to a pair's strength.
+const (
+	bandAdresse   = "adresse"
+	bandFirma     = "firma"
+	bandBeziehung = "beziehung"
+)
+
+var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandBeziehung: 3}
+
+// Hiding: Aus is not shown and restorable; Nicht is taken out of the
+// photos before any tie is computed.
+const (
+	verbergenAus   = "aus"
+	verbergenNicht = "nicht"
+)
+
+// netzFoto is one photo of the table: its id, when (an instant), where,
+// who (Immich person ids).
+type netzFoto struct {
+	ID    string    `json:"i"`
+	T     time.Time `json:"t"`
+	Lat   *float64  `json:"la,omitempty"`
+	Lng   *float64  `json:"lo,omitempty"`
+	Stadt string    `json:"s,omitempty"`
+	Wer   []string  `json:"p"`
+}
+
+// netzKontakt is a contact of the phone books: its key (haushalt/<uid>,
+// privat/<uid>), name and Immich person ("" none).
+type netzKontakt struct {
+	Key    string `json:"k"`
+	Name   string `json:"n"`
+	Person string `json:"p,omitempty"`
+}
+
+// festBand is a phone-book tie between two contacts' keys; for a
+// relation, A's card says B is A's Wie.
+type festBand struct {
+	A   string `json:"a"`
+	B   string `json:"b"`
+	Art string `json:"art"`
+	Wie string `json:"wie,omitempty"`
+}
+
+// netzTabelle is what a round read, kept in the vault.
+type netzTabelle struct {
+	Format   string            `json:"format"`
+	Version  int               `json:"version"`
+	Geholt   time.Time         `json:"geholt"`
+	Fotos    []netzFoto        `json:"fotos"`
+	Namen    map[string]string `json:"namen"` // the named persons, by id
+	Kontakte []netzKontakt     `json:"kontakte"`
+	Fest     []festBand        `json:"fest"`
+	Ich      string            `json:"ich,omitempty"`      // the person's own contact
+	Haushalt []string          `json:"haushalt,omitempty"` // the household book's cards as last read
+}
+
+// Knoten is a person: an Immich person (ID its id) or a contact without
+// one (ID its key); Kontakt its contact ("" none).
+type Knoten struct {
+	ID, Name, Kontakt string
+}
+
+// Kante is a tie: Staerke for the picture, Rang for the order; Tage the
+// distinct photo days and Seit the first one's year (0 none); Fest what
+// the phone books say.
+type Kante struct {
+	A, B          string
+	Staerke, Rang float64
+	Tage, Seit    int
+	Fest          []festBand
+}
+
+// Netz is the person's contact net, built from a table.
+type Netz struct {
+	Loc *time.Location // the house's: a photo's day; nil time.Local
+	Now func() time.Time
+
+	mu        sync.Mutex
+	st        netzTabelle
+	verborgen map[string]string // by node: Aus or Nicht
+	knoten    map[string]Knoten
+	von       map[string]string // node by contact key
+	kanten    map[string][]*Kante
+	ich       string
+}
+
+// neuesNetz builds the net of st with the hidden ones.
+func neuesNetz(st netzTabelle, verborgen map[string]string, loc *time.Location, now func() time.Time) *Netz {
+	n := &Netz{Loc: loc, Now: now, st: st, verborgen: maps.Clone(verborgen)}
+	if n.verborgen == nil {
+		n.verborgen = map[string]string{}
+	}
+	if n.st.Namen == nil {
+		n.st.Namen = map[string]string{}
+	}
+	n.bauen()
+	return n
+}
+
+func (n *Netz) now() time.Time {
+	if n.Now != nil {
+		return n.Now()
+	}
+	return time.Now()
+}
+
+// ereignis is one day at one place: its day, year, instant and who.
+type ereignis struct {
+	tag  string
+	jahr int
+	t    time.Time
+	wer  map[string]bool
+}
+
+// paar is a pair as it is summed up.
+type paar struct {
+	s, ueber    float64 // ueber: shared events over both's, geometric
+	tage, jahre map[string]bool
+	geteilt     int
+	seit        int
+}
+
+// bauen rebuilds the nodes and the ties from st; n.mu is held or n is new.
+func (n *Netz) bauen() {
+	nicht := map[string]bool{}
+	for id, art := range n.verborgen {
+		nicht[id] = art == verbergenNicht
+	}
+	n.knoten, n.von, n.kanten = map[string]Knoten{}, map[string]string{}, map[string][]*Kante{}
+	for id, name := range n.st.Namen {
+		n.knoten[id] = Knoten{ID: id, Name: name}
+	}
+	for _, k := range n.st.Kontakte {
+		id := cmp.Or(k.Person, k.Key)
+		kn, da := n.knoten[id]
+		if !da {
+			kn = Knoten{ID: id, Name: k.Name}
+		}
+		if kn.Kontakt == "" || strings.HasPrefix(k.Key, "haushalt/") && !strings.HasPrefix(kn.Kontakt, "haushalt/") {
+			kn.Kontakt = k.Key
+		}
+		n.knoten[id], n.von[k.Key] = kn, id
+	}
+	n.ich = n.von[n.st.Ich]
+	alle := map[[2]string]*Kante{}
+	for key, p := range n.fotoPaare(nicht) {
+		if len(p.tage) >= netzMinTage {
+			s := p.s + netzJahrBonus*float64(len(p.jahre))
+			alle[key] = &Kante{A: key[0], B: key[1], Staerke: s, Rang: s * (0.25 + 0.75*p.ueber), Tage: len(p.tage), Seit: p.seit}
+		}
+	}
+	n.festDazu(alle, nicht)
+	for _, k := range alle {
+		n.kanten[k.A], n.kanten[k.B] = append(n.kanten[k.A], k), append(n.kanten[k.B], k)
+	}
+}
+
+// fotoPaare sums the photos up by pair, those in nicht left out.
+func (n *Netz) fotoPaare(nicht map[string]bool) map[[2]string]*paar {
+	loc := cmp.Or(n.Loc, time.Local)
+	evs := map[string]*ereignis{}
+	for _, f := range n.st.Fotos {
+		t := f.T.In(loc)
+		key := t.Format("2006-01-02") + "|" + ort(f)
+		e := evs[key]
+		if e == nil {
+			e = &ereignis{tag: t.Format("2006-01-02"), jahr: t.Year(), t: f.T, wer: map[string]bool{}}
+			evs[key] = e
+		}
+		for _, id := range f.Wer {
+			if n.st.Namen[id] != "" && !nicht[id] {
+				e.wer[id] = true
+			}
+		}
+	}
+	je, paare := map[string]int{}, map[[2]string]*paar{}
+	for _, e := range evs {
+		wer := slices.Sorted(maps.Keys(e.wer))
+		alter := max(0, n.now().Sub(e.t).Hours()) / netzHalbwert.Hours()
+		w := math.Pow(0.5, alter) / float64(max(1, len(wer)-1))
+		for i, a := range wer {
+			je[a]++
+			for _, b := range wer[i+1:] {
+				p := paare[[2]string{a, b}]
+				if p == nil {
+					p = &paar{tage: map[string]bool{}, jahre: map[string]bool{}, seit: e.jahr}
+					paare[[2]string{a, b}] = p
+				}
+				p.s, p.geteilt, p.seit = p.s+w, p.geteilt+1, min(p.seit, e.jahr)
+				p.tage[e.tag], p.jahre[strconv.Itoa(e.jahr)] = true, true
+			}
+		}
+	}
+	for key, p := range paare { // the hub: a child on every photo shares many, out of many
+		p.ueber = float64(p.geteilt) / math.Sqrt(float64(je[key[0]]*je[key[1]]))
+	}
+	return paare
+}
+
+// ort is a photo's place: its cell of about 1 km, else its city, else none.
+func ort(f netzFoto) string {
+	if f.Lat != nil && f.Lng != nil && (*f.Lat != 0 || *f.Lng != 0) {
+		breit := netzZelle / math.Max(0.1, math.Cos(*f.Lat*math.Pi/180))
+		return strconv.Itoa(int(math.Floor(*f.Lat/netzZelle))) + "," + strconv.Itoa(int(math.Floor(*f.Lng/breit)))
+	}
+	return strings.ToLower(f.Stadt)
+}
+
+// festDazu adds the phone books' ties to alle, between the contacts'
+// nodes, those in nicht left out; the same tie twice (both books) once.
+func (n *Netz) festDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
+	for _, f := range n.st.Fest {
+		a, b := n.von[f.A], n.von[f.B]
+		if a == "" || b == "" || a == b || nicht[a] || nicht[b] {
+			continue
+		}
+		key := [2]string{min(a, b), max(a, b)}
+		k := alle[key]
+		if k == nil {
+			k = &Kante{A: key[0], B: key[1]}
+			alle[key] = k
+		}
+		if slices.ContainsFunc(k.Fest, func(g festBand) bool { return g.Art == f.Art && g.Wie == f.Wie && n.von[g.A] == a }) {
+			continue
+		}
+		if !slices.ContainsFunc(k.Fest, func(g festBand) bool { return g.Art == f.Art }) { // a kind counts once
+			k.Staerke, k.Rang = k.Staerke+festGewicht[f.Art], k.Rang+festGewicht[f.Art]
+		}
+		k.Fest = append(k.Fest, f)
+	}
+}
+
+// Verbindung is a tie as seen from one end: the other, and the tie.
+type Verbindung struct {
+	Mit   Knoten
+	Kante Kante
+}
+
+func andererVon(e *Kante, id string) string {
+	if e.A == id {
+		return e.B
+	}
+	return e.A
+}
+
+// Nahe are the k ties of id ranked first, those hidden left out.
+func (n *Netz) Nahe(id string, k int) []Verbindung {
+	if n == nil {
+		return nil
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	var out []Verbindung
+	for _, e := range n.kanten[id] {
+		other := andererVon(e, id)
+		if n.verborgen[other] == "" && n.verborgen[id] == "" {
+			out = append(out, Verbindung{n.knoten[other], *e})
+		}
+	}
+	slices.SortFunc(out, func(a, b Verbindung) int {
+		return cmp.Or(cmp.Compare(b.Kante.Rang, a.Kante.Rang), strings.Compare(a.Mit.Name, b.Mit.Name))
+	})
+	return out[:min(k, len(out))]
+}
+
+// Zwischen are the ties among ids, each as the two indexes into ids.
+func (n *Netz) Zwischen(ids []string) (out [][2]int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for i, a := range ids {
+		for _, e := range n.kanten[a] {
+			if j := slices.Index(ids, andererVon(e, a)); j > i {
+				out = append(out, [2]int{i, j})
+			}
+		}
+	}
+	return out
+}
+
+// Person is node id; ok false for none.
+func (n *Netz) Person(id string) (Knoten, bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	k, ok := n.knoten[id]
+	return k, ok
+}
+
+// Von is the node of the contact key ("haushalt/<uid>"); "" none.
+func (n *Netz) Von(key string) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.von[key]
+}
+
+// Ich is the person's own node; "" when no card of the phone books is theirs.
+func (n *Netz) Ich() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.ich
+}
+
+// Mitte is where the picture starts: the person's own node, else the
+// one with the most ties; "" without any.
+func (n *Netz) Mitte() string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if len(n.kanten[n.ich]) > 0 {
+		return n.ich
+	}
+	best := ""
+	for id, ks := range n.kanten {
+		if len(ks) > len(n.kanten[best]) || len(ks) == len(n.kanten[best]) && id < best {
+			best = id
+		}
+	}
+	return best
+}
+
+// Groesse is how many people and ties the net holds.
+func (n *Netz) Groesse() (personen, kanten int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, ks := range n.kanten {
+		kanten += len(ks)
+	}
+	return len(n.kanten), kanten / 2
+}
+
+// Verborgen is a hidden node and how (Aus, Nicht).
+type Verborgen struct {
+	Knoten
+	Art string
+}
+
+// Verborgene are the hidden nodes, by name.
+func (n *Netz) Verborgene() (out []Verborgen) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for id, art := range n.verborgen {
+		out = append(out, Verborgen{cmp.Or(n.knoten[id], Knoten{ID: id, Name: id}), art})
+	}
+	slices.SortFunc(out, func(a, b Verborgen) int { return strings.Compare(a.Name, b.Name) })
+	return out
+}
+
+// Verbergen hides id (Aus, Nicht), or with "" shows it again; Nicht's
+// change rebuilds the ties at once from the table. It answers the hidden
+// ones as they now are, for the vault.
+func (n *Netz) Verbergen(id, art string) map[string]string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	vorher := n.verborgen[id]
+	if art == "" {
+		delete(n.verborgen, id)
+	} else {
+		n.verborgen[id] = art
+	}
+	if vorher == verbergenNicht || art == verbergenNicht {
+		n.bauen()
+	}
+	return maps.Clone(n.verborgen)
+}
+
+// Gruende are the tie's reasons as seen from mitte: the photo days and
+// since when, then what the phone books say.
+func (n *Netz) Gruende(mitte string, k Kante) string {
+	var out []string
+	if k.Tage > 0 {
+		out = append(out, fmt.Sprintf("%s auf deinen Fotos seit %d", anzahlT(k.Tage, "Tag", "Tage"), k.Seit))
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, f := range k.Fest {
+		switch {
+		case f.Art == bandAdresse:
+			out = append(out, "gleiche Adresse")
+		case f.Art == bandFirma:
+			out = append(out, "gleiche Firma")
+		case f.Wie == "":
+			out = append(out, "im Telefonbuch verknüpft")
+		case n.von[f.A] == mitte:
+			out = append(out, f.Wie+" (Telefonbuch)")
+		default:
+			out = append(out, f.Wie+" von "+n.knoten[n.von[f.A]].Name+" (Telefonbuch)")
+		}
+	}
+	return strings.Join(out, " · ")
+}
+
+// anzahlT is anzahl with the thousands point.
+func anzahlT(n int, eins, mehr string) string {
+	if n == 1 {
+		return "1 " + eins
+	}
+	return tausender(n) + " " + mehr
+}

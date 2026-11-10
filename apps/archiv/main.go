@@ -85,9 +85,13 @@ func main() {
 		ab.Relais = &Relais{Person: person, Port: relaisPort}
 	}
 	tresor.Vorbereiten = ab.Vorbereiten
+	um := &Umfeld{URL: immichURL(), Radicale: rad, Schluessel: schluessel, Takt: sekunden("UMFELD_TAKT", time.Hour)}
+	if os.Getenv("IMMICH_URL") != "" && um.URL == "" {
+		log.Printf("archiv: IMMICH_URL %q ist keine http(s)-Adresse: Umfeld aus", os.Getenv("IMMICH_URL"))
+	}
 	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HomesSecret: homesSecret(os.Getenv),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
-		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}}
+		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}, Umfeld: um}
 
 	status := func() {
 		st := tresor.Stand()
@@ -99,12 +103,14 @@ func main() {
 		statusSchreiben(statusDatei, statusBauen(web.lage(st)))
 		web.Puls.Senden()
 	}
-	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert, ab.Geaendert = status, status, status, status, status, status
-	tresor.Lauf = func(ctx context.Context, innen Innen) { // the import and the Abgleich, side by side, both ending with the vault
-		fertig := make(chan struct{})
+	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert, ab.Geaendert, um.Geaendert = status, status, status, status, status, status, status
+	tresor.Lauf = func(ctx context.Context, innen Innen) { // the import, the Abgleich and the Umfeld, side by side, all ending with the vault
+		fertig, umfeldFertig := make(chan struct{}), make(chan struct{})
 		go func() { defer close(fertig); ab.Lauf(ctx, innen) }()
+		go func() { defer close(umfeldFertig); um.Lauf(ctx, innen) }()
 		pb.Lauf(ctx, innen)
 		<-fertig
+		<-umfeldFertig
 	}
 	tresor.Erkennen()
 	if _, _, zu := prot.Kopie(); zu == nil && tresor.Stand().Zustand == Verschlossen {

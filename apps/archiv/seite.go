@@ -70,6 +70,7 @@ var meldungen = map[string]string{
 	"person-nein": "Gemerkt: Das sind verschiedene Personen. Das Archiv fragt nicht wieder.",
 	"zusammen":    "Die beiden sind jetzt eine Person.",
 	"abgleich":    "Das Archiv gleicht deine Kontakte und Kalender jetzt ab.",
+	"umfeld":      saysUmfeldGespeichert,
 }
 
 // Web is the whole HTTP side.
@@ -92,6 +93,7 @@ type Web struct {
 	Passkeys    *Passkeys
 	Abgleich    *Abgleich      // contacts and calendars from Radicale (nil: not set up)
 	Personen    *Personenkarte // „Ist das dieselbe Person?“
+	Umfeld      *Umfeld        // who stands close to whom (nil: not set up)
 }
 
 type sitzungArt int
@@ -254,6 +256,9 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/personen/entscheiden", w.entscheiden)
 	mux.HandleFunc("GET /tresor/personen/vorschau", w.vorschau)
 	mux.HandleFunc("POST /tresor/personen/zusammen", w.zusammen)
+	mux.HandleFunc("GET /tresor/umfeld", w.umfeldGet)
+	mux.HandleFunc("POST /tresor/umfeld/schluessel", w.umfeldSchluessel)
+	mux.HandleFunc("POST /tresor/umfeld/verbergen", w.umfeldVerbergen)
 	return mux
 }
 
@@ -269,7 +274,7 @@ func (w *Web) stand(rw http.ResponseWriter, r *http.Request) {
 // lage is what the status and the page are made of.
 func (w *Web) lage(st Stand) Lage {
 	return Lage{Person: w.Person, Stand: st, Wartend: wartende(w.Eingang), Briefkasten: briefkastenStand(w.Briefkasten.Post), Protokoll: w.Protokoll,
-		Packt: w.packt(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.fehlenSignalSchluessel(), URL: w.PublicURL, Jetzt: time.Now(), Abgleich: w.Abgleich}
+		Packt: w.packt(), Liefert: w.Postbote.Laeuft(), FehlenSchluessel: w.fehlenSignalSchluessel(), URL: w.PublicURL, Jetzt: time.Now(), Abgleich: w.Abgleich, Umfeld: w.Umfeld}
 }
 
 // fehlenSignalSchluessel: Signal backups wait, and the passphrase or the
@@ -570,6 +575,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		w.smsKarte(&b)
 		w.whatsappKarte(&b)
 		w.kontakteKarte(&b, true)
+		w.umfeldKarte(&b)
 		if st.Bereit {
 			w.personenKarte(&b)
 		}
@@ -1053,5 +1059,8 @@ progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-colo
 details{margin:.4rem 0}summary{cursor:pointer;color:var(--akzent);font-weight:500;min-height:44px;display:flex;align-items:center}
 ol{padding-left:1.2rem}li{margin:.3rem 0}
 .vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:.5rem}
+.netzbild{display:block;width:100%;max-width:400px;height:auto;margin:1rem auto 0}.netzbild line{stroke:var(--k);stroke-linecap:round}.netzbild line.zw{stroke:var(--line);stroke-width:.6}
+.netzbild circle{fill:var(--bg);stroke:var(--akzent);stroke-width:1.5}.netzbild .mitte circle{fill:var(--akzent)}.netzbild text{fill:var(--fg);font-size:10px;text-anchor:middle}.netzbild a:focus circle,.netzbild a:hover circle{fill:var(--akzent)}
+ol.nahe,ul.nahe{padding-left:1.4rem}.nahe li{margin:.7rem 0}.nahe form.knoepfe{margin:.2rem 0 0;flex-wrap:wrap}.nahe button{min-height:36px;padding:.3rem .8rem;font-size:.92rem}
 select{display:block;font:inherit;padding:.5rem .6rem;margin-top:.2rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:inherit;width:100%;max-width:420px}
 `

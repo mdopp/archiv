@@ -47,6 +47,7 @@ type statusDatei struct {
 	Packt         string                  `json:"packt,omitempty"`   // the backup being packed now
 	Liefert       string                  `json:"liefert,omitempty"` // the packet going into msgvault now
 	Abgleich      *abgleichStatus         `json:"abgleich,omitempty"`
+	UmfeldAm      *time.Time              `json:"umfeld_am,omitempty"` // when the net was last computed: a time, nothing of it
 }
 
 // abgleichStatus: when contacts and calendars were last read (no names,
@@ -103,6 +104,7 @@ type Lage struct {
 	URL              string
 	Jetzt            time.Time
 	Abgleich         *Abgleich
+	Umfeld           *Umfeld
 }
 
 // DreimalRot: after this many failures in a row of the same file with the
@@ -114,7 +116,7 @@ func statusBauen(l Lage) statusDatei {
 	st := l.Stand
 	s := statusDatei{At: l.Jetzt.Format(time.RFC3339), Person: l.Person, Zustand: st.Zustand, Bereit: st.Bereit,
 		Wartend: l.Wartend, Briefkasten: l.Briefkasten, LetztesPaket: l.Protokoll.Pakete(), LetzterImport: ein,
-		LetzterFehler: fehler, Packt: l.Packt, Liefert: l.Liefert}
+		LetzterFehler: fehler, Packt: l.Packt, Liefert: l.Liefert, UmfeldAm: l.Umfeld.umfeldAm()}
 	wo := "unter " + l.URL
 	if l.URL == "" {
 		wo = "im Archiv"
