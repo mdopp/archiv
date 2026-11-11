@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -26,7 +27,7 @@ import (
 
 const (
 	SchluesselTelefon = "telefon" // the person's own number, E.164 (the XML import's owner)
-	SchluesselIMAP    = "imap"    // {host, benutzer, passwort} as JSON
+	SchluesselIMAP    = "imap"    // the person's mailboxes, a JSON list of imapZugang (before 2026-11-11 one object: imapKontenAus)
 
 	altSignal = "signal" // where the Signal passphrase was kept before 2026-11-02; only SignalEinziehen reads it
 )
@@ -38,6 +39,7 @@ const (
 	saysSignalFormat  = "Die Signal-Passphrase hat genau 30 Ziffern. Prüf sie und gib sie noch einmal ein."
 	saysTelefonFormat = "Gib deine Nummer mit Ländervorwahl ein, zum Beispiel +49 151 2345678."
 	saysIMAPFehlt     = "Für die E-Mail braucht das Archiv Server, Benutzername und App-Passwort."
+	saysIMAPPort      = "Der Port ist eine Zahl zwischen 1 und 65535, meist 993. Lass das Feld leer, dann nimmt das Archiv 993."
 	saysZu            = "Das Archiv ist abgeschlossen. Öffne es zuerst, dann kannst du Schlüssel hinterlegen."
 )
 
@@ -102,10 +104,103 @@ func telefonnummer(s string) (string, error) {
 	return s, nil
 }
 
+// imapZugang is one of the person's mailboxes. ID names its fetch state
+// and its settings in the vault; it never changes while host and user stay.
 type imapZugang struct {
-	Host     string `json:"host"`
-	Benutzer string `json:"benutzer"`
-	Passwort string `json:"passwort"`
+	ID       string    `json:"id,omitempty"`
+	Name     string    `json:"name,omitempty"` // what the person calls it: „Arbeit“, „GMX“
+	Host     string    `json:"host"`
+	Port     int       `json:"port,omitempty"` // 0: in Host, or 993
+	Benutzer string    `json:"benutzer"`
+	Passwort string    `json:"passwort"`
+	Am       time.Time `json:"am,omitempty"` // when the person stored the password
+}
+
+// kontoErstes is the ID of the one mailbox kept before several were
+// possible: its fetch state stays where it was (mail-stand.json).
+const kontoErstes = "erstes"
+
+var kontoIDMuster = regexp.MustCompile(`^[a-z0-9]{1,32}$`)
+
+// Anzeige is how the page names the mailbox.
+func (z imapZugang) Anzeige() string {
+	if z.Name != "" {
+		return z.Name
+	}
+	return z.Benutzer
+}
+
+// imapKontenAus reads the stored mailboxes. One object is the single
+// mailbox of before (migrated as kontoErstes, unchanged on disk until the
+// person changes something); a list is what this version writes.
+func imapKontenAus(roh []byte) ([]imapZugang, error) {
+	roh = []byte(strings.TrimSpace(string(roh)))
+	if len(roh) > 0 && roh[0] == '{' {
+		var z imapZugang
+		if err := json.Unmarshal(roh, &z); err != nil {
+			return nil, err
+		}
+		z.ID = kontoErstes
+		return []imapZugang{z}, nil
+	}
+	var k []imapZugang
+	if err := json.Unmarshal(roh, &k); err != nil {
+		return nil, err
+	}
+	out := k[:0]
+	for _, z := range k {
+		if !kontoIDMuster.MatchString(z.ID) || z.ID == kontoDokumente {
+			log.Printf("archiv: IMAP-Zugang mit ungültiger Kennung übersprungen")
+			continue
+		}
+		out = append(out, z)
+	}
+	return out, nil
+}
+
+// imapKonten are the person's mailboxes; none (and no error) when none is stored.
+func imapKonten(s Schluessel) ([]imapZugang, error) {
+	roh, err := s.Lesen(SchluesselIMAP)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer nullen(roh)
+	return imapKontenAus(roh)
+}
+
+func imapKontenSpeichern(s Schluessel, k []imapZugang) error {
+	b, err := json.Marshal(k)
+	if err != nil {
+		return err
+	}
+	defer nullen(b)
+	return s.Speichern(SchluesselIMAP, b)
+}
+
+// ohnePasswort: the mailboxes as the page may show them.
+func ohnePasswort(k []imapZugang) []imapZugang {
+	out := make([]imapZugang, len(k))
+	for i, z := range k {
+		z.Passwort = ""
+		out[i] = z
+	}
+	return out
+}
+
+// imapPort reads the port field: empty is 0 (993, or what Host names).
+func imapPort(s string) (int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 || n > 65535 {
+		return 0, errFormat
+	}
+	return n, nil
 }
 
 // Schluessel is the key folder of an open vault.

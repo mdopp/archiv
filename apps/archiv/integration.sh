@@ -296,6 +296,13 @@ hallo=$(docker exec -i archiv archiv umfeld-hinweise <"$D/hallo-antwort.json") |
 echo "$hallo"
 [ "$(grep -c . <<<"$hallo")" -ge 2 ] || { cat "$D/hallo-antwort.json"; fail "the statement found no message with „hallo“"; }
 grep -q "von=1" <<<"$hallo" || { cat "$D/hallo-antwort.json"; fail "no sender read for a message"; }
+echo "old mail at the provider (aufraeumen.go): msgvault proves a mail by its Message-ID and the SHA-256 of its raw bytes"
+want="maildir-$(sha256sum "$D/mails/1.eml" | cut -d' ' -f1)"
+jq -n '{sql: "SELECT CAST(rfc822_message_id AS VARCHAR) AS mid, CAST(source_message_id AS VARCHAR) AS sid FROM messages WHERE deleted_at IS NULL AND rfc822_message_id IN ('"'"'eins@example.org'"'"')"}' >"$D/beleg.json"
+code=$(curl -s -o "$D/beleg-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/beleg.json" "$U/api/v1/query")
+[ "$code" = 200 ] || { cat "$D/beleg-antwort.json"; fail "msgvault refuses the archive's proof query: $code"; }
+jq -e --arg want "$want" '[.rows[] | select(.[0] == "eins@example.org" and .[1] == $want)] | length == 1' "$D/beleg-antwort.json" >/dev/null ||
+  { cat "$D/beleg-antwort.json"; echo "want $want"; fail "msgvault does not keep a fetched mail as maildir-<sha256>: the cleanup could prove nothing"; }
 
 echo "Umfeld (archiv#27 step 4): the edge page's statement for the last lines, against the real msgvault's views"
 # the conversations the round's statement found above, by msgvault's own ids

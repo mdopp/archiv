@@ -54,7 +54,8 @@ Where the keys the person enters live:
 | key | where | why |
 |---|---|---|
 | own number | `/data/schluessel/telefon`, outside the vault, 0600 | no secret; the page and the status say it is missing (masked number) while the vault is closed |
-| IMAP host/user/app password | `/data/schluessel/imap`, outside the vault, 0600 | the Mailholer fetches mail while the vault is closed |
+| IMAP mailboxes (name, host, port, user, app password; one or more) | `/data/schluessel/imap`, outside the vault, 0600, a JSON list (one object before 2026-11-11, read as the first mailbox) | the Mailholer fetches mail while the vault is closed |
+| deleting old mail at the provider: on/off, „älter als“, the person's tap, the last count | `/run/tresor/mail-aufraeumen.json`, **inside** the vault | it runs only while the vault is open: the proof needs msgvault |
 | Signal passphrase | `/run/tresor/signal-passphrase`, **inside** the vault, 0600 | Signal is read only while the vault is open (since 2026-11-02) |
 | WhatsApp key | `/run/tresor/whatsapp-schluessel`, **inside** the vault, 0600 | WhatsApp is read only while the vault is open |
 
@@ -228,9 +229,17 @@ closed). `GET /intern/empfaenger` gives Homes the public key.
 
 ### Mail: fetched every hour, vault closed or open
 
-Owner, 2026-11-02 („A“). Once the IMAP access is stored (host, user, app
+Owner, 2026-11-02 („A“). Once an IMAP access is stored (host, user, app
 password), the Mailholer runs at start, every hour (`MAIL_TAKT`, seconds)
-and at once when the access is entered anew:
+and at once when an access is entered anew. Since 2026-11-11 the person may
+store several mailboxes (name, host, port, user, app password); each is
+fetched as below, one after the other, with its own fetch state
+(`/data/gesehen/mail-stand-<id>.json`; the mailbox stored before keeps
+`mail-stand.json` and the id `erstes`, so nothing is fetched twice), its own
+refused-login wait and its own error on the page. Another host or user for
+an entry starts its state over; removing one forgets its state, never what
+it brought. Each mailbox's mail is imported under its own address as
+msgvault's account.
 
 1. TLS to port 993 (or the port given; 143 only with STARTTLS — a server
    without TLS is refused), LOGIN with the app password.
@@ -260,6 +269,76 @@ folders become labels, a message is keyed by the hash of its raw bytes, a
 copy in another folder only gets the label. Additive as above.
 `archiv paket-aus-mails -konto <adresse> <ordner>` packs a folder of
 `.eml` files the same way (an old export; CI uses it).
+
+### The household's document mail (owner, 2026-11-11)
+
+Paperless reads one mailbox, the domain's catch-all, and files what comes
+to `<login>+doc@<domain>` (and `<login>+doc+<anything>@`) as that person's
+(laib `templates/paperless`, laib#1160). Where the box gives the archive
+that mailbox (`DOKUMENTE_MAIL_*`, below), the Mailholer reads it each round
+too: only the folder Paperless reads (`DOKUMENTE_MAIL_ORDNER`, INBOX), read
+only (`EXAMINE`, `BODY.PEEK`: Paperless' flags stay), `UID SEARCH TO
+<login>+doc` to narrow, and then the archive's own check, because IMAP's TO
+is a substring (`hanna+doc` holds `anna+doc`): a mail goes in only when a
+recipient in To, Cc, Delivered-To, X-Original-To or Envelope-To has the
+local part `<login>+doc` or `<login>+doc+…` at exactly the domain. Packed as
+any mail, under the account `<login>+doc@<domain>`, label „Dokumente“,
+without Paperless' flags. The person enters nothing; the page says it is
+on, or that the admin has not given it yet. Nothing is ever deleted there.
+
+The price: the archive holds the document mailbox's login, which reads the
+whole mailbox (everyone's document mail, and what else that mailbox gets);
+the check above is the archive's, not the provider's. Laib gives it per
+person (`DOKUMENTE_MAIL_PASSWORD_<PERSON>`, set by the owner), so the owner
+decides for whom, and a read-only login at the provider, where one exists,
+is better than the mailbox's own password.
+
+`GET /tresor/mail?id=<Message-ID>` opens that mail in msgvault's own page
+(`/messages/<id>`; while closed it sends the person to open the archive
+first). Paperless keeps that link on a document that came to a person's
+`+doc` address, as a note „Die Mail dazu im Archiv“.
+
+### Old mail deleted at the provider (opt-in, owner 2026-11-11)
+
+Per mailbox, off by default (`aufraeumen.go`). The person switches it on
+on the sources' page with „älter als“ N months or years (default 24
+months). Then:
+
+1. **A dry run** (EXAMINE, nothing changes): it counts the messages older
+   than the limit (the server's INTERNALDATE) that are not flagged, not a
+   draft, not marked deleted, outside Drafts, Junk and Trash, and of those
+   the ones **proven in the archive**. The page asks: „1.234 Mails älter
+   als 2 Jahre, alle im Archiv – jetzt beim Anbieter löschen?“ (or how many
+   are not in the archive yet and stay), and says it cannot be undone at
+   the provider, while the archive keeps them. Counted again after a day,
+   and whenever the limit changes.
+2. **The person's tap** (`POST /tresor/mail/loeschen`) on that count
+   starts the first deletion; another limit, switching off, or another
+   host/user for the entry takes the tap back.
+3. **Monthly** after that, while the vault is open (`AUFRAEUMEN_TAKT`, s,
+   default 3600, is how often it looks whether a run is due). The page shows
+   the last run's count and its error, if any.
+
+Proven in the archive means: msgvault (`POST /api/v1/query`, read only,
+over its analytics cache) holds an undeleted message with the same
+Message-ID whose content id is `<type>-<SHA-256 of the raw bytes>`, the
+SHA-256 of what the server sends now (`import-maildir` keys a message as
+`maildir-<sha256>`; `integration.sh` checks that against the real
+msgvault). The headers are read first; only a message with a Message-ID
+msgvault knows is fetched whole and hashed. Not proven, never deleted: no
+Message-ID; fetched but not imported yet; in msgvault with other content;
+anything while msgvault does not answer (the vault closed, its index still
+being built, a query error): then the run deletes nothing and says so.
+
+Deleting needs a writable session: only this uses `SELECT` (the fetch
+stays `EXAMINE`); the app password of the fetch is enough. Gmail (a server
+with an `\All` folder) gets a `UID MOVE` into its `\Trash` folder, which
+Gmail empties after 30 days; without MOVE or a Trash folder nothing is
+deleted. Elsewhere `UID STORE +FLAGS.SILENT (\Deleted)` and `UID EXPUNGE`
+of exactly those messages (UIDPLUS); a server without UIDPLUS gets a plain
+`EXPUNGE` only when the marked messages in the folder are exactly ours,
+else the marks are taken back and nothing goes. The document mailbox is
+never cleaned. A removed mailbox forgets its settings.
 
 **Discord** is not imported: its data package has no importer in msgvault.
 `archiv paket-aus-xml -telefon <number> [-quelle sms] < backup.xml` packs
@@ -1048,6 +1127,7 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | Radicale (contacts, calendars) | `RADICALE_URL=http://host.containers.internal:5232` (Radicale's root, no path), `RADICALE_USER=archiv-<person>`, and that account's password as a file: `Secret=<the instance's ARCHIV_RADICALE_PASSWORD>,type=mount,target=radicale-password` (read from `RADICALE_PASSWORD_FILE`, default `/run/secrets/radicale-password`; never an environment variable). Without `RADICALE_URL` and `RADICALE_USER` the page says the box has not set it up. Optional: `KONTAKTE_TAKT` (s, default 10800), `KONTAKTE_RELAIS_PORT` (default 18443, inside the container only). |
 | Immich (Umfeld) | `IMMICH_URL=http://host.containers.internal:2283` (Immich's root; `uses: [immich]`). The key is the person's own, entered on the page, never the template's. Optional: `UMFELD_TAKT` (s, default 3600); `IMMICH_PUBLIC_URL` (Immich as the browser reaches it, `https://fotos.<domain>`), where the edge page's photos open. |
 | the box's model (Umfeld, step 5) | `MODEL_URL`, `MODEL_LEASE`, `MODEL_KEY` (laib's builtins as a pod reaches them: `http://host.containers.internal:11435/v1`, `…/api/model-lease`, the model key) and `MODEL_NAME` (the household preset, used when the lease names none). Without `MODEL_URL` no message goes anywhere; names, titles and groups still give their hints. |
+| The household's document mailbox (optional) | `DOKUMENTE_MAIL_HOST`, `DOKUMENTE_MAIL_USER`, `DOKUMENTE_MAIL_DOMAIN` (of `<login>+doc@<domain>`), optional `DOKUMENTE_MAIL_PORT` (993) and `DOKUMENTE_MAIL_ORDNER` (INBOX), and the password as a file: `Secret=<the instance's secret>,type=mount,target=dokumente-mail-password` (`DOKUMENTE_MAIL_PASSWORD_FILE`, default `/run/secrets/dokumente-mail-password`; never an environment variable). Without host, user or domain, or without the file, there is no document mailbox. |
 | Homes (answers) | `ARCHIV_HOMES_INTERN=http://host.containers.internal:8650` (Homes' own port on the box, where an answer is written; laib's template sets it). The packet is signed with `ARCHIV_HOMES_SECRET`; without either, answers stay in the vault and the card says so. |
 | Radicale account and rights | an LLDAP account `archiv-<person>` per instance (seeded like `kalender`, its password the instance's generated secret), and in `templates/radicale/pre-start`'s rights, **right after `[root]`** (before every `user: .+`/`(.+)` section): `[archiv-home]` user `archiv-(.+)`, collection `{0}`, permissions `R`; `[archiv-lesen]` user `archiv-(.+)`, collection `{0}/(handy-kontakte\|google-(?!kontakte(/\|$))[^/]+\|privat-[^/]+)(/.*)?`, permissions `r`; `[archiv-sonst-nichts]` user `archiv-.+`, collection `.*`, permissions empty. `integration.sh` runs these rights in a real Radicale. For Umfeld (archiv#27) the account also reads `homes/haushalt-kontakte` (read only; the laib template change and its ADR 0029 amendment bring that right); until then the archive gets 403 there and the page says the household book is missing. |
 | backup | do not quiesce by stopping the unit (that locks the vault); while open, a snapshot catches a live SQLite in ciphertext — the restore is only as good as that moment. |

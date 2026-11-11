@@ -14,6 +14,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	netmail "net/mail"
 	"os"
 	"path/filepath"
 	"sort"
@@ -266,9 +267,15 @@ type fakePostfach struct {
 
 func (f *fakePostfach) Ordner() ([]PostOrdner, error)    { return f.ordner, nil }
 func (f *fakePostfach) Waehlen(n string) (uint32, error) { f.aktuell = n; return 7, nil }
-func (f *fakePostfach) NeueUIDs(nach uint32) ([]uint32, error) {
+func (f *fakePostfach) NeueUIDs(nach uint32, an string) ([]uint32, error) {
 	var out []uint32
 	for _, m := range f.mails[f.aktuell] {
+		if an != "" { // as IMAP's SEARCH TO: a substring of the To header, any case
+			k, err := netmail.ReadMessage(bytes.NewReader(m.Roh))
+			if err != nil || !strings.Contains(strings.ToLower(k.Header.Get("To")), strings.ToLower(an)) {
+				continue
+			}
+		}
 		if m.UID > nach {
 			out = append(out, m.UID)
 		}
@@ -468,7 +475,7 @@ func TestAnotherMailboxIsFetchedFromTheStart(t *testing.T) {
 	mt.h.Verbinden = func(context.Context, imapZugang) (Postfach, error) { return pf, nil }
 	mt.h.Runde(context.Background())
 	pf = post("zweites") // the same folder, the same numbers, other mail
-	mt.h.KontoGewechselt()
+	mt.h.KontoGewechselt(kontoErstes)
 	mt.h.Now = func() time.Time { return tag.Add(time.Hour) }
 	mt.h.Runde(context.Background())
 	_, e, _ := mt.mails(t)

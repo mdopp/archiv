@@ -112,6 +112,14 @@ func (p *Protokoll) Gepackt(quelle string, g Gepackt) {
 	p.speichern()
 }
 
+// PaketMerken records a packet of a round that then broke off, leaving the error as it is.
+func (p *Protokoll) PaketMerken(quelle string, g Gepackt) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.LetztesPaket[quelle] = &g
+	p.speichern()
+}
+
 func (p *Protokoll) Fehlschlag(f Fehler) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -128,6 +136,17 @@ func (p *Protokoll) FehlerWeg(quelle string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.LetzterFehler != nil && p.LetzterFehler.Quelle == quelle {
+		p.LetzterFehler = nil
+		p.speichern()
+	}
+}
+
+// FehlerWegVon forgets the last error of one mailbox (Datei names it), or
+// one written before several mailboxes were possible (no Datei).
+func (p *Protokoll) FehlerWegVon(quelle, datei string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if f := p.LetzterFehler; f != nil && f.Quelle == quelle && (f.Datei == datei || f.Datei == "") {
 		p.LetzterFehler = nil
 		p.speichern()
 	}

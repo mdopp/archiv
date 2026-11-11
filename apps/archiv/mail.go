@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,12 +36,19 @@ import (
 // Postbote hands the Maildir to `msgvault import-maildir`. The price, said
 // on the page: whoever has root on the box can read the person's mail
 // with the app password, which the provider can revoke at any time.
+//
+// Several mailboxes (owner, 2026-11-11): the person may give more than
+// one; each is fetched the same way, one after the other, each with its
+// own fetch state. And the household's document mailbox (the Paperless
+// catch-all, its login from the box: Dokumentenpostfach): only the mails
+// addressed to this person's <login>+doc…@<domain>, read-only as well.
 
 const (
 	saysMailAnmeldung = "Der Mail-Server hat die Anmeldung abgelehnt. Prüf Benutzername und App-Passwort und gib sie neu ein."
 	saysMailServer    = "Der Mail-Server %s war nicht erreichbar. Das Archiv versucht es in einer Stunde wieder."
 	saysMailPaket     = "Aus den neuen Mails ließ sich kein Paket schreiben. Das Archiv versucht es in einer Stunde wieder; hilft das nicht, sag dem Admin Bescheid."
 	saysMailAbbruch   = "Das Abholen der Mails brach ab (%s). Was schon im Briefkasten liegt, bleibt; der Rest kommt in einer Stunde."
+	saysDokuAnmeldung = "Das Dokumenten-Postfach des Haushalts hat die Anmeldung des Archivs abgelehnt. Sag dem Admin Bescheid: Das Passwort für dein Archiv ist veraltet."
 )
 
 var ErrMailAnmeldung = errors.New(saysMailAnmeldung)
@@ -66,7 +74,7 @@ type Mail struct {
 type Postfach interface {
 	Ordner() ([]PostOrdner, error)
 	Waehlen(name string) (uidValidity uint32, err error) // read-only
-	NeueUIDs(nach uint32) ([]uint32, error)              // UIDs greater than nach, ascending
+	NeueUIDs(nach uint32, an string) ([]uint32, error)   // UIDs greater than nach, ascending; an: only mail whose To holds it (IMAP's substring)
 	Holen(uids []uint32, f func(Mail) error) error
 	Abmelden() error
 }
@@ -89,6 +97,9 @@ var imapWurzeln *x509.CertPool
 // password never travels in the clear: a server without TLS is refused.
 func ImapVerbinden(ctx context.Context, z imapZugang) (Postfach, error) {
 	adresse, name := imapAdresse(z.Host)
+	if z.Port > 0 {
+		adresse = net.JoinHostPort(name, strconv.Itoa(z.Port))
+	}
 	d := &net.Dialer{Timeout: 30 * time.Second}
 	cfg := &tls.Config{ServerName: name, MinVersion: tls.VersionTLS12, RootCAs: imapWurzeln}
 	var c *client.Client
@@ -141,11 +152,14 @@ func (p *imapPostfach) Waehlen(name string) (uint32, error) {
 	return st.UidValidity, nil
 }
 
-func (p *imapPostfach) NeueUIDs(nach uint32) ([]uint32, error) {
+func (p *imapPostfach) NeueUIDs(nach uint32, an string) ([]uint32, error) {
 	k := imap.NewSearchCriteria()
 	s := new(imap.SeqSet)
 	s.AddRange(nach+1, 0) // nach+1:* — which always names the last message, even an older one
 	k.Uid = s
+	if an != "" {
+		k.Header.Add("To", an)
+	}
 	uids, err := p.c.UidSearch(k)
 	if err != nil {
 		return nil, err
@@ -279,11 +293,18 @@ type ordnerStand struct {
 	UID      uint32 `json:"uid"`
 }
 
-func (h *Mailholer) standDatei() string { return filepath.Join(h.Gesehen.Dir, "mail-stand.json") }
+// standDatei is a mailbox's fetch state: the first mailbox keeps the file
+// it had before there were several.
+func (h *Mailholer) standDatei(id string) string {
+	if id == kontoErstes || id == "" {
+		return filepath.Join(h.Gesehen.Dir, "mail-stand.json")
+	}
+	return filepath.Join(h.Gesehen.Dir, "mail-stand-"+id+".json")
+}
 
-func (h *Mailholer) standLaden() mailStand {
+func (h *Mailholer) standLaden(id string) mailStand {
 	s := mailStand{}
-	if b, err := os.ReadFile(h.standDatei()); err == nil {
+	if b, err := os.ReadFile(h.standDatei(id)); err == nil {
 		if err := json.Unmarshal(b, &s); err != nil {
 			log.Printf("archiv: mail-stand: %v (beginne neu; doppelte Mails lässt das Archiv weg)", err)
 			s = mailStand{}
@@ -292,12 +313,12 @@ func (h *Mailholer) standLaden() mailStand {
 	return s
 }
 
-func (h *Mailholer) standSpeichern(s mailStand) error {
+func (h *Mailholer) standSpeichern(id string, s mailStand) error {
 	b, _ := json.Marshal(s)
 	if err := os.MkdirAll(h.Gesehen.Dir, 0o700); err != nil {
 		return err
 	}
-	return schreibenAtomar(h.standDatei(), b, 0o600)
+	return schreibenAtomar(h.standDatei(id), b, 0o600)
 }
 
 // Mailholer fetches new mail into the Briefkasten, vault closed or open.
@@ -306,6 +327,7 @@ type Mailholer struct {
 	Empfaenger string // /data/briefkasten.pub
 	Gesehen    *Gesehen
 	Schluessel Schluessel
+	Dokumente  *Dokumentenpostfach // the household's document mailbox; nil: none on this box
 	Verbinden  func(context.Context, imapZugang) (Postfach, error)
 	Protokoll  *Protokoll
 	Takt       time.Duration // between rounds; one hour
@@ -317,8 +339,8 @@ type Mailholer struct {
 	mu      sync.Mutex
 	laeuft  bool
 	gang    Gang
-	falsch  bool
-	wechsel bool // another mailbox was given: its fetch state starts over
+	falsch  map[string]bool // a mailbox whose login was refused: wait for a new password
+	wechsel map[string]bool // a mailbox now names another one: its fetch state starts over
 	anstoss chan struct{}
 }
 
@@ -365,19 +387,29 @@ func (h *Mailholer) gangSetzen(f func(*Gang)) {
 	h.geaendert()
 }
 
-// KontoGewechselt: the next round starts the fetch state over (folder
-// numbers of another mailbox say nothing; the HMAC set still keeps out
-// what is already packed).
-func (h *Mailholer) KontoGewechselt() {
+// KontoGewechselt: the next round starts this mailbox's fetch state over
+// (folder numbers of another mailbox say nothing; the HMAC set still keeps
+// out what is already packed).
+func (h *Mailholer) KontoGewechselt(id string) {
 	h.mu.Lock()
-	h.wechsel = true
+	if h.wechsel == nil {
+		h.wechsel = map[string]bool{}
+	}
+	h.wechsel[id] = true
 	h.mu.Unlock()
+}
+
+// KontoWeg forgets a removed mailbox's fetch state. What it brought stays in the archive.
+func (h *Mailholer) KontoWeg(id string) {
+	if err := os.Remove(h.standDatei(id)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		log.Printf("archiv: Mail-Stand: %v", err)
+	}
 }
 
 // NeuerSchluessel: new credentials; try at once, also after a refused login.
 func (h *Mailholer) NeuerSchluessel() {
 	h.mu.Lock()
-	h.falsch = false
+	h.falsch = nil
 	h.mu.Unlock()
 	h.Protokoll.FehlerWeg("mail")
 	select {
@@ -404,39 +436,49 @@ func (h *Mailholer) Lauf(ctx context.Context) {
 	}
 }
 
-// Runde fetches what is new in every folder once.
+// kontoLauf is one mailbox in a round.
+type kontoLauf struct {
+	ID     string // its fetch state
+	Konto  string // the packet's account: msgvault's identifier, and how the page names it
+	Zugang imapZugang
+	Doku   *Dokumentenpostfach // the document mailbox: one folder, only the person's mail
+}
+
+// konten are the mailboxes of a round: the person's, then the document mailbox.
+func (h *Mailholer) konten() []kontoLauf {
+	var out []kontoLauf
+	k, err := imapKonten(h.Schluessel)
+	if err != nil {
+		log.Printf("archiv: IMAP-Zugang unlesbar: %v", err)
+	}
+	for _, z := range k {
+		out = append(out, kontoLauf{ID: z.ID, Konto: z.Benutzer, Zugang: z})
+	}
+	if d := h.Dokumente; d != nil {
+		if z, ok := d.zugang(); ok {
+			out = append(out, kontoLauf{ID: kontoDokumente, Konto: d.Adresse(), Zugang: z, Doku: d})
+		}
+	}
+	return out
+}
+
+// Runde fetches what is new in every folder of every mailbox once.
 func (h *Mailholer) Runde(ctx context.Context) {
 	empf, err := empfaengerLesen(h.Empfaenger)
 	if err != nil {
 		return // no vault made yet
 	}
-	roh, err := h.Schluessel.Lesen(SchluesselIMAP)
-	if err != nil {
+	konten := h.konten()
+	if len(konten) == 0 {
 		return // no mail account given
 	}
-	var z imapZugang
-	err = json.Unmarshal(roh, &z)
-	nullen(roh)
-	if err != nil {
-		log.Printf("archiv: IMAP-Zugang unlesbar: %v", err)
-		return
-	}
 	h.mu.Lock()
-	if h.falsch || h.laeuft {
+	if h.laeuft {
 		h.mu.Unlock()
 		return
 	}
 	h.laeuft = true
-	h.gang = Gang{Was: z.Benutzer, Quelle: "mail", Seit: h.now()}
-	wechsel := h.wechsel
-	h.wechsel = false
 	h.mu.Unlock()
-	if wechsel {
-		if err := os.Remove(h.standDatei()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			log.Printf("archiv: Mail-Stand: %v", err)
-		}
-	}
-	h.geaendert()
 	defer func() {
 		h.mu.Lock()
 		h.laeuft = false
@@ -444,11 +486,34 @@ func (h *Mailholer) Runde(ctx context.Context) {
 		h.mu.Unlock()
 		h.geaendert()
 	}()
+	for _, k := range konten {
+		if ctx.Err() != nil {
+			return
+		}
+		h.kontoRunde(ctx, empf, k)
+	}
+}
+
+func (h *Mailholer) kontoRunde(ctx context.Context, empf age.Recipient, k kontoLauf) {
+	h.mu.Lock()
+	if h.falsch[k.ID] {
+		h.mu.Unlock()
+		return
+	}
+	h.gang = Gang{Was: k.Konto, Quelle: "mail", Seit: h.now()}
+	wechsel := h.wechsel[k.ID]
+	delete(h.wechsel, k.ID)
+	h.mu.Unlock()
+	if wechsel {
+		h.KontoWeg(k.ID)
+	}
+	h.geaendert()
 
 	verbinden := h.Verbinden
 	if verbinden == nil {
 		verbinden = ImapVerbinden
 	}
+	z := k.Zugang
 	pf, err := verbinden(ctx, z)
 	z.Passwort = ""
 	if err != nil {
@@ -457,34 +522,41 @@ func (h *Mailholer) Runde(ctx context.Context) {
 		}
 		if errors.Is(err, ErrMailAnmeldung) {
 			h.mu.Lock()
-			h.falsch = true // the same password fails again; wait for a new one
+			if h.falsch == nil {
+				h.falsch = map[string]bool{}
+			}
+			h.falsch[k.ID] = true // the same password fails again; wait for a new one
 			h.mu.Unlock()
-			h.Protokoll.Fehlschlag(Fehler{Am: h.now(), Quelle: "mail", Satz: saysMailAnmeldung})
+			satz := saysMailAnmeldung
+			if k.Doku != nil {
+				satz = saysDokuAnmeldung
+			}
+			h.Protokoll.Fehlschlag(Fehler{Am: h.now(), Quelle: "mail", Datei: k.Konto, Satz: satz})
 			return
 		}
 		log.Printf("archiv: IMAP %s: %v", z.Host, err)
-		h.Protokoll.Fehlschlag(Fehler{Am: h.now(), Quelle: "mail", Satz: fmt.Sprintf(saysMailServer, z.Host)})
+		h.Protokoll.Fehlschlag(Fehler{Am: h.now(), Quelle: "mail", Datei: k.Konto, Satz: fmt.Sprintf(saysMailServer, z.Host)})
 		return
 	}
 	defer pf.Abmelden()
-	g, err := h.holen(ctx, pf, empf, z.Benutzer)
+	g, err := h.holen(ctx, pf, empf, k)
 	if ctx.Err() != nil {
 		return
 	}
-	if err != nil {
-		log.Printf("archiv: Mail holen: %v", err)
-		satz := fmt.Sprintf(saysMailAbbruch, kurz(err))
-		if errors.Is(err, errMailPaket) {
-			satz = saysMailPaket
-		}
-		h.Protokoll.Fehlschlag(Fehler{Am: h.now(), Quelle: "mail", Satz: satz})
-	}
-	if g.Nachrichten > 0 || err == nil {
-		h.Protokoll.Gepackt("mail", g)
-	}
 	if err == nil {
-		h.Protokoll.FehlerWeg("mail")
+		h.Protokoll.Gepackt("mail", g)
+		h.Protokoll.FehlerWegVon("mail", k.Konto)
+		return
 	}
+	if g.Nachrichten > 0 {
+		h.Protokoll.PaketMerken("mail", g) // without clearing this mailbox's error: a break in a row counts on
+	}
+	log.Printf("archiv: Mail holen: %v", err)
+	satz := fmt.Sprintf(saysMailAbbruch, kurz(err))
+	if errors.Is(err, errMailPaket) {
+		satz = saysMailPaket
+	}
+	h.Protokoll.Fehlschlag(Fehler{Am: h.now(), Quelle: "mail", Datei: k.Konto, Satz: satz})
 }
 
 var errMailPaket = errors.New("paket")
@@ -510,7 +582,8 @@ type mailPaket struct {
 // holen walks the folders and packs what is new. The fetch state of a
 // folder is saved only once the messages up to it are in a packet in
 // place: a crash fetches them again (and the HMAC set leaves them out).
-func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, konto string) (Gepackt, error) {
+func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, k kontoLauf) (Gepackt, error) {
+	konto := k.Konto
 	g := Gepackt{Am: h.now(), Sicherung: konto}
 	buendel := h.Buendel
 	if buendel <= 0 {
@@ -520,15 +593,22 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 	if grenze <= 0 {
 		grenze = 256 << 20
 	}
-	alle, err := pf.Ordner()
-	if err != nil {
-		return g, fmt.Errorf("Ordner: %w", err)
+	var wahl []PostOrdner
+	an := ""
+	if k.Doku != nil {
+		wahl, an = []PostOrdner{{Name: k.Doku.ordner(), Trenner: "/"}}, k.Doku.lokal() // the one folder Paperless reads, only the person's mail
+	} else {
+		alle, err := pf.Ordner()
+		if err != nil {
+			return g, fmt.Errorf("Ordner: %w", err)
+		}
+		wahl = ordnerWahl(alle)
 	}
 	gesehen, err := h.Gesehen.Laden("mail")
 	if err != nil {
 		return g, fmt.Errorf("%w: %v", errMailPaket, err)
 	}
-	stand := h.standLaden()
+	stand := h.standLaden(k.ID)
 	neu := mailStand{}
 	for k, v := range stand {
 		neu[k] = v
@@ -542,7 +622,7 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 	}()
 	einwerfenJetzt := func() error {
 		if pk == nil {
-			return h.standSpeichern(neu) // nothing new was fetched: the state may move on
+			return h.standSpeichern(k.ID, neu) // nothing new was fetched: the state may move on
 		}
 		err := pk.p.Schliessen()
 		if err == nil {
@@ -571,7 +651,7 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 		g.Paket, g.Nachrichten = name, g.Nachrichten+pk.n
 		log.Printf("archiv: mail → %d neue Mails in %s", pk.n, name)
 		pk = nil
-		return h.standSpeichern(neu)
+		return h.standSpeichern(k.ID, neu)
 	}
 	neuesPaket := func() error {
 		if err := os.MkdirAll(h.Post, 0o700); err != nil {
@@ -592,7 +672,7 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 		return nil
 	}
 
-	for _, o := range ordnerWahl(alle) {
+	for _, o := range wahl {
 		if ctx.Err() != nil {
 			return g, ctx.Err()
 		}
@@ -610,12 +690,15 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 		if st.Validity != validity {
 			st = ordnerStand{Validity: validity} // the server renumbered: from the start (the HMAC set keeps out what is packed)
 		}
-		uids, err := pf.NeueUIDs(st.UID)
+		uids, err := pf.NeueUIDs(st.UID, an)
 		if err != nil {
 			return g, fmt.Errorf("SEARCH: %w", err)
 		}
 		h.gangSetzen(func(gg *Gang) { gg.Gesamt += len(uids) })
 		pfad := maildirPfad(o)
+		if k.Doku != nil {
+			pfad = "Dokumente" // msgvault's label for these mails, whatever the household's folder is called
+		}
 		bis := h.Gang().Bis
 		for i := 0; i < len(uids); i += buendel {
 			if ctx.Err() != nil {
@@ -623,6 +706,12 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 			}
 			teil := uids[i:min(i+buendel, len(uids))]
 			err := pf.Holen(teil, func(m Mail) error {
+				if k.Doku != nil {
+					if !k.Doku.Passt(m.Roh) {
+						return nil // IMAP's TO is a substring: hanna+doc holds anna+doc; never another person's mail
+					}
+					m.Flags = nil // Paperless' marks, not the person's
+				}
 				summe := sha256.Sum256(m.Roh)
 				hs := hex.EncodeToString(summe[:])
 				d, err := h.Gesehen.Mac("v1\x00" + hs)
@@ -660,7 +749,7 @@ func (h *Mailholer) holen(ctx context.Context, pf Postfach, empf age.Recipient, 
 			neu[schl] = st
 			h.gangSetzen(func(gg *Gang) { gg.Fertig += len(teil); gg.Bis = bis }) // once per bundle: each change rewrites the status file
 			if pk == nil {
-				if err := h.standSpeichern(neu); err != nil {
+				if err := h.standSpeichern(k.ID, neu); err != nil {
 					return g, fmt.Errorf("%w: %v", errMailPaket, err)
 				}
 			} else if pk.bytes >= grenze {

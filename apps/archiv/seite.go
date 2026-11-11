@@ -67,6 +67,11 @@ var meldungen = map[string]string{
 	"zu":            "Das Archiv ist abgeschlossen.",
 	"signal":        "Gespeichert. Wartende Signal-Sicherungen liest das Archiv gleich ein.",
 	"imap":          "Gespeichert. Das Archiv holt deine Mails jetzt ab, danach jede Stunde.",
+	"imap-weg":      "Das Postfach ist entfernt. Mails, die schon im Archiv sind, bleiben drin.",
+	"aufr-an":       "Eingeschaltet. Das Archiv zählt jetzt, welche alten Mails es beim Anbieter löschen könnte; gelöscht wird erst, wenn du es unten bestätigst.",
+	"aufr-aus":      "Ausgeschaltet. Das Archiv löscht beim Anbieter nichts mehr.",
+	"aufr-los":      "Bestätigt. Das Archiv löscht die alten Mails jetzt beim Anbieter, danach einmal im Monat, solange es offen ist.",
+	"mail-zu":       "Öffne dein Archiv, dann tipp noch einmal auf den Link aus Paperless: Er führt dann zur Mail.",
 	"whatsapp":      "Gespeichert. Das Archiv liest deine WhatsApp-Sicherung gleich ein.",
 	"passkey-weg":   "Der Passkey ist entfernt; er öffnet das Archiv nicht mehr.",
 	"person-ja":     "Gemerkt: Das ist dieselbe Person.",
@@ -89,6 +94,7 @@ type Web struct {
 	Tresor      *Tresor
 	Briefkasten *Briefkasten
 	Mailholer   *Mailholer
+	Aufraeumer  *Aufraeumer // old mail deleted at the provider, on the person's word (aufraeumen.go)
 	Postbote    *Postbote
 	Eingang     *Eingang
 	Protokoll   *Protokoll
@@ -294,6 +300,10 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/abschliessen", w.abschliessen)
 	mux.HandleFunc("POST /tresor/signal", w.signal)
 	mux.HandleFunc("POST /tresor/imap", w.imap)
+	mux.HandleFunc("POST /tresor/imap/weg", w.imapWeg)
+	mux.HandleFunc("POST /tresor/mail/aufraeumen", w.aufraeumenEinstellen)
+	mux.HandleFunc("POST /tresor/mail/loeschen", w.aufraeumenLos)
+	mux.HandleFunc("GET /tresor/mail", w.mailZeigen)
 	mux.HandleFunc("POST /tresor/whatsapp", w.whatsapp)
 	mux.HandleFunc("POST /tresor/abgleich", w.abgleichJetzt)
 	mux.HandleFunc("POST /tresor/personen/entscheiden", w.entscheiden)
@@ -360,6 +370,7 @@ func (w *Web) packt() string {
 
 // quellenFormulare are the forms on the sources' page; the others are the main page's.
 var quellenFormulare = map[string]bool{"/tresor/signal": true, "/tresor/imap": true, "/tresor/whatsapp": true, "/tresor/abgleich": true,
+	"/tresor/imap/weg": true, "/tresor/mail/aufraeumen": true, "/tresor/mail/loeschen": true,
 	"/tresor/umfeld/schluessel": true, "/tresor/passkey/weg": true}
 
 // antwort ends a form: back to the page it came from, with the sentence.
@@ -489,40 +500,6 @@ func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 		w.Geaendert()
 	}
 	http.Redirect(rw, r, "/tresor/quellen?m=signal", http.StatusSeeOther)
-}
-
-func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
-	sch, ok := w.offenesFach(rw, r)
-	if !ok {
-		return
-	}
-	var alt imapZugang
-	if roh, err := sch.Lesen(SchluesselIMAP); err == nil {
-		json.Unmarshal(roh, &alt)
-		nullen(roh)
-		alt.Passwort = ""
-	}
-	b, err := imapJSON(r.PostFormValue("host"), r.PostFormValue("benutzer"), r.PostFormValue("passwort"))
-	if err != nil {
-		w.antwort(rw, r, http.StatusBadRequest, "", saysIMAPFehlt)
-		return
-	}
-	defer nullen(b)
-	if err := sch.Speichern(SchluesselIMAP, b); err != nil {
-		log.Printf("archiv: IMAP speichern: %v", err)
-		w.antwort(rw, r, http.StatusInternalServerError, "", saysSpeichernFehler)
-		return
-	}
-	if w.Mailholer != nil {
-		if alt.Benutzer != "" && (!strings.EqualFold(alt.Benutzer, strings.TrimSpace(r.PostFormValue("benutzer"))) || !strings.EqualFold(alt.Host, strings.TrimSpace(r.PostFormValue("host")))) {
-			w.Mailholer.KontoGewechselt()
-		}
-		w.Mailholer.NeuerSchluessel()
-	}
-	if w.Geaendert != nil {
-		w.Geaendert()
-	}
-	http.Redirect(rw, r, "/tresor/quellen?m=imap", http.StatusSeeOther)
 }
 
 // whatsapp stores the key inside the vault (as Signal's passphrase):
@@ -842,41 +819,6 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 %s</form><p class=hinweis>%s</p></details></section>`, offenWenn(!komplett), summary, knopf(map[bool]string{true: "Ersetzen", false: "Speichern"}[komplett], "Speichere …", ""), saysSignalHinweis)
 }
 
-func (w *Web) mailKarte(b *strings.Builder, offen bool) {
-	b.WriteString(`<section class=quelle id=karte-mail data-live><h3>E-Mail</h3>`)
-	w.imAchiv(b, "mail", "Mail", "Mails")
-	w.fehlerVon(b, "mail")
-	sch := w.Schluessel
-	var z imapZugang
-	t, ok := sch.Hinterlegt(SchluesselIMAP)
-	if ok {
-		if roh, err := sch.Lesen(SchluesselIMAP); err == nil {
-			json.Unmarshal(roh, &z)
-			nullen(roh)
-			z.Passwort = ""
-		}
-		fmt.Fprintf(b, `<p class=zugang>Postfach <b>%s</b> auf %s · App-Passwort hinterlegt am %s</p>`, esc(z.Benutzer), esc(z.Host), datum(t))
-	} else {
-		b.WriteString(`<p class=zugang><span class=fehlt>Kein Postfach eingetragen</span></p>`)
-	}
-	if !offen {
-		b.WriteString(`</section>`)
-		return
-	}
-	host, summary, erklaerung, knopfText := "imap.gmail.com", "Postfach eintragen", "", "Speichern"
-	if ok {
-		host, summary, knopfText = z.Host, "Neues App-Passwort oder anderes Postfach", "Ersetzen"
-		erklaerung = fmt.Sprintf(`<p class=k>Das Archiv holt ein Postfach. Was du hier speicherst, ersetzt %s. Mails, die schon im Archiv sind, bleiben drin.</p>`, esc(z.Benutzer))
-	}
-	fmt.Fprintf(b, `<details id=d-mail%s><summary>%s</summary>%s
-<p class=k>Mit einem App-Passwort deines Mail-Anbieters, nicht deinem normalen Passwort (Gmail: Google-Konto → Sicherheit → App-Passwörter; dafür muss die Bestätigung in zwei Schritten an sein). Das Archiv holt jede Stunde die neuen Mails ab, auch wenn es zu ist, und ändert auf dem Server nichts, nicht einmal „gelesen“. Bei Gmail liest es „Alle Nachrichten“ (ohne Spam und Papierkorb); deine Gmail-Labels kommen nicht mit.</p>
-<form method=post action="/tresor/imap" class=feld>
-<label>Server (für Gmail so lassen)<input name=host autocomplete=off value="%s"></label>
-<label>Benutzername, meist deine Mail-Adresse<input name=benutzer type=email autocomplete=off value="%s" placeholder="z. B. name@gmail.com"></label>
-<label>App-Passwort<input name=passwort type=password autocomplete=new-password></label>
-%s</form><p class=hinweis>%s</p></details></section>`, offenWenn(!ok), summary, erklaerung, esc(host), esc(z.Benutzer), knopf(knopfText, "Speichere …", ""), saysMailPreis)
-}
-
 func (w *Web) smsKarte(b *strings.Builder) {
 	b.WriteString(`<section class=quelle id=karte-sms data-live><h3>SMS und Anrufe</h3>`)
 	ein, _, _ := w.Protokoll.Kopie()
@@ -1189,6 +1131,7 @@ p.laeuft{font-weight:600}span.laeuft{flex:none;width:14px;height:14px;margin-top
 @media (prefers-reduced-motion:reduce){span.laeuft{animation:none;background:var(--accent)}}
 progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-color:var(--accent)}
 .zugang{font-size:.95rem}.fehlt{color:var(--danger);font-weight:600}
+.postfach{border-top:1px solid var(--line);padding:.3rem 0}.postfach:first-of-type{border-top:0}.aufraeumen{margin:.4rem 0;padding:.2rem 12px;background:var(--panel);border-radius:10px}.aufraeumen p{margin:.4rem 0}
 details{margin:6px 0}summary{cursor:pointer;color:var(--accent);font-weight:600;min-height:44px;display:flex;align-items:center}
 ol{padding-left:1.2rem}li{margin:.3rem 0}form.zeile{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:.3rem 0}
 .vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0}

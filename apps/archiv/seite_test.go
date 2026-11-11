@@ -53,7 +53,7 @@ func neuesWeb(t *testing.T) *webTest {
 	pb := &Postbote{Post: bk.Post, Eingang: eingang, Letzte: bk.Letzte, Schluessel: sch, Protokoll: prot, Run: &fakeMsgvault{}}
 	wt.data = data
 	wt.w = &Web{Passkeys: &Passkeys{Datei: filepath.Join(data, "schluessel", "passkeys.json")}, Person: "anna", Secret: "s3cret", HomesSecret: "homes-geheim", Tresor: tt.Tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang,
-		Protokoll: prot, Schluessel: sch, Letzte: bk.Letzte, Archiv: archivProxy(port)}
+		Protokoll: prot, Schluessel: sch, Letzte: bk.Letzte, Archiv: archivProxy(port), Aufraeumer: &Aufraeumer{Schluessel: sch}}
 	return wt
 }
 
@@ -93,6 +93,9 @@ func TestEveryPostRouteAnswers(t *testing.T) {
 		"/tresor/abschliessen":         {},
 		"/tresor/signal":               {"passphrase": {"12"}},
 		"/tresor/imap":                 {"host": {""}},
+		"/tresor/imap/weg":             {"konto": {"gibtsnicht"}},
+		"/tresor/mail/aufraeumen":      {"konto": {"gibtsnicht"}, "an": {"1"}, "dauer": {"2"}, "einheit": {"jahre"}},
+		"/tresor/mail/loeschen":        {"konto": {"gibtsnicht"}},
 		"/tresor/abgleich":             {},
 		"/tresor/personen/entscheiden": {"id": {"7"}, "token": {"t"}, "antwort": {"ja"}},
 		"/tresor/personen/zusammen":    {"a": {"1"}, "b": {"2"}},
@@ -169,7 +172,7 @@ func TestPagesPerState(t *testing.T) {
 		t.Fatalf("imap: %d %s", rec.Code, rec.Body)
 	}
 	body = wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
-	if !strings.Contains(body, "Postfach <b>anna@example.org</b> auf imap.gmail.com") || !strings.Contains(body, "ersetzt anna@example.org") || strings.Contains(body, "abcd efgh") {
+	if !strings.Contains(body, "Postfach <b>anna@example.org</b> auf imap.gmail.com") || !strings.Contains(body, "ersetzt den Eintrag für anna@example.org") || strings.Contains(body, "abcd efgh") {
 		t.Fatalf("the mail card does not name the stored mailbox, or shows the password:\n%s", body)
 	}
 	// outside the vault, owner-only
