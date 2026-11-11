@@ -1,11 +1,13 @@
 package main
 
 import (
+	"fmt"
 	"image"
 	"image/png"
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -13,7 +15,8 @@ import (
 // TestSchau serves kanteBox's open archive on ARCHIV_SCHAU (an address)
 // for ARCHIV_SCHAU_DAUER, signed in as anna: for looking at the pages in a
 // browser; with ARCHIV_SCHAU_VIEL a pair with many chats and threads
-// (kanteViel). Without the variable it does nothing.
+// (kanteViel), with ARCHIV_SCHAU_LEUTE that many more people on anna's
+// photos (schauLeute). Without the variable it does nothing.
 func TestSchau(t *testing.T) {
 	addr := os.Getenv("ARCHIV_SCHAU")
 	if addr == "" {
@@ -22,6 +25,9 @@ func TestSchau(t *testing.T) {
 	wt, ut, _, innen, _ := kanteBox(t)
 	if os.Getenv("ARCHIV_SCHAU_VIEL") != "" {
 		kanteViel(t, ut, innen)
+	}
+	if viele, _ := strconv.Atoi(os.Getenv("ARCHIV_SCHAU_LEUTE")); viele > 0 {
+		schauLeute(t, ut, innen, viele)
 	}
 	dauer, _ := time.ParseDuration(os.Getenv("ARCHIV_SCHAU_DAUER"))
 	if dauer == 0 {
@@ -49,4 +55,26 @@ func TestSchau(t *testing.T) {
 	go srv.Serve(l)
 	time.Sleep(dauer)
 	srv.Close()
+}
+
+// schauLeute puts viele more people on anna's photos, each on a few days
+// of its own (the first ones on more), for the picture with many.
+func schauLeute(t *testing.T, ut *umfeldTest, innen Innen, viele int) {
+	tab, err := tabelleLaden(innen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	vornamen := []string{"Lena", "Jonas", "Mia", "Paul", "Emma", "Felix", "Lina", "Max", "Clara", "Noah", "Ida", "Elias", "Greta", "Theo", "Marie"}
+	nachnamen := []string{"Schmidt", "Weber", "Fischer", "Wagner", "Becker", "Hoffmann", "Schulz", "Koch"}
+	for i := range viele {
+		id := fmt.Sprintf("p-viel%d", i)
+		tab.Namen[id] = vornamen[i%len(vornamen)] + " " + nachnamen[i/len(vornamen)%len(nachnamen)]
+		for d := range 2 + (viele-i)/4 {
+			tab.Fotos = append(tab.Fotos, netzFoto{ID: fmt.Sprintf("v%d-%d", i, d), T: time.Date(2020+d%6, time.Month(1+i%12), 1+d, 12, 0, 0, 0, time.UTC), Wer: []string{"p-anna", id}})
+		}
+	}
+	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+		t.Fatal(err)
+	}
+	ut.u.laden(innen)
 }

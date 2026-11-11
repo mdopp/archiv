@@ -1,6 +1,7 @@
 package main
 
 import (
+	"slices"
 	"strings"
 	"time"
 	"unicode"
@@ -34,6 +35,7 @@ type buchKarte struct {
 	family   string   // N's first part, for the suggestions (fragen.go)
 	geb      string   // BDAY as JJJJ-MM-TT; "" none or without a year
 	strassen []string // each ADR's street without its number, with its postcode: a neighbour's
+	spitz    []string // NICKNAME's names, as written („Hasi“)
 }
 
 // vcardZeile is one content line: its group, name (upper case), parameters
@@ -202,6 +204,8 @@ func karteAus(buch string, zeilen []vcardZeile) (buchKarte, bool) {
 			k.family = strings.TrimSpace(vTeile(z.wert)[0])
 		case "BDAY":
 			k.geb = gebLesen(v)
+		case "NICKNAME":
+			k.spitz = spitznamen(k.spitz, z.wert)
 		case "ADR":
 			p := append(vTeile(z.wert), make([]string, 7)...)
 			if s := strasse(p[2]); s != "" && strings.TrimSpace(p[5]) != "" {
@@ -237,6 +241,32 @@ func karteAus(buch string, zeilen []vcardZeile) (buchKarte, bool) {
 	k.key = buch + uid
 	k.rel = relationen(zeilen)
 	return k, true
+}
+
+// spitznamen adds a NICKNAME's names (a list, split at its unescaped
+// commas) to have, each once (umlauts alike).
+func spitznamen(have []string, wert string) []string {
+	var teile []string
+	var cur strings.Builder
+	for i := 0; i < len(wert); i++ {
+		switch {
+		case wert[i] == '\\' && i+1 < len(wert):
+			cur.WriteString(wert[i : i+2])
+			i++
+		case wert[i] == ',':
+			teile = append(teile, cur.String())
+			cur.Reset()
+		default:
+			cur.WriteByte(wert[i])
+		}
+	}
+	for _, t := range append(teile, cur.String()) {
+		t = strings.Join(strings.Fields(vText(t)), " ")
+		if klar(t) != "" && !slices.ContainsFunc(have, func(h string) bool { return klar(h) == klar(t) }) {
+			have = append(have, t)
+		}
+	}
+	return have
 }
 
 // gebLesen is a BDAY as JJJJ-MM-TT; "" for one without a year or unread.

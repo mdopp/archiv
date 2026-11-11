@@ -736,16 +736,20 @@ inside the open vault; closed, there is no net, not even in memory.
   the hidden ones restorable. On top one field finds a person by name
   (`?suche=`, `gemeinsam.go`; owner 2026-11-11: „Ich kann nicht nach
   einer Person suchen“): umlauts in every spelling, part of a name, a
-  phone book's name for somebody Immich names otherwise („Papa“); one
+  phone book's name for somebody Immich names otherwise („Papa“), a
+  card's NICKNAME („Hasi“, kept in the round's table; the person's page
+  says it, „auch: Hasi“); one
   hit opens the person, several are offered, the closer first; the
   search on top of the archive lists persons too. A person's page leads
   with who she is to the person: the relation, how close (the picture's
   rings, „Nr. 3 von 212“), when the two were last together (the newest
   shared photo or message in a shared chat or thread), what they share
   in one sentence, and one button to the edge page. Each row of a list
-  is one link and one short line (the relation, then at most three
-  reasons): from the person's own list to that person's page, from
-  another's to what connects the two. „Ausblenden“ and „Nicht
+  is one short line (the relation, then at most three reasons) and a
+  name always opens that person's page; on another's list a small „mit
+  Ben ›“ after it opens what connects the two. The picture scales to
+  what it holds (rings as wide as their people need, the frame cut to
+  them, labels placed where they meet nothing, at most 40 in it). „Ausblenden“ and „Nicht
   berechnen“ (out before any tie is computed) are folded at the end of a
   person's page, big and apart, each
   with a Rückgängig toast (owner 2026-11-11: „gefährlich platziert, dicke

@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 )
@@ -299,7 +300,10 @@ func personenZeilen(b *strings.Builder, n *Netz, ts []Treffer) {
 	b.WriteString(`<ul class=leute>`)
 	for _, t := range ts {
 		var k []string
-		if t.Als != "" {
+		switch {
+		case t.Spitz:
+			k = append(k, "auch: "+t.Als)
+		case t.Als != "":
 			k = append(k, "im Telefonbuch: "+t.Als)
 		}
 		if kurz := n.Kurz(ich, n.KanteMit(ich, t.ID)); kurz != "" && t.ID != ich {
@@ -344,6 +348,9 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 			b.WriteString(`<p class=k>Deine eigene Karte hat das Archiv in den Telefonbüchern nicht gefunden (es sucht die E-Mail deines Immich-Kontos und deine Nummer); in der Mitte steht deshalb, wer die meisten Verbindungen hat.</p>`)
 		}
 		b.WriteString(umfeldBild(n, k, vs))
+		if len(vs) > umfeldBildHoechstens {
+			fmt.Fprintf(b, `<p class=k>Im Bild die nächsten %d, alle %d in der Liste.</p>`, umfeldBildHoechstens, len(vs))
+		}
 		b.WriteString(umfeldListe(n, k, vs))
 		if len(vs) == zeigen && !mehr {
 			fmt.Fprintf(b, `<p><a href="%s">Mehr zeigen</a></p>`, esc("/tresor/umfeld?"+url.Values{"mitte": {mitte}, "mehr": {"1"}}.Encode()))
@@ -377,6 +384,9 @@ func umfeldMitte(id string) string { return "/tresor/umfeld?" + url.Values{"mitt
 // on: the edge page, where the examples are and the relation is set.
 func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
 	fmt.Fprintf(b, `<section class=person id=person><div class=wer-ist>%s<h2>%s</h2></div>`, gesicht(k.Name), esc(k.Name))
+	if sp := n.Spitznamen(k.ID); len(sp) > 0 {
+		fmt.Fprintf(b, `<p class="k auch">auch: %s</p>`, esc(strings.Join(sp, ", ")))
+	}
 	p, ok := n.Paar(k.ID, n.Ich())
 	if !ok {
 		b.WriteString(`</section>`)
@@ -404,20 +414,21 @@ func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
 }
 
 // umfeldListe is the ranked list: each row the person and the tie in one
-// short line (Netz.Kurz), one link. From the person's own list it opens
-// that person's page, which leads with what the two share; from anybody
-// else's it opens what connects that one and the row's. No action on the
+// short line (Netz.Kurz). A name always opens that person's page (owner
+// 2026-11-11), which leads with what she and the person share; on
+// anybody else's list a small „mit Ben ›“ after it opens what connects
+// the row's and the middle. No action on the
 // row (owner 2026-11-11: „gefährlich platziert, dicke Finger“): Ausblenden
 // and Nicht berechnen are at the end of the person's page (umfeldAktionen).
 func umfeldListe(n *Netz, mitte Knoten, vs []Verbindung) string {
 	var b strings.Builder
 	b.WriteString(`<ol class=nahe>`)
 	for _, v := range vs {
-		ziel := umfeldMitte(v.Mit.ID)
+		paar := ""
 		if mitte.ID != n.Ich() {
-			ziel = kanteAdresse(mitte.ID, v.Mit.ID)
+			paar = fmt.Sprintf(`<a class=paar href="%s">mit %s ›</a>`, esc(kanteAdresse(mitte.ID, v.Mit.ID)), esc(rufname(mitte.Name)))
 		}
-		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a></li>`, esc(ziel), esc(n.Anzeige(v.Mit)), esc(n.Kurz(mitte.ID, v.Kante)))
+		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a>%s</li>`, esc(umfeldMitte(v.Mit.ID)), esc(n.Anzeige(v.Mit)), esc(n.Kurz(mitte.ID, v.Kante)), paar)
 	}
 	b.WriteString(`</ol>`)
 	return b.String()
@@ -455,43 +466,159 @@ func umfeldKnoepfe(mitte, id string, arten ...string) string {
 }
 
 // umfeldBild is the picture: the middle, the first fifth on the inner
-// ring, up to half on the middle one, the rest outside; a line to each,
-// its width the tie's strength, and thin ones among them.
+// ring, up to half on the middle one, the rest outside (eight or fewer on
+// one ring); a line to each, its width the tie's strength, and thin ones
+// among them. It scales to what it holds (owner 2026-11-11): each ring
+// as wide as its people need, a full ring staggered so neighbouring names
+// do not meet, the frame cut to the people and their names, and never
+// wider than the phone shows it readably; at most umfeldBildHoechstens
+// (the list has the rest).
 func umfeldBild(n *Netz, mitte Knoten, vs []Verbindung) string {
-	const c = 200.0
+	vs = vs[:min(len(vs), umfeldBildHoechstens)]
 	ids, xy := make([]string, len(vs)), make([][2]float64, len(vs))
-	ringe := [3][2]int{{0, max(1, len(vs)/5)}, {max(1, len(vs)/5), max(2, len(vs)/2)}, {max(2, len(vs)/2), len(vs)}}
+	for i, v := range vs {
+		ids[i] = v.Mit.ID
+	}
+	ringe := [][2]int{{0, len(vs)}}
+	if len(vs) > bildEinRing {
+		ringe = [][2]int{{0, len(vs) / 5}, {len(vs) / 5, len(vs) / 2}, {len(vs) / 2, len(vs)}}
+	}
+	r := 0.0
 	for ring, rg := range ringe {
-		for i := rg[0]; i < min(rg[1], len(vs)); i++ {
-			a := 2*math.Pi*float64(i-rg[0])/float64(rg[1]-rg[0]) + float64(ring)*0.5 - math.Pi/2
-			r := []float64{70, 120, 165}[ring]
-			ids[i], xy[i] = vs[i].Mit.ID, [2]float64{c + r*math.Cos(a), c + r*math.Sin(a)}
+		m := rg[1] - rg[0]
+		versetzt := m > bildVersetzt
+		r = max(bildRadius[min(ring, len(bildRadius)-1)], r+bildAbstand, float64(m)*bildBogen/(2*math.Pi))
+		for i := rg[0]; i < rg[1]; i++ {
+			a := 2*math.Pi*float64(i-rg[0])/float64(m) + float64(ring)*0.5 - math.Pi/2
+			ri := r
+			if versetzt && (i-rg[0])%2 == 1 {
+				ri += bildVersatz
+			}
+			xy[i] = [2]float64{ri * math.Cos(a), ri * math.Sin(a)}
+		}
+		if versetzt {
+			r += bildVersatz
 		}
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, `<svg class=netzbild viewBox="0 0 400 400" role=img aria-label="%s">`, esc("Wer "+mitte.Name+" nahe steht"))
+	punkte := append([]bildPunkt{{x: 0, y: 0, r: 9, name: kurzName(mitte.Name)}}, make([]bildPunkt, len(vs))...)
+	for i, v := range vs {
+		punkte[i+1] = bildPunkt{x: xy[i][0], y: xy[i][1], r: 5, name: kurzName(v.Mit.Name)}
+	}
+	rahmen := beschriften(punkte)
+	rahmen.mindestens(bildMindestens)
+	b, h := rahmen.x1-rahmen.x0, rahmen.y1-rahmen.y0
+	var s strings.Builder
+	fmt.Fprintf(&s, `<svg class=netzbild viewBox="%.0f %.0f %.0f %.0f" style="max-width:%.0fpx" role=img aria-label="%s">`, rahmen.x0, rahmen.y0, b, h, b*bildZoom, esc("Wer "+mitte.Name+" nahe steht"))
 	for _, p := range n.Zwischen(ids) {
-		fmt.Fprintf(&b, `<line class=zw x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, xy[p[0]][0], xy[p[0]][1], xy[p[1]][0], xy[p[1]][1])
+		fmt.Fprintf(&s, `<line class=zw x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, xy[p[0]][0], xy[p[0]][1], xy[p[1]][0], xy[p[1]][1])
 	}
 	for i, v := range vs {
-		fmt.Fprintf(&b, `<line x1="200" y1="200" x2="%.1f" y2="%.1f" stroke-width="%.1f"/>`, xy[i][0], xy[i][1], 0.5+2.5*v.Kante.Staerke/vs[0].Kante.Staerke)
+		fmt.Fprintf(&s, `<line x1="0" y1="0" x2="%.1f" y2="%.1f" stroke-width="%.1f"/>`, xy[i][0], xy[i][1], 0.5+2.5*v.Kante.Staerke/vs[0].Kante.Staerke)
 	}
 	for i, v := range vs {
-		b.WriteString(umfeldPunkt(v.Mit, xy[i][0], xy[i][1], 5, i%2 == 1 && xy[i][1] < c))
+		s.WriteString(umfeldPunkt(v.Mit, punkte[i+1]))
 	}
-	b.WriteString(`<g class=mitte>` + umfeldPunkt(mitte, c, c, 9, false) + `</g></svg>`)
-	return b.String()
+	s.WriteString(`<g class=mitte>` + umfeldPunkt(mitte, punkte[0]) + `</g></svg>`)
+	return s.String()
+}
+
+// The picture's measures, in its units (a label's 10px at bildZoom 1).
+const (
+	umfeldBildHoechstens = 40  // persons in the picture; „Mehr zeigen“ lists more
+	bildEinRing          = 8   // up to this many stand on one ring
+	bildAbstand          = 46  // from one ring to the next at least
+	bildBogen            = 30  // along a ring, from one person to the next at least
+	bildVersetzt         = 12  // a ring with more is staggered
+	bildVersatz          = 20  // every second person of a staggered ring further out
+	bildZeichen          = 5.8 // a label's letter, wide
+	bildRand             = 4
+	bildZoom             = 1.3 // a small picture is shown this much larger, no more
+	bildMindestens       = 200 // the frame's width at least, its height 0.7 of it: one or two people are no sliver
+)
+
+// bildRadius are the rings' smallest radii.
+var bildRadius = []float64{62, 108, 150}
+
+// bildRahmen is a box in the picture: the frame, a label's, a point's.
+type bildRahmen struct{ x0, y0, x1, y1 float64 }
+
+func (f bildRahmen) trifft(o bildRahmen) bool {
+	return f.x0 < o.x1 && o.x0 < f.x1 && f.y0 < o.y1 && o.y0 < f.y1
+}
+
+func (f *bildRahmen) dazu(o bildRahmen) {
+	f.x0, f.y0, f.x1, f.y1 = min(f.x0, o.x0), min(f.y0, o.y0), max(f.x1, o.x1), max(f.y1, o.y1)
+}
+
+// bildPunkt is a person in the picture and where its label stands: tx, ty
+// the text's anchor, anker its text-anchor.
+type bildPunkt struct {
+	x, y, r, tx, ty float64
+	name, anker     string
+}
+
+// beschriften places each label where it meets no point and no label
+// placed before (the middle's first, then the closest): below or above
+// the point, the outer side first, else beside it; the first place when
+// none is free. It answers the frame around all of them.
+func beschriften(ps []bildPunkt) bildRahmen {
+	var belegt []bildRahmen
+	for _, p := range ps {
+		belegt = append(belegt, bildRahmen{p.x - p.r - 1, p.y - p.r - 1, p.x + p.r + 1, p.y + p.r + 1})
+	}
+	rahmen := belegt[0]
+	for i := range ps {
+		p := &ps[i]
+		w := float64(len([]rune(p.name))) * bildZeichen
+		unten := [3]float64{p.x, p.y + p.r + 11, 0}
+		oben := [3]float64{p.x, p.y - p.r - 4, 0}
+		rechts, links := [3]float64{p.x + p.r + 3, p.y + 3.5, 1}, [3]float64{p.x - p.r - 3, p.y + 3.5, -1}
+		orte := [][3]float64{unten, oben, rechts, links}
+		if p.y < -1 {
+			orte[0], orte[1] = oben, unten
+		}
+		if p.x < -1 {
+			orte[2], orte[3] = links, rechts
+		}
+		box := func(o [3]float64) bildRahmen {
+			x0 := o[0] - w/2 + o[2]*w/2
+			return bildRahmen{x0 - 1, o[1] - 9, x0 + w + 1, o[1] + 2.5}
+		}
+		wahl := orte[0]
+		for _, o := range orte {
+			if !slices.ContainsFunc(belegt, box(o).trifft) {
+				wahl = o
+				break
+			}
+		}
+		p.tx, p.ty, p.anker = wahl[0], wahl[1], [3]string{"end", "", "start"}[int(wahl[2])+1]
+		belegt = append(belegt, box(wahl))
+		rahmen.dazu(box(wahl))
+		rahmen.dazu(belegt[i])
+	}
+	rahmen.x0, rahmen.y0, rahmen.x1, rahmen.y1 = rahmen.x0-bildRand, rahmen.y0-bildRand, rahmen.x1+bildRand, rahmen.y1+bildRand
+	return rahmen
+}
+
+// mindestens widens the frame evenly to at least m wide and 0.7 m high.
+func (f *bildRahmen) mindestens(m float64) {
+	if d := m - (f.x1 - f.x0); d > 0 {
+		f.x0, f.x1 = f.x0-d/2, f.x1+d/2
+	}
+	if d := m*0.7 - (f.y1 - f.y0); d > 0 {
+		f.y0, f.y1 = f.y0-d/2, f.y1+d/2
+	}
 }
 
 // umfeldPunkt is one person in the picture, a link that puts it in the
-// middle; its label below it, or above (oben) where its neighbours' are.
-func umfeldPunkt(k Knoten, x, y, r float64, oben bool) string {
-	dy := r + 11
-	if oben {
-		dy = -r - 4
+// middle, with its label where beschriften put it.
+func umfeldPunkt(k Knoten, p bildPunkt) string {
+	anker := ""
+	if p.anker != "" {
+		anker = ` style="text-anchor:` + p.anker + `"`
 	}
-	return fmt.Sprintf(`<a href="%s" aria-label="%s"><circle cx="%.1f" cy="%.1f" r="%.0f"/><text x="%.1f" y="%.1f">%s</text></a>`, esc(umfeldMitte(k.ID)),
-		esc(k.Name+" in die Mitte"), x, y, r, x, y+dy, esc(kurzName(k.Name)))
+	return fmt.Sprintf(`<a href="%s" aria-label="%s"><circle cx="%.1f" cy="%.1f" r="%.0f"/><text x="%.1f" y="%.1f"%s>%s</text></a>`, esc(umfeldMitte(k.ID)),
+		esc(k.Name+" in die Mitte"), p.x, p.y, p.r, p.tx, p.ty, anker, esc(p.name))
 }
 
 // kurzName is a name in the picture: the first name and the last one's initial.
@@ -501,6 +628,14 @@ func kurzName(name string) string {
 		return bisZu(name, 12)
 	}
 	return bisZu(ws[0], 12) + " " + string([]rune(ws[len(ws)-1])[:1]) + "."
+}
+
+// rufname is a name's first word, as a row says „mit Ben“.
+func rufname(name string) string {
+	if ws := strings.Fields(name); len(ws) > 0 {
+		return ws[0]
+	}
+	return name
 }
 
 func bisZu(s string, n int) string {

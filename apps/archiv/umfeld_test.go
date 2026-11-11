@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -173,7 +174,7 @@ type umfeldTest struct {
 // Gerd, a hidden Hanna and an unnamed face. Anna and Ben are together on
 // three days, Kim with each, Fritz with Kim on two, Gerd with Anna on one
 // day (two photos at one place); the household's book has Anna (the
-// key's e-mail, iOS: Ben her spouse) and Ben at one address, Carla (no
+// key's e-mail, iOS: Ben her spouse) and Ben („Hasi“) at one address, Carla (no
 // face) at Anna's firm; anna's phone (the archive's contact store) has
 // Fritz, whom Android calls her friend and vCard 4 her brother.
 func netzBox(t *testing.T) *umfeldTest {
@@ -201,7 +202,7 @@ func netzBox(t *testing.T) *umfeldTest {
 	rad.haushalt = map[string]string{
 		"a.vcf": karteMit("a", "Anna Berg", "EMAIL:anna@box.test\r\nADR;TYPE=HOME:;;Gartenweg 2;Saarbrücken;;66111;Deutschland\r\nORG:Werk AG\r\n"+
 			"item1.X-ABRELATEDNAMES:Ben Berg\r\nitem1.X-ABLabel:_$!<Spouse>!$_\r\n"),
-		"b.vcf": karteMit("b", "Ben Berg", "ADR;TYPE=HOME:;;Gartenweg 2;Saarbrücken;;66111;Deutschland\r\n"),
+		"b.vcf": karteMit("b", "Ben Berg", "ADR;TYPE=HOME:;;Gartenweg 2;Saarbrücken;;66111;Deutschland\r\nNICKNAME:Hasi\r\n"),
 		"c.vcf": karteMit("c", "Carla Wolf", "ORG:Werk AG;Einkauf\r\n"),
 		"f.vcf": karteMit("f", "Werk AG", "ORG:Werk AG\r\nCATEGORIES:Firma\r\n"),
 	}
@@ -562,6 +563,9 @@ func TestUmfeldSeite(t *testing.T) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}
 	}
+	if strings.Contains(page, `class=paar`) {
+		t.Fatal("her own list says „mit …“: there the name already opens what the two share")
+	}
 	if strings.Contains(page, `action="/tresor/umfeld/verbergen"`) || strings.Contains(page, `value="nicht"`) {
 		t.Fatal("an action on a row of the list (owner 2026-11-11: „dicke Finger“)")
 	}
@@ -573,8 +577,8 @@ func TestUmfeldSeite(t *testing.T) {
 		// who Ben is to her first, then what the two share in one sentence, then the one way on (owner 2026-11-11)
 		`<section class=person id=person><div class=wer-ist>`, `<h2>Ben Berg</h2>`, `<p class=ist>Für dich: Partner/in · sehr nah (Nr. 1 von 4) · zuletzt gemeinsam am 24.12.2025</p>`,
 		`<p class=summe>4 gemeinsame Fotos (2019–2025, zuletzt im Dezember)</p>`, `<a class=weiter href="/tresor/kante?a=p-ben&amp;b=p-anna">Was verbindet euch?</a>`,
-		// Ben's list: a row opens what connects Ben and that one
-		`<a class=zeile href="/tresor/kante?a=p-ben&amp;b=p-kim">Kim Berg <span class=k>2 Tage auf deinen Fotos seit 2019</span></a></li>`} {
+		// Ben's list: a name always opens that person's page; „mit Ben ›“ after it what connects the two (owner 2026-11-11)
+		`<li><a class=zeile href="/tresor/umfeld?mitte=p-kim">Kim Berg <span class=k>2 Tage auf deinen Fotos seit 2019</span></a><a class=paar href="/tresor/kante?a=p-ben&amp;b=p-kim">mit Ben ›</a></li>`} {
 		if !strings.Contains(ben, want) {
 			t.Fatalf("Ben's detail lacks %q:\n%s", want, ben)
 		}
@@ -698,3 +702,76 @@ func TestUmfeldLaufEndetMitDemTresor(t *testing.T) {
 		t.Fatalf("after closing: %v %+v", u.Netz() != nil, u.Stand())
 	}
 }
+
+// sternNetz is m on two photo days with each of viele others, the closer
+// the lower their number.
+func sternNetz(viele int) (*Netz, Knoten) {
+	st := netzTabelle{Namen: map[string]string{"m": "Mia Mitte"}}
+	vor := []string{"Lena", "Jonas", "Maximilian", "Paul", "Emma", "Felix", "Charlotte", "Noah"}
+	for i := range viele {
+		id := fmt.Sprintf("p%02d", i)
+		st.Namen[id] = vor[i%len(vor)] + fmt.Sprintf(" Nachname%d", i)
+		for d := range 2 + viele - i {
+			st.Fotos = append(st.Fotos, netzFoto{ID: fmt.Sprintf("%s-%d", id, d), T: time.Date(2020, 1, 1+d, 12, 0, 0, 0, time.UTC), Stadt: fmt.Sprint(i, d), Wer: []string{"m", id}})
+		}
+	}
+	n := neuesNetz(st, nil, nil, time.UTC, func() time.Time { return time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC) })
+	k, _ := n.Person("m")
+	return n, k
+}
+
+var (
+	bildRahmenRe = regexp.MustCompile(`viewBox="(-?\d+) (-?\d+) (\d+) (\d+)" style="max-width:(\d+)px"`)
+	bildTextRe   = regexp.MustCompile(`<text x="(-?[\d.]+)" y="(-?[\d.]+)"(?: style="text-anchor:(start|end)")?>([^<]*)</text>`)
+)
+
+// The picture scales to what it holds (owner 2026-11-11): few people,
+// a small picture without empty space around them; many, wider rings,
+// no two names on each other, every point and name inside the frame, and
+// at most umfeldBildHoechstens in it, never shown so small that a name is
+// unreadable on a phone (380px wide).
+func TestUmfeldBildSkaliert(t *testing.T) {
+	for _, c := range []struct{ viele, punkte, hoechstensBreit int }{{1, 2, 260}, {2, 3, 260}, {4, 5, 300}, {8, 9, 380}, {30, 31, 0}, {60, 41, 0}} {
+		n, m := sternNetz(c.viele)
+		vs := n.Nahe("m", c.viele)
+		if len(vs) != c.viele {
+			t.Fatalf("%d: the net has %d", c.viele, len(vs))
+		}
+		svg := umfeldBild(n, m, vs)
+		r := bildRahmenRe.FindStringSubmatch(svg)
+		if r == nil {
+			t.Fatalf("%d: no frame: %s", c.viele, svg)
+		}
+		x0, y0, b, h, breit := atoi(r[1]), atoi(r[2]), atoi(r[3]), atoi(r[4]), atoi(r[5])
+		if got := strings.Count(svg, "<circle"); got != c.punkte {
+			t.Fatalf("%d: %d points, want %d", c.viele, got, c.punkte)
+		}
+		if c.hoechstensBreit > 0 && breit > c.hoechstensBreit {
+			t.Fatalf("%d people: shown %dpx wide, at most %d", c.viele, breit, c.hoechstensBreit)
+		}
+		if skala := min(float64(breit), 380) / float64(b); skala*10 < 8.5 {
+			t.Fatalf("%d people: a name at %.1fpx on a phone", c.viele, skala*10)
+		}
+		type box struct{ x0, y0, x1, y1 float64 }
+		var bs []box
+		for _, tx := range bildTextRe.FindAllStringSubmatch(svg, -1) {
+			x, y := atof(tx[1]), atof(tx[2])
+			w := float64(len([]rune(tx[4]))) * 5.6
+			x += map[string]float64{"start": w / 2, "end": -w / 2}[tx[3]]
+			bx := box{x - w/2, y - 8, x + w/2, y + 2}
+			if bx.x0 < float64(x0) || bx.x1 > float64(x0+b) || bx.y0 < float64(y0) || bx.y1 > float64(y0+h) {
+				t.Fatalf("%d people: %q outside the frame %v", c.viele, tx[4], r[1:5])
+			}
+			for _, o := range bs {
+				if bx.x0 < o.x1-2 && o.x0 < bx.x1-2 && bx.y0 < o.y1-1 && o.y0 < bx.y1-1 {
+					t.Fatalf("%d people: %q lies on another name", c.viele, tx[4])
+				}
+			}
+			bs = append(bs, bx)
+		}
+	}
+}
+
+func atoi(s string) int { i, _ := strconv.Atoi(s); return i }
+
+func atof(s string) float64 { f, _ := strconv.ParseFloat(s, 64); return f }
