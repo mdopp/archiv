@@ -110,10 +110,16 @@ page says so).
   („✓ aktuell“, what runs, or what needs the person); their details and
   setup are `/tresor/quellen`, open or closed. Closed and new, the page
   opens or makes the vault in the same look.
+- The start: a browser opening `/` (a top-level navigation, no query)
+  goes to `/tresor`, open or closed (owner 2026-11-11). The workplace's
+  one link to msgvault, „Alle Nachrichten (msgvault)“, is `/nachrichten`,
+  which msgvault gets as `/`; the way back is the browser's.
 - Every other path, while open: msgvault's own web UI and API (it lives at
-  the root: absolute asset paths, no frames). The supervisor adds
+  the root: absolute asset paths, no frames; its shell answers every path
+  without an extension, and its state is in the query, so `/?…`, a fetch
+  of `/`, its assets and a bearer still reach it). The supervisor adds
   `X-API-Key` itself; Caddy's headers and Authelia's cookie stay behind.
-  While closed, `/` is the page to open it and other GETs redirect there.
+  While closed, other GETs redirect to `/tresor`.
 - An agent (`/p/<person>/…`, the prefix stripped by Caddy, past Authelia):
   `Authorization: Bearer <msgvault's key>` goes to msgvault unchanged while
   open; while closed, 423 `{"fehler": "Das Archiv ist abgeschlossen. …"}`.

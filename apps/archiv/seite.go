@@ -27,11 +27,14 @@ import (
 // key as a bearer: it goes to msgvault unchanged while the vault is open.
 // Anything else is refused.
 //
-// Paths: the supervisor's own pages live under /tresor. While the vault
-// is open and msgvault answers, every other path is msgvault's own web UI
-// (it wants to be at the root: its assets and API are absolute paths, and
-// it refuses frames), with its key added by the supervisor so the person
-// never sees it. While closed, / is the page to open it.
+// Paths: the supervisor's own pages live under /tresor, and the start (a
+// browser opening / with no query) goes there, open or locked (owner
+// 2026-11-11: the archive's own functions were not to be found). While
+// the vault is open and msgvault answers, every other path is msgvault's
+// own web UI (it wants to be at the root: its assets and API are absolute
+// paths, and it refuses frames), with its key added by the supervisor so
+// the person never sees it. Its entry from the workplace is /nachrichten,
+// which msgvault gets as /.
 
 const proxyHeader = "X-Archiv-Proxy" // the header laib renders for the route's proxySecret
 
@@ -193,11 +196,40 @@ func gleicheHerkunft(r *http.Request) bool {
 
 type schluesselKontext struct{}
 
-// archivOderTuer: msgvault while open and answering, else the way in.
+// msgvaultEingang is the workplace's link to msgvault's own web UI. The
+// proxy hands it to msgvault as /, so msgvault serves its shell; the
+// browser stays at /nachrichten and msgvault's UI keeps that path while
+// it writes its state into the query.
+const msgvaultEingang = "/nachrichten"
+
+// startseite: a browser opening the bare start. Only a top-level
+// navigation to / with no query is the start: msgvault's own links to /
+// carry their state in the query (its search, the workplace's links to
+// it, an OAuth callback), and a fetch or an asset is never a navigation.
+func startseite(r *http.Request) bool {
+	if r.URL.Path != "/" || r.URL.RawQuery != "" || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		return false
+	}
+	if m := r.Header.Get("Sec-Fetch-Mode"); m != "" {
+		return m == "navigate"
+	}
+	return strings.Contains(r.Header.Get("Accept"), "text/html")
+}
+
+// archivOderTuer: the start is the workplace; else msgvault while open
+// and answering, else the way in.
 func (w *Web) archivOderTuer(rw http.ResponseWriter, r *http.Request) {
+	if startseite(r) {
+		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
+		return
+	}
 	st := w.Tresor.Stand()
 	if key := w.Tresor.APIKey(); key != "" {
-		w.Archiv.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), schluesselKontext{}, key)))
+		r = r.WithContext(context.WithValue(r.Context(), schluesselKontext{}, key))
+		if r.URL.Path == msgvaultEingang {
+			r.URL.Path, r.URL.RawPath = "/", ""
+		}
+		w.Archiv.ServeHTTP(rw, r)
 		return
 	}
 	if r.URL.Path == "/" {
@@ -584,6 +616,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		switch {
 		case st.Bereit:
 			b.WriteString(sucheForm(""))
+			b.WriteString(`<p class=weiter-in><a href="` + msgvaultEingang + `">Alle Nachrichten (msgvault)</a></p>`)
 		case st.Fehler != "":
 			fmt.Fprintf(&b, `<div class=achtung role=alert><p>%s</p></div>`, esc(st.Fehler))
 		default:

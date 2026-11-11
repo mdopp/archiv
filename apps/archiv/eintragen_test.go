@@ -345,7 +345,7 @@ func TestArbeitsplatz(t *testing.T) {
 			t.Fatalf("Quellen lacks %q", want)
 		}
 	}
-	if suche := wt.rufe("GET", "/tresor/suche?q=Oma+Hilde", anna, nil).Body.String(); !strings.Contains(suche, `href="/?explore=%7B%22query%22%3A%22Oma+Hilde%22%2C%22schemaVersion%22%3A1%7D&amp;mode=full_text&amp;workspace=everything">In allen Nachrichten nach „Oma Hilde“ suchen`) ||
+	if suche := wt.rufe("GET", "/tresor/suche?q=Oma+Hilde", anna, nil).Body.String(); !strings.Contains(suche, `href="/nachrichten?explore=%7B%22query%22%3A%22Oma+Hilde%22%2C%22schemaVersion%22%3A1%7D&amp;mode=full_text&amp;workspace=everything">In allen Nachrichten nach „Oma Hilde“ suchen`) ||
 		strings.Contains(suche, "Auch „") {
 		t.Fatalf("search:\n%s", suche)
 	}

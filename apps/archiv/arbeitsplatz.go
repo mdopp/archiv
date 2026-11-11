@@ -137,7 +137,7 @@ func sucheForm(q string) string {
 // its state in the address: workspace, mode, explore).
 func msgvaultSuche(q string) string {
 	explore, _ := json.Marshal(map[string]any{"schemaVersion": 1, "query": q})
-	return "/?" + url.Values{"workspace": {"everything"}, "mode": {"full_text"}, "explore": {string(explore)}}.Encode()
+	return msgvaultEingang + "?" + url.Values{"workspace": {"everything"}, "mode": {"full_text"}, "explore": {string(explore)}}.Encode()
 }
 
 // suche is the search's page: the contacts whose name matches (umlauts
