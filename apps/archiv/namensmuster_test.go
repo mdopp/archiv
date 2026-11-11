@@ -27,6 +27,11 @@ func TestImMuster(t *testing.T) {
 		{"mamá de Lucía", "eltern", "Lucía", false},
 		{"Peter via Lena", "", "Lena", true},
 		{"Peter (über Lena Berg)", "", "Lena Berg", true},
+		{"Vater von Wilma Gnielczyk-Jazdzejewski / Jazdzejewski", "eltern", "Wilma Gnielczyk-Jazdzejewski", false},
+		{"Vater von Wilma Gnielczyk-Jazdzejewski/Jazdzejewski", "eltern", "Wilma Gnielczyk-Jazdzejewski", false},
+		{"Papa von Tom Berg Berg", "eltern", "Tom Berg", false},
+		{"Mama von Lena Berg-Groß Groß", "eltern", "Lena Berg-Groß", false},
+		{"Mama von Lena/Tom", "eltern", "Lena|Tom", false},
 	} {
 		m, ok := woerter.imMuster(c.name)
 		if !ok || m.Art != c.art || strings.Join(m.Ziele, "|") != c.ziele || m.Ueber != c.ueber {
@@ -37,6 +42,9 @@ func TestImMuster(t *testing.T) {
 		if m, ok := woerter.imMuster(name); ok {
 			t.Errorf("%q: %+v", name, m)
 		}
+	}
+	if m, _ := woerter.imMuster("Vater von Wilma Gnielczyk-Jazdzejewski / Jazdzejewski"); m.Wort != "Vater" || strings.Join(m.Roh, "|") != "Wilma Gnielczyk-Jazdzejewski / Jazdzejewski" {
+		t.Errorf("word and raw name: %+v", m)
 	}
 	if w, _ := woerter.imNamen("Mama von Lena"); w != "" {
 		t.Fatal("„Mama von Lena“ was asked as the person's Mama")
@@ -93,5 +101,33 @@ func TestNamensmusterImNetz(t *testing.T) {
 	}
 	if n.imBuchBeziehung("privat/s", "name:lena") {
 		t.Fatal("a pattern counted as the phone book's relation")
+	}
+}
+
+// „Vater von Wilma Gnielczyk-Jazdzejewski / Jazdzejewski“ (owner
+// 2026-11-11) makes Wilma Gnielczyk-Jazdzejewski, not „… Jazdzejewski
+// Jazdzejewski“; her id is still the one the doubled name had, so an answer
+// given about her before the fix is hers and now shows her right name.
+func TestNamensmusterSchraegstrich(t *testing.T) {
+	jetzt := time.Date(2026, 11, 11, 16, 15, 0, 0, time.UTC)
+	vater := "Vater von Wilma Gnielczyk-Jazdzejewski / Jazdzejewski"
+	alt := "name:wilmagnielczykjazdzejewskijazdzejewski" // the id the doubled name had
+	st := netzTabelle{Namen: map[string]string{}, Ich: "haushalt/a",
+		Kontakte: []netzKontakt{{Key: "haushalt/a", Name: "Anna Berg"}, {Key: "privat/v", Name: vater}}}
+	antworten := map[string]antwort{paarKey("privat/v", alt): {X: "privat/v", Art: "eltern", Am: jetzt}}
+	n := neuesNetz(st, nil, antworten, time.UTC, func() time.Time { return jetzt })
+	wilma, ok := n.Person(alt)
+	if !ok || wilma.Name != "Wilma Gnielczyk-Jazdzejewski" {
+		t.Fatalf("Wilma: %+v %v", wilma, ok)
+	}
+	if g, da := n.Gegebenes(paarKey("privat/v", alt)); !da || gegebenSatz(g) != vater+" ist Mutter/Vater von Wilma Gnielczyk-Jazdzejewski." {
+		t.Fatalf("the earlier answer: %+v %v", g, da)
+	}
+	a, ok := n.Anlage(alt, "privat/v")
+	if !ok || angelegtSatz(a) != "Wilma Gnielczyk-Jazdzejewski angelegt, Vater: „"+vater+"“" {
+		t.Fatalf("Anlage: %+v %v", a, ok)
+	}
+	if _, ok := n.Anlage("privat/v", "haushalt/a"); ok {
+		t.Fatal("a pair no name made counted as made")
 	}
 }

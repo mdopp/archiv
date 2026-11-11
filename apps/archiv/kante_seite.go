@@ -35,9 +35,29 @@ const (
 	saysKanteZurueck    = "Rückgängig gemacht."
 )
 
+// vonErkannt: the edge page was opened from the suggestions; its Fertig goes back there.
+const vonErkannt = "erkannt"
+
 // kanteAdresse is the edge page of a and b.
 func kanteAdresse(a, b string) string {
 	return kantePfad + "?" + url.Values{"a": {a}, "b": {b}}.Encode()
+}
+
+// kanteVon is the edge page of a and b opened from von (aus=erkannt; else the questions).
+func kanteVon(a, b, von string) string {
+	if von != vonErkannt {
+		return kanteAdresse(a, b)
+	}
+	return kantePfad + "?" + url.Values{"a": {a}, "b": {b}, "aus": {von}}.Encode()
+}
+
+// kanteFertig is the edge page's way on (owner 2026-11-11: „komme nicht
+// mehr weiter“): back to the suggestions it came from, else to the questions.
+func kanteFertig(von string) string {
+	if von == vonErkannt {
+		return fmt.Sprintf(`<p class=weiter-in id=fertig><a href="%s">Fertig, zurück zu Erkannt</a></p>`, erkanntPfad)
+	}
+	return `<p class=weiter-in id=fertig><a href="/tresor?tab=fragen">Fertig, weiter mit den Fragen</a></p>`
 }
 
 // kanteGet is the edge page; with a name instead of an id (von, wer:
@@ -85,7 +105,7 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if q.Get("a") != a || q.Get("b") != b { // found by name: the page's own address
-		http.Redirect(rw, r, kanteAdresse(a, b), http.StatusSeeOther)
+		http.Redirect(rw, r, kanteVon(a, b, q.Get("aus")), http.StatusSeeOther)
 		return
 	}
 	w.kanteSeite(rw, r, http.StatusOK, a, b, meldungen[q.Get("m")], "")
@@ -117,12 +137,14 @@ func (w *Web) kanteSeite(rw http.ResponseWriter, r *http.Request, code int, a, b
 		seite(rw, http.StatusNotFound, "Was verbindet die beiden?", `<p class=ruhig><span class="punkt grau"></span>`+esc(saysKanteWeg)+`</p><p class=weiter-in><a href="/tresor?tab=stammbaum">Zum Stammbaum</a></p>`, "")
 		return
 	}
-	hier := kanteAdresse(p.X.ID, p.Y.ID)
+	von := r.URL.Query().Get("aus")
+	hier := kanteVon(p.X.ID, p.Y.ID, von)
 	var s strings.Builder
 	meldungenText(&s, meldung, fehler)
 	fmt.Fprintf(&s, `<div class=paar><a href="%s">%s<span>%s</span></a><span class=k aria-hidden=true>↔</span><a href="%s">%s<span>%s</span></a></div>`,
 		esc(umfeldMitte(p.X.ID)), gesicht(p.X.Name), esc(n.Anzeige(p.X)), esc(umfeldMitte(p.Y.ID)), gesicht(p.Y.Name), esc(n.Anzeige(p.Y)))
 	w.kanteFrage(&s, n, p, hier, r.URL.Query().Get("pruefen") != "")
+	s.WriteString(kanteFertig(von))
 	s.WriteString(w.toast(n, r.URL.Query().Get("getan"), hier))
 	w.kanteFotos(&s, p)
 	w.kanteNachrichten(&s, r, p)

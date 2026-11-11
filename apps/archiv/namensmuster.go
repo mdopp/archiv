@@ -29,15 +29,21 @@ const (
 )
 
 // namensMuster is what a card's name says: the contact is Art of each of
-// Ziele; Ueber, known through them (no kind).
+// Ziele; Ueber, known through them (no kind). Roh is each name as the card
+// wrote it (alternatives and repeats in it), the made person's id (it was
+// the name before archiv#48, so answers about her stay hers); Wort the
+// card's word for the relation („Vater“).
 type namensMuster struct {
 	Art   string
 	Ziele []string
+	Roh   []string
+	Wort  string
 	Ueber bool
 }
 
-// musterTrenner are the marks a pattern may stand between: „Sabine (Mama von Lena)“.
-var musterTrenner = strings.NewReplacer("(", " ", ")", " ", "[", " ", "]", " ", ",", " ", ";", " ", "/", " ", "|", " ")
+// musterTrenner are the marks a pattern may stand between: „Sabine (Mama
+// von Lena)“; a slash stays a word of its own (zielNamen).
+var musterTrenner = strings.NewReplacer("(", " ", ")", " ", "[", " ", "]", " ", ",", " ", ";", " ", "/", " / ", "|", " ")
 
 // buchstabenWorte are the letter runs of s: „Ex-Freund“ is Ex, Freund.
 func buchstabenWorte(s string) []string {
@@ -68,12 +74,12 @@ func (w *woerterbuch) musterArtenVon(wort string, zuerst bool) []string {
 func (w *woerterbuch) imMuster(name string) (namensMuster, bool) {
 	felder := strings.Fields(musterTrenner.Replace(name))
 	for i := 1; i < len(felder)-1; i++ {
-		ziele := w.zielNamen(felder[i+1:])
+		ziele, roh := w.zielNamen(felder[i+1:])
 		if len(ziele) == 0 {
 			continue
 		}
 		if w.ist(w.ueber, felder[i]) {
-			return namensMuster{Ziele: ziele, Ueber: true}, true
+			return namensMuster{Ziele: ziele, Roh: roh, Ueber: true}, true
 		}
 		if !w.ist(w.von, felder[i]) {
 			continue
@@ -92,37 +98,64 @@ func (w *woerterbuch) imMuster(name string) (namensMuster, bool) {
 		if ex && (art == "freund" || art == "partner") {
 			art = "expartner"
 		}
-		return namensMuster{Art: art, Ziele: ziele}, true
+		return namensMuster{Art: art, Ziele: ziele, Roh: roh, Wort: wort}, true
 	}
 	return namensMuster{}, false
 }
 
 // zielNamen are the names after „von“, split at „und“ („Lena und Tom“),
-// each trimmed of what is no letter or digit at its ends („Lena 🎂“).
-func (w *woerterbuch) zielNamen(felder []string) (out []string) {
-	var jetzt []string
+// each trimmed of what is no letter or digit at its ends („Lena 🎂“), and
+// each as written (roh). „<Vorname> <Nachname> / <Nachname>“: what follows
+// the slash is another family name of the same one, never part of her
+// name (owner 2026-11-11: „Wilma Gnielczyk-Jazdzejewski / Jazdzejewski“
+// is Wilma Gnielczyk-Jazdzejewski); after a given name alone („Lena /
+// Tom“) the slash is an „und“. A word already in the name („… -Jazdzejewski
+// Jazdzejewski“) is not added again.
+func (w *woerterbuch) zielNamen(felder []string) (out, roh []string) {
+	var jetzt, wie []string
+	alt := false
+	rand := func(ws []string) string {
+		return strings.TrimFunc(strings.Join(ws, " "), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+	}
 	fertig := func() {
-		s := strings.TrimFunc(strings.Join(jetzt, " "), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
-		if klar(s) != "" {
-			out = append(out, s)
+		if s := rand(jetzt); klar(s) != "" {
+			out, roh = append(out, s), append(roh, rand(wie))
 		}
-		jetzt = nil
+		jetzt, wie, alt = nil, nil, false
 	}
 	for _, f := range felder {
-		if f == "&" || f == "+" || w.ist(w.und, f) {
+		if f == "&" || f == "+" || w.ist(w.und, f) || f == "/" && len(jetzt) == 1 {
 			fertig()
 			continue
 		}
-		jetzt = append(jetzt, f)
+		wie = append(wie, f)
+		switch {
+		case f == "/":
+			alt = true
+		case !alt && !schonImNamen(jetzt, f):
+			jetzt = append(jetzt, f)
+		}
 	}
 	fertig()
-	return out
+	return out, roh
+}
+
+// schonImNamen: the word w is one of ws already, or a part of one („Jazdzejewski“ in „Gnielczyk-Jazdzejewski“).
+func schonImNamen(ws []string, w string) bool {
+	k := klar(w)
+	if k == "" {
+		return false
+	}
+	return slices.ContainsFunc(ws, func(v string) bool {
+		return klar(v) == k || slices.ContainsFunc(buchstabenWorte(v), func(t string) bool { return klar(t) == k })
+	})
 }
 
 // namensBand is a pattern of a card as the net holds it: Von, the
-// contact's node, is Art of Zu ("" known through Zu); Name the card's.
+// contact's node, is Art of Zu ("" known through Zu); Name the card's,
+// Wort its word for the relation.
 type namensBand struct {
-	Von, Zu, Art, Name string
+	Von, Zu, Art, Name, Wort string
 }
 
 // musterBauen reads the cards' names for patterns and finds or makes the
@@ -144,7 +177,7 @@ func (n *Netz) musterBauen() {
 		if !ok || von == "" {
 			continue
 		}
-		for _, ziel := range m.Ziele {
+		for i, ziel := range m.Ziele {
 			z, id := klar(ziel), ""
 			switch {
 			case len(perName[z]) == 1:
@@ -156,12 +189,12 @@ func (n *Netz) musterBauen() {
 			case !strings.Contains(ziel, " ") && len(perVorname[z]) > 1:
 				continue
 			default:
-				id = "name:" + z
+				id = "name:" + klar(m.Roh[i])
 				n.knoten[id] = Knoten{ID: id, Name: ziel}
 				perName[z] = []string{id}
 			}
 			if id != von {
-				n.musterBaender = append(n.musterBaender, namensBand{Von: von, Zu: id, Art: m.Art, Name: k.Name})
+				n.musterBaender = append(n.musterBaender, namensBand{Von: von, Zu: id, Art: m.Art, Name: k.Name, Wort: m.Wort})
 			}
 		}
 	}
@@ -251,4 +284,49 @@ func (n *Netz) musterVorschlaege() (out [][2]string) {
 		}
 	}
 	return out
+}
+
+// Anlage is a person a card's name made („Wilma“ of „Vater von Wilma“, no
+// card of her own), with the card that names her: confirming the pair
+// makes her and the relation in one tap (owner 2026-11-11: „Das
+// Verhältnis sollte aber direkt da sein“). Wort is the card's word for it.
+type Anlage struct {
+	Neu, Karte Knoten
+	Ich        bool // the card is the person's own
+	Wort       string
+	Art        string // the card's node is Art of Neu
+}
+
+// Anlage is the made person of the pair x, y, if a card's name with a
+// kind made one of them.
+func (n *Netz) Anlage(x, y string) (Anlage, bool) {
+	if n == nil {
+		return Anlage{}, false
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, b := range n.musterBaender {
+		a, z := n.musterEnden(b)
+		if b.Art != "" && strings.HasPrefix(b.Zu, "name:") && paarKey(a, z) == paarKey(x, y) {
+			return Anlage{Neu: n.knoten[z], Karte: n.knoten[a], Ich: a == n.ich, Wort: b.Wort, Art: b.Art}, true
+		}
+	}
+	return Anlage{}, false
+}
+
+// angelegtSatz is the confirmation of an Anlage: „Wilma angelegt, Vater: „Vater von Wilma““.
+func angelegtSatz(a Anlage) string { return a.Neu.Name + " angelegt, " + anlageWer(a) }
+
+// anlageWer is who the card is to the made person: „Vater: „Vater von Wilma““, „Mama: du“.
+func anlageWer(a Anlage) string {
+	karte := "„" + a.Karte.Name + "“"
+	if a.Ich {
+		karte = "du"
+	}
+	wort := a.Wort
+	if wort == "" || a.Art == "expartner" { // „Ex-Freund“'s word is „Freund“
+		wort = kurzWort(a.Art)
+	}
+	r := []rune(wort)
+	return strings.ToUpper(string(r[:1])) + string(r[1:]) + ": " + karte
 }

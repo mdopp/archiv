@@ -86,18 +86,7 @@ func (w *Web) erkanntSeite(rw http.ResponseWriter, r *http.Request, code int, me
 	if len(bs)+len(gs)+len(gebs)+len(hs) == 0 {
 		fmt.Fprintf(&b, `<div class=gut><span class=punkt></span><p>%s</p></div>`, esc(saysErkanntLeer))
 	}
-	if len(bs) > 0 {
-		fmt.Fprintf(&b, `<section class=karte><h2>Beziehungen (%d)</h2><ul>`, len(bs))
-		for _, x := range bs[:min(len(bs), erkanntZeigen)] {
-			kante, nicht := kanteAdresse(x.X.ID, x.Y.ID), ""
-			if x.Quelle == "wir" { // a couple is discarded here; the others by an answer on their question
-				nicht = fmt.Sprintf(`<button formaction="%s/paar" class=leise data-laeuft="Merkt es …">Stimmt nicht</button>`, erkanntPfad)
-			}
-			fmt.Fprintf(&b, `<li class=tu><div>%s<span class=k>%s</span></div><form method=post action="%s" class=knoepfe><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value="%s"><button name=art value="%s" data-laeuft="Trägt ein …">Stimmt</button>%s<a class=k href="%s">Ansehen</a></form></li>`,
-				esc(bezugSatz(x)), esc("Vorschlag, weil "+x.Weil+"."), antwortPfad, esc(x.X.ID), esc(x.Y.ID), esc(kante), esc(x.Art), nicht, esc(kante))
-		}
-		b.WriteString(`</ul></section>`)
-	}
+	bezugAbschnitt(&b, n, bs)
 	if len(gs) > 0 {
 		fmt.Fprintf(&b, `<section class=karte><h2>Gruppen (%d)</h2><ul>`, len(gs))
 		for _, g := range gs[:min(len(gs), erkanntZeigen)] {
@@ -134,6 +123,36 @@ func (w *Web) erkanntSeite(rw http.ResponseWriter, r *http.Request, code int, me
 	b.WriteString(w.toast(n, r.URL.Query().Get("getan"), erkanntPfad))
 	fmt.Fprintf(&b, `<p class=hinweis>%s</p>`, esc(saysErkanntRegel))
 	seite(rw, code, "Erkannt", b.String(), "")
+}
+
+// bezugAbschnitt are the suggested relations, each with one tap; a yes
+// comes back to the list with its toast, never to the edge page (owner
+// 2026-11-11: „komme nicht mehr weiter“).
+func bezugAbschnitt(b *strings.Builder, n *Netz, bs []ErkannterBezug) {
+	if len(bs) == 0 {
+		return
+	}
+	fmt.Fprintf(b, `<section class=karte><h2>Beziehungen (%d)</h2><ul>`, len(bs))
+	for _, x := range bs[:min(len(bs), erkanntZeigen)] {
+		satz, grund, ja, nicht := bezugSatz(x), "Vorschlag, weil "+x.Weil+".", "Stimmt", ""
+		if x.Quelle == "wir" { // a couple is discarded here; the others by an answer on their question
+			nicht = fmt.Sprintf(`<button formaction="%s/paar" class=leise data-laeuft="Merkt es …">Stimmt nicht</button>`, erkanntPfad)
+		}
+		if a, ok := n.Anlage(x.X.ID, x.Y.ID); ok && x.Quelle == "name" { // one tap makes her and the relation
+			satz, grund, ja = a.Neu.Name+" anlegen?", anlageGrund(a), "Anlegen"
+		}
+		fmt.Fprintf(b, `<li class=tu><div>%s<span class=k>%s</span></div><form method=post action="%s" class=knoepfe><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value="%s"><button name=art value="%s" data-laeuft="Trägt ein …">%s</button>%s<a class=k href="%s">Ansehen</a></form></li>`,
+			esc(satz), esc(grund), antwortPfad, esc(x.X.ID), esc(x.Y.ID), erkanntPfad, esc(x.Art), ja, nicht, esc(kanteVon(x.X.ID, x.Y.ID, vonErkannt)))
+	}
+	b.WriteString(`</ul></section>`)
+}
+
+// anlageGrund is the line under „Wilma anlegen?“: „Vater: „Vater von Wilma“ aus deinem Telefonbuch.“
+func anlageGrund(a Anlage) string {
+	if a.Ich {
+		return anlageWer(a) + "."
+	}
+	return anlageWer(a) + " aus deinem Telefonbuch."
 }
 
 // gebGrund is why a birthday is suggested: „3 Glückwünsche, 2023 bis 2025“.

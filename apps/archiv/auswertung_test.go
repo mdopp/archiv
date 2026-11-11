@@ -256,8 +256,12 @@ func TestGruppenTab(t *testing.T) {
 }
 
 // What was recognised: one line under Fragen, leading to the
-// suggestions; a card's name's suggestion confirmed in one tap goes the
-// way of every answer (the edge page and its toast).
+// suggestions; a card's name that makes a person („Mama von Lena“, no
+// Lena in the book) is „Lena anlegen?“, and one tap makes her and the
+// relation and comes back to the list with „Lena angelegt, Mama: …“ and
+// Rückgängig, never to the edge page (owner 2026-11-11: „Das Verhältnis
+// sollte aber direkt da sein“); „Ansehen“ opens the edge page, whose
+// Fertig leads back here.
 func TestErkannt(t *testing.T) {
 	wt, ut, _, innen := eintragenBox(t)
 	tab, err := tabelleLaden(innen)
@@ -274,20 +278,34 @@ func TestErkannt(t *testing.T) {
 		t.Fatalf("the line:\n%s", page)
 	}
 	page = wt.rufe("GET", erkanntPfad, anna, nil).Body.String()
-	for _, want := range []string{"Beziehungen (1)", esc("Mama von Lena ist Mutter/Vater von Lena?"), esc("Vorschlag, weil „Mama von Lena“ im Telefonbuch."), ">Stimmt<", esc(saysErkanntRegel)} {
+	ansehen := kanteVon("privat/s", "name:lena", vonErkannt)
+	for _, want := range []string{"Beziehungen (1)", esc("Lena anlegen?"), esc("Mama: „Mama von Lena“ aus deinem Telefonbuch."), ">Anlegen<",
+		`<input type=hidden name=zurueck value="/tresor/erkannt">`, `href="` + esc(ansehen) + `">Ansehen<`, esc(saysErkanntRegel)} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the page lacks %q:\n%s", want, page)
 		}
 	}
-	rec := wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"privat/s"}, "y": {"name:lena"}, "art": {"eltern"}, "zurueck": {kanteAdresse("privat/s", "name:lena")}})
-	if rec.Code != 303 || !strings.HasPrefix(rec.Header().Get("Location"), kantePfad) {
+	kante := wt.rufe("GET", ansehen, anna, nil).Body.String()
+	if !strings.Contains(kante, `<a href="/tresor/erkannt">Fertig, zurück zu Erkannt</a>`) || !strings.Contains(kante, `name=zurueck value="`+esc(ansehen)+`"`) {
+		t.Fatalf("the edge page has no way back:\n%s", kante)
+	}
+	rec := wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"privat/s"}, "y": {"name:lena"}, "art": {"eltern"}, "zurueck": {erkanntPfad}})
+	if rec.Code != 303 || !strings.HasPrefix(rec.Header().Get("Location"), erkanntPfad+"?") {
 		t.Fatalf("%d %s", rec.Code, rec.Header().Get("Location"))
 	}
 	if g, da := ut.u.Netz().Gegebenes(paarKey("privat/s", "name:lena")); !da || g.Art != "eltern" || g.X.ID != "privat/s" {
 		t.Fatalf("not kept: %+v", g)
 	}
-	if page := wt.rufe("GET", erkanntPfad, anna, nil).Body.String(); !strings.Contains(page, esc(saysErkanntLeer)) {
-		t.Fatalf("still suggested:\n%s", page)
+	ziel, page := wt.folgen(t, rec)
+	if !strings.HasPrefix(ziel, erkanntPfad) || !strings.Contains(page, esc("✓ Lena angelegt, Mama: „Mama von Lena“ · ")) || !strings.Contains(page, ">Rückgängig<") ||
+		!strings.Contains(page, esc(saysErkanntLeer)) {
+		t.Fatalf("not back on the list with the confirmation (%s):\n%s", ziel, page)
+	}
+	// the same yes as a question card goes on with the next question, with the same line
+	wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {paarKey("privat/s", "name:lena")}, "tu": {"vergessen"}, "zurueck": {erkanntPfad}}))
+	ziel, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"privat/s"}, "y": {"name:lena"}, "art": {"eltern"}, "zurueck": {"/tresor"}}))
+	if !strings.HasPrefix(ziel, "/tresor?") || !strings.Contains(page, esc("✓ Lena angelegt, Mama: „Mama von Lena“ · ")) {
+		t.Fatalf("the question's yes (%s):\n%s", ziel, page)
 	}
 }
 
