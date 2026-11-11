@@ -75,12 +75,12 @@ func (w *Web) wohinSatz(u Uebernahme) (punkt, satz string) {
 	return "", "kommt nur auf dein Handy"
 }
 
-// nochZu is the portion's rest, the card's footer: „noch 3 zum Nachbessern“.
+// nochZu is the portion's rest, the card's footer: „noch 3 Fragen“.
 func nochZu(rest int) string {
 	if rest == 1 {
-		return "die letzte zum Nachbessern"
+		return "die letzte Frage"
 	}
-	return fmt.Sprintf("noch %d zum Nachbessern", rest)
+	return fmt.Sprintf("noch %d Fragen", rest)
 }
 
 // frageKarte is the question f as one form: of the visit's portion with
@@ -106,7 +106,7 @@ func (w *Web) frageKarte(n *Netz, f Frage, rest int, mehr bool) string {
 	for _, a := range vorn {
 		b.WriteString(chip(a, kurzWort(a), map[bool]string{true: " vorschlag"}[a == f.Vorschlag]))
 	}
-	b.WriteString(chip(artFremd, "kennen sich nicht", "") + `<details class=mehr><summary>mehr …</summary><div class=chips>`)
+	b.WriteString(chip(artFremd, fremdWort(f.Ich), "") + `<details class=mehr><summary>mehr …</summary><div class=chips>`)
 	for _, a := range arten {
 		if !slices.Contains(vorn, a) {
 			b.WriteString(chip(a, kurzWort(a), ""))
@@ -173,6 +173,15 @@ func gruppenKarte(g GruppenFrage, rest int, mehr bool) string {
 
 func chip(art, text, klasse string) string {
 	return fmt.Sprintf(`<button name=art value=%s class="chip%s" data-laeuft="%s">%s</button>`, art, klasse, esc(text+" …"), esc(text))
+}
+
+// fremdWort is the chip for „no tie at all“, as the person would say it
+// of somebody on their own photos, or of two others.
+func fremdWort(ich bool) string {
+	if ich {
+		return "kenne ich nicht"
+	}
+	return "kennen sich nicht"
 }
 
 // gegebenSatz is an answer as a sentence: „Clara ist Kind von dir.“

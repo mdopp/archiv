@@ -227,7 +227,7 @@ func TestGruppenTab(t *testing.T) {
 	}
 	ut.u.laden(innen)
 	page := wt.rufe("GET", "/tresor?tab=gruppen", anna, nil).Body.String()
-	for _, want := range []string{`aria-current=page>Gruppen`, `<summary>Skatrunde</summary>`, "noch nicht eingeordnet", `name=liste value=1`, `name=eigen`, esc(saysGruppenTab)} {
+	for _, want := range []string{`aria-current=page>Gruppen`, `<summary>Skatrunde<span class=k>noch nicht eingeordnet</span></summary>`, `name=liste value=1`, `name=eigen`, esc(saysGruppenTab)} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("the tab lacks %q:\n%s", want, page)
 		}

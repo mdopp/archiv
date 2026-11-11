@@ -234,8 +234,18 @@ func TestBeziehungDazu(t *testing.T) {
 	if page := wt.rufe("GET", kantePfad+"?a=p-ben&wer=berg", anna, nil).Body.String(); !strings.Contains(page, "Welche Person meinst du?") || !strings.Contains(page, `href="/tresor/kante?a=p-ben&amp;b=p-kim"`) {
 		t.Fatalf("several:\n%s", page)
 	}
-	if page := wt.rufe("GET", kantePfad+"?a=p-ben&wer=Zacharias", anna, nil).Body.String(); !strings.Contains(page, esc(saysKanteNiemand)) || !strings.Contains(page, `name=wer list=namen`) {
-		t.Fatalf("none:\n%s", page)
+	// nobody by that name is no dead end (owner 2026-11-11): the typed name stays in the field, and the
+	// page leads on to the name in the messages and back to the person
+	page := wt.rufe("GET", kantePfad+"?a=p-ben&wer=Zacharias", anna, nil).Body.String()
+	for _, want := range []string{esc(saysKanteNiemand), `<input name=wer list=namen data-namen autocomplete=off required placeholder="Name" value="Zacharias">`,
+		`<a href="` + esc(msgvaultSuche("Zacharias")) + `">In den Nachrichten nach „Zacharias“ suchen</a>`, `<a href="/tresor/umfeld?mitte=p-ben">Zurück zu Ben Berg</a>`} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("none: %q missing:\n%s", want, page)
+		}
+	}
+	// a tap on a suggested name goes on at once where the name is all the form asks
+	if !strings.Contains(page, `class=feld data-weiter>`) || !strings.Contains(skript, "hasAttribute('data-weiter')") {
+		t.Fatalf("„Zu wem?“ does not go on with the tapped name:\n%s", page)
 	}
 	if page := wt.rufe("GET", "/tresor/umfeld?mitte=p-ben", anna, nil).Body.String(); !strings.Contains(page, "+ Beziehung von Ben Berg") || !strings.Contains(page, `<a class=warum-klein href="/tresor/kante?a=p-ben&amp;b=p-anna">`) {
 		t.Fatalf("the person detail:\n%s", page)
@@ -291,7 +301,7 @@ func TestNamenFelder(t *testing.T) {
 		if want := namenListe(wt.w.Umfeld.Netz()); len(wt.w.Umfeld.Netz().Namen()) < 5 || !strings.Contains(page, want) {
 			t.Fatalf("%s: the datalist is not the net's names %s:\n%s", adresse, want, page)
 		}
-		if !strings.Contains(page, `<input name=wer list=namen data-namen autocomplete=off required placeholder="Name">`) || strings.Count(page, "list=namen") != strings.Count(page, "data-namen ") {
+		if !strings.Contains(page, `<input name=wer list=namen data-namen autocomplete=off required placeholder="Name"`) || strings.Count(page, "list=namen") != strings.Count(page, "data-namen ") {
 			t.Fatalf("%s: a name field without namenFeld:\n%s", adresse, page)
 		}
 	}
@@ -302,5 +312,20 @@ func TestNamenFelder(t *testing.T) {
 		if !strings.Contains(skript, want) {
 			t.Fatalf("the script has no %q", want)
 		}
+	}
+}
+
+// The words are the person's (owner 2026-11-11): of somebody on their own
+// photos they say „kenne ich nicht“, of two others „kennen sich nicht“;
+// and a group named in the address („Anders nennen“ → #g-…) opens its row.
+func TestWorteDerPerson(t *testing.T) {
+	wt, _, _, _, _ := kanteBox(t)
+	for adresse, want := range map[string][2]string{kanteAdresse("p-anna", "p-ben"): {">kenne ich nicht<", ">kennen sich nicht<"}, kanteAdresse("p-ben", "p-fritz"): {">kennen sich nicht<", ">kenne ich nicht<"}} {
+		if page := wt.rufe("GET", adresse, anna, nil).Body.String(); !strings.Contains(page, want[0]) || strings.Contains(page, want[1]) {
+			t.Fatalf("%s: want %q, not %q:\n%s", adresse, want[0], want[1], page)
+		}
+	}
+	if !strings.Contains(skript, "location.hash.slice(1)") {
+		t.Fatal("the script opens no row named in the address")
 	}
 }

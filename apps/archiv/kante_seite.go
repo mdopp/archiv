@@ -28,7 +28,7 @@ import (
 const (
 	kantePfad           = "/tresor/kante"
 	saysKanteWeg        = "Diese Verbindung gibt es nicht (mehr): Eine der beiden Personen ist ausgeblendet oder nicht mehr im Umfeld."
-	saysKanteNiemand    = "Niemanden mit diesem Namen gefunden. Versuch es mit dem Vor- oder Nachnamen."
+	saysKanteNiemand    = "Niemanden mit diesem Namen gefunden. Zur Wahl steht, wer in deinen Telefonbüchern steht oder auf deinen Fotos einen Namen hat."
 	saysKanteSichSelbst = "Das ist dieselbe Person. Wähle eine andere."
 	saysKantePruefen    = "Diese Linie passt nicht zu den anderen im Stammbaum (sie ergäbe einen Kreis oder eine andere Generation). Stimmt sie? Ein Tipp bessert sie nach."
 	saysKanteFotosOhne  = "Keine gemeinsamen Fotos."
@@ -85,7 +85,7 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 		ks := n.Finden(s.name)
 		switch len(ks) {
 		case 0:
-			w.kanteWahl(rw, n, a, nil, saysKanteNiemand)
+			w.kanteWahl(rw, n, a, nil, saysKanteNiemand, s.name)
 			return
 		case 1:
 			*s.id = ks[0].ID
@@ -93,7 +93,7 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 			if a == "" {
 				a = n.Ich()
 			}
-			w.kanteWahl(rw, n, a, ks, "")
+			w.kanteWahl(rw, n, a, ks, "", "")
 			return
 		}
 	}
@@ -101,7 +101,7 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 		a = n.Ich()
 	}
 	if a != "" && a == b {
-		w.kanteWahl(rw, n, a, nil, saysKanteSichSelbst)
+		w.kanteWahl(rw, n, a, nil, saysKanteSichSelbst, "")
 		return
 	}
 	if q.Get("a") != a || q.Get("b") != b { // found by name: the page's own address
@@ -112,8 +112,10 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 }
 
 // kanteWahl is „Welche Person meinst du?“: each of ks a link to its edge
-// with a, or (none) the sentence and the form again.
-func (w *Web) kanteWahl(rw http.ResponseWriter, n *Netz, a string, ks []Knoten, fehler string) {
+// with a, or (none) the sentence and the form again, the typed name
+// (gesucht) still in it, with the ways on: the name in the messages, and
+// back to the person the relation was for (owner 2026-11-11: no dead end).
+func (w *Web) kanteWahl(rw http.ResponseWriter, n *Netz, a string, ks []Knoten, fehler, gesucht string) {
 	var b strings.Builder
 	meldungenText(&b, "", fehler)
 	if len(ks) > 0 {
@@ -123,8 +125,13 @@ func (w *Web) kanteWahl(rw http.ResponseWriter, n *Netz, a string, ks []Knoten, 
 		}
 		b.WriteString(`</ul></section>`)
 	}
+	gesucht = strings.TrimSpace(gesucht)
 	if k, ok := n.Person(a); ok {
-		b.WriteString(beziehungDazu(n, k, true))
+		b.WriteString(beziehungDazu(n, k, true, gesucht))
+		if gesucht != "" {
+			fmt.Fprintf(&b, `<p class=weiter-in><a href="%s">In den Nachrichten nach „%s“ suchen</a></p>`, esc(msgvaultSuche(gesucht)), esc(gesucht))
+		}
+		fmt.Fprintf(&b, `<p class=weiter-in><a href="%s">Zurück zu %s</a></p>`, esc(umfeldMitte(k.ID)), esc(map[bool]string{true: "dir", false: k.Name}[k.ID == n.Ich()]))
 	}
 	seite(rw, http.StatusOK, "Beziehung ergänzen", b.String(), "")
 }
@@ -155,7 +162,7 @@ func (w *Web) kanteSeite(rw http.ResponseWriter, r *http.Request, code int, a, b
 		}
 		s.WriteString(`</ul></section>`)
 	}
-	s.WriteString(beziehungDazu(n, p.X, false))
+	s.WriteString(beziehungDazu(n, p.X, false, ""))
 	seite(rw, code, "Was verbindet die beiden?", s.String(), "")
 }
 
@@ -188,7 +195,7 @@ func (w *Web) kanteFrage(s *strings.Builder, n *Netz, p PaarSicht, hier string, 
 	for _, a := range vorn {
 		s.WriteString(chipGewaehlt(a, kurzWort(a), klasse(a)))
 	}
-	s.WriteString(chipGewaehlt(artKeine, "keine Beziehung", klasse(artKeine)) + chipGewaehlt(artFremd, "kennen sich nicht", klasse(artFremd)) +
+	s.WriteString(chipGewaehlt(artKeine, "keine Beziehung", klasse(artKeine)) + chipGewaehlt(artFremd, fremdWort(p.Ich), klasse(artFremd)) +
 		`<details class=mehr><summary>mehr …</summary><div class=chips>`)
 	for _, a := range arten {
 		if !slices.Contains(vorn, a) {
@@ -328,11 +335,13 @@ func nachrichtAdresse(id string) string {
 
 // beziehungDazu is „+ Beziehung“: anyone by name (the browser suggests
 // the net's names; the archive finds umlauts alike), then the edge page
-// of k and that person, where one tap sets the kind. offen: unfolded.
-func beziehungDazu(n *Netz, k Knoten, offen bool) string {
+// of k and that person, where one tap sets the kind. offen: unfolded,
+// wert in the field. A tap on a suggested name goes on at once
+// (data-weiter: the field is all the form asks).
+func beziehungDazu(n *Netz, k Knoten, offen bool, wert string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, `<details class=karte id=dazu%s><summary>+ Beziehung von %s</summary><form method=get action="%s" class=feld><input type=hidden name=a value="%s"><label>Zu wem?%s</label><button>Weiter</button></form>`,
-		offenWenn(offen), esc(map[bool]string{true: "dir", false: k.Name}[k.ID == n.Ich()]), kantePfad, esc(k.ID), namenFeld("wer", ""))
+	fmt.Fprintf(&b, `<details class=karte id=dazu%s><summary>+ Beziehung von %s</summary><form method=get action="%s" class=feld data-weiter><input type=hidden name=a value="%s"><label>Zu wem?%s</label><button>Weiter</button></form>`,
+		offenWenn(offen), esc(map[bool]string{true: "dir", false: k.Name}[k.ID == n.Ich()]), kantePfad, esc(k.ID), namenFeld("wer", wert))
 	b.WriteString(namenListe(n))
 	b.WriteString(`</details>`)
 	return b.String()

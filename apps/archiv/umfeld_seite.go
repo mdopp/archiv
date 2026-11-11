@@ -216,7 +216,7 @@ func (w *Web) umfeldSeiteMit(rw http.ResponseWriter, r *http.Request, code int, 
 	b.WriteString(`</div>`)
 	if n != nil {
 		if jetzt, _ := n.Portion(u.Besuch(false)); len(jetzt) > 0 {
-			fmt.Fprintf(&b, `<p class=weiter-in><a href="/tresor?tab=fragen">%s</a></p>`, esc(anzahl(len(jetzt), "Frage", "Fragen")+" zum Nachbessern"))
+			fmt.Fprintf(&b, `<p class=weiter-in><a href="/tresor?tab=fragen">%s</a></p>`, esc(anzahl(len(jetzt), "offene Frage", "offene Fragen")))
 		}
 		w.antwortenListe(&b, n, "/tresor/umfeld")
 		gruppenListe(&b, n, "/tresor/umfeld")
@@ -246,7 +246,7 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 			b.WriteString(umfeldAktionen(mitte))
 		}
 		if ok {
-			b.WriteString(beziehungDazu(n, k, true))
+			b.WriteString(beziehungDazu(n, k, true, ""))
 		}
 	default:
 		titel := "Steht dir nahe"
@@ -264,7 +264,7 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 		}
 		b.WriteString(umfeldBild(n, k, vs))
 		b.WriteString(umfeldListe(n, k, vs))
-		b.WriteString(beziehungDazu(n, k, false))
+		b.WriteString(beziehungDazu(n, k, false, ""))
 		if len(vs) == zeigen && !mehr {
 			fmt.Fprintf(b, `<p><a href="%s">Mehr zeigen</a></p>`, esc("/tresor/umfeld?"+url.Values{"mitte": {mitte}, "mehr": {"1"}}.Encode()))
 		}
