@@ -58,6 +58,7 @@ type PaarSicht struct {
 	Satz       string            // Gemeinsam in one sentence ("" nothing shared)
 	Kategorie  map[string]string // a shared group's category as the person reads it, by conversation
 	Ausserdem  []string          // what neither a count nor the relation says (Netz.ausserdem)
+	Bekannte   []Knoten          // tied to both, context only (gemeinsameBekannte)
 }
 
 // buchArt is a phone book's relation word as a kind ("" none it knows).
@@ -120,8 +121,39 @@ func (n *Netz) Paar(a, b string) (PaarSicht, bool) {
 	if n.gleicherName(a, b) {
 		p.Ausserdem = append(p.Ausserdem, "gleicher Nachname")
 	}
+	p.Bekannte = n.gemeinsameBekannte(a, b)
 	n.mu.Unlock()
 	return p, true
+}
+
+// gemeinsameBekannte are the shown people tied to both a and b, the
+// strongest pair of ties first (owner 2026-11-11: „Kann das auch durch
+// gemeinsame Freunde kommen?“). No: they are context the pages name,
+// never evidence. bauen never reads them, so they make no tie and
+// strengthen none (TestBekannteSindKeinBeleg). n.mu is held.
+func (n *Netz) gemeinsameBekannte(a, b string) []Knoten {
+	type bekannter struct {
+		k Knoten
+		s float64
+	}
+	var out []bekannter
+	for _, e := range n.kanten[a] {
+		c := andererVon(e, a)
+		if c == b || !n.fragbar(c) {
+			continue
+		}
+		for _, f := range n.kanten[b] {
+			if andererVon(f, b) == c {
+				out = append(out, bekannter{n.knoten[c], e.Staerke + f.Staerke})
+			}
+		}
+	}
+	slices.SortFunc(out, func(x, y bekannter) int { return cmp.Or(cmp.Compare(y.s, x.s), strings.Compare(x.k.Name, y.k.Name)) })
+	ks := make([]Knoten, len(out))
+	for i, x := range out {
+		ks[i] = x.k
+	}
+	return ks
 }
 
 // artZwischen is the kind x is of y now, where it comes from and, for a

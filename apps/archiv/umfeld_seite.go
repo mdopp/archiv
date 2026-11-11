@@ -28,7 +28,7 @@ const (
 	saysUmfeldGespeichert = "Gespeichert. Das Archiv liest jetzt deine Fotos aus Immich und rechnet dein Umfeld; bei vielen Fotos dauert das ein paar Minuten."
 	saysSucheNiemand      = "Niemanden mit diesem Namen gefunden. Zu finden ist, wer in deinen Telefonbüchern steht oder auf deinen Fotos einen Namen hat."
 	saysUmfeldVerbergen   = "Das ließ sich nicht speichern. Versuch es gleich noch einmal."
-	saysUmfeldHinweis     = "Das Archiv zählt, an wie vielen Tagen zwei Menschen zusammen auf deinen Fotos sind; ein Tag an einem Ort zählt einmal, ein großes Gruppenfoto wenig, Altes weniger als Neues. Dazu kommt, was die Telefonbücher sagen: dieselbe Adresse, dieselbe Firma, eine eingetragene Beziehung. „Nicht berechnen“ (bei der Person selbst) nimmt jemanden ganz heraus, etwa Freunde der Kinder. Alles liegt in deinem Tresor; nur du siehst diese Seite, und nur solange dein Archiv offen ist."
+	saysUmfeldHinweis     = "Das Archiv zählt, an wie vielen Tagen zwei Menschen zusammen auf deinen Fotos sind; ein Tag an einem Ort zählt einmal, ein großes Gruppenfoto wenig, Altes weniger als Neues. Dazu kommt, was die Telefonbücher sagen: dieselbe Adresse, eine eingetragene Beziehung. Dieselbe Firma allein verbindet nicht, dann fragt das Archiv nach. Gemeinsame Bekannte nennt es, sie verbinden aber nie. „Nicht berechnen“ (bei der Person selbst) nimmt jemanden ganz heraus, etwa Freunde der Kinder. Alles liegt in deinem Tresor; nur du siehst diese Seite, und nur solange dein Archiv offen ist."
 )
 
 // umfeldKarte is the card on the open vault page.
@@ -409,8 +409,8 @@ func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
 	if z := p.Gemeinsam.Zuletzt; !z.IsZero() {
 		teile = append(teile, "zuletzt gemeinsam am "+z.In(cmp.Or(n.Loc, time.Local)).Format("02.01.2006"))
 	}
-	fmt.Fprintf(b, `<p class=ist>%s</p><p class=summe>%s</p><p><a class=weiter href="%s">%s</a></p></section>`, esc(strings.Join(teile, " · ")),
-		esc(cmp.Or(p.Satz, saysKanteNichts)), esc(kanteAdresse(k.ID, n.Ich())), weiter)
+	fmt.Fprintf(b, `<p class=ist>%s</p><p class=summe>%s</p>%s<p><a class=weiter href="%s">%s</a></p></section>`, esc(strings.Join(teile, " · ")),
+		esc(cmp.Or(p.Satz, saysKanteNichts)), bekannteZeile(n, p.Bekannte), esc(kanteAdresse(k.ID, n.Ich())), weiter)
 }
 
 // umfeldListe is the ranked list: each row the person and the tie in one

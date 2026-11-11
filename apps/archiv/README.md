@@ -714,10 +714,18 @@ inside the open vault; closed, there is no net, not even in memory.
   halved every 4 years, plus 0.15 per year they meet in; the rank divides
   by how often both appear at all (hub); a tie from photos alone shows
   from two days on. The phone books add the same address (1.5, groups up
-  to 12), the same company (0.4, up to 30) and a relation (3): vCard 4
+  to 12), the same company (0.4, on up to 8 people's cards, never a
+  placeholder like „Privat“) and a relation (3): vCard 4
   `RELATED`, iOS `X-ABRELATEDNAMES` with its `X-ABLabel`, Android
   `X-ANDROID-CUSTOM` relation rows. A contact is the Immich person of the
-  same name (Homes keeps them named alike).
+  same name (Homes keeps them named alike). A shared company alone is no
+  tie (owner 2026-11-11): it is the last kind of question, „Kennen sich
+  X und Y? (Beide Karten nennen die Firma …)“, Ja a tie the person stated
+  (never written to an address book), Nein never asked again. Every
+  phone-book reason says its value („Gleiche Adresse auf beiden Karten:
+  Mühlenweg 4“, „Max Langs Karte nennt Ute Lang als Schwester“).
+  Shared acquaintances („Gemeinsame Bekannte: …“ on the edge and person
+  pages) are context only: they never make or strengthen a tie.
 - **Kept in the vault**: `/run/tresor/umfeld/netz.json` (format
   `archiv-umfeld`, version 1: the photos' ids, times, places and persons,
   the names and Immich's birthdays, the contacts with their family name,

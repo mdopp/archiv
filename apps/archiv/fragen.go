@@ -48,7 +48,12 @@ const (
 	artKeine   = "keine"
 	artFremd   = "fremd"
 	artSpaeter = "spaeter"
+	// artKennen: „Ja“ to „Kennen sich X und Y?“ (kennenFragen): a tie the
+	// person stated, no kind, never written to an address book
+	artKennen = "kennen"
 )
+
+const saysKennenGesagt = "kennen sich (von dir angegeben)"
 
 // arten are the kinds a question offers, in its order; „X ist <Art> von Y“.
 var arten = []string{"partner", "expartner", "eltern", "kind", "geschwister", "grosseltern", "enkel", "onkel", "neffe", "cousin",
@@ -116,7 +121,10 @@ type Frage struct {
 	Vorschlag, Weil      string
 	Abgeleitet, Konflikt bool
 	Gruppe               *GruppenFrage
-	regel                int
+	// Kennen: no kind but „Kennen sich X und Y?“, Ja or Nein: only both
+	// cards' company (Weil) says they might (owner 2026-11-11)
+	Kennen bool
+	regel  int
 }
 
 // key is the question's: the pair's, or the group's.
@@ -178,13 +186,18 @@ func (n *Netz) gesagtDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
 			delete(alle, p)
 		}
 		_, dx := n.knoten[x]
-		if _, dy := n.knoten[y]; !dx || !dy || nicht[x] || nicht[y] || !slices.Contains(arten, a.Art) {
+		if _, dy := n.knoten[y]; !dx || !dy || nicht[x] || nicht[y] || !slices.Contains(arten, a.Art) && a.Art != artKennen {
 			continue
 		}
 		k := alle[p]
 		if k == nil {
 			k = &Kante{A: p[0], B: p[1]}
 			alle[p] = k
+		}
+		if a.Art == artKennen {
+			k.Staerke, k.Rang = k.Staerke+festGewicht[bandKennen], k.Rang+festGewicht[bandKennen]
+			k.Fest = append(k.Fest, festBand{A: y, B: x, Art: bandKennen, Gesagt: true})
+			continue
 		}
 		if !slices.ContainsFunc(k.Fest, func(f festBand) bool { return f.Art == bandBeziehung }) {
 			k.Staerke, k.Rang = k.Staerke+festGewicht[bandBeziehung], k.Rang+festGewicht[bandBeziehung]
@@ -195,6 +208,9 @@ func (n *Netz) gesagtDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
 
 // gesagtGrund is an answer as a reason seen from mitte: „Kind (von dir angegeben)“.
 func gesagtGrund(mitte string, f festBand) string {
+	if f.Art == bandKennen {
+		return saysKennenGesagt
+	}
 	art := f.Wie
 	if f.A != mitte {
 		art = cmp.Or(gegen[art], art)
@@ -376,6 +392,7 @@ func (n *Netz) offen() (out []Frage) {
 			fragen(p[0], p[1], n.kanteZwischen(p[0], p[1]), true)
 		}
 	}
+	out = append(out, n.kennenFragen(gesehen, offenesPaar)...)
 	out = append(out, n.gruppenFragen()...)
 	spaeter := func(f Frage) int {
 		art := n.antworten[f.key()].Art
@@ -389,6 +406,8 @@ func (n *Netz) offen() (out []Frage) {
 	}
 	gruppe := func(f Frage) int {
 		switch {
+		case f.Kennen:
+			return 5 // only a company says it: after everything else
 		case f.Ich:
 			return 0
 		case f.Gruppe == nil && kreis[f.X.ID] && kreis[f.Y.ID] && n.gleicherName(f.X.ID, f.Y.ID) && f.Kante.Tage >= freundTage:
@@ -425,7 +444,36 @@ func (n *Netz) kanteZwischen(x, y string) Kante {
 			return *k
 		}
 	}
-	return Kante{A: min(x, y), B: max(x, y), Gruppen: n.paarGruppen[paarKey(x, y)]}
+	k := Kante{A: min(x, y), B: max(x, y), Gruppen: n.paarGruppen[paarKey(x, y)]}
+	if org := n.firmen[paarKey(x, y)]; org != "" { // no tie, but „Warum?“ says the company
+		k.Fest = []festBand{{A: x, B: y, Art: bandFirma, Wie: org}}
+	}
+	return k
+}
+
+// kennenFragen are „Kennen sich X und Y?“: the pairs whose cards name one
+// company and nothing else ties (owner 2026-11-11: a shared company alone
+// is no tie), not asked yet (gesehen, offen); Ja makes the tie (artKennen),
+// Nein (Fremd) takes the pair out for good. n.mu is held.
+func (n *Netz) kennenFragen(gesehen map[string]bool, offen func(a, b string) bool) (out []Frage) {
+	for _, key := range slices.Sorted(maps.Keys(n.firmen)) {
+		x, y, _ := strings.Cut(key, "|")
+		if gesehen[key] || !offen(x, y) || n.hatKante(x, y) {
+			continue
+		}
+		gesehen[key] = true
+		if x == n.ich {
+			x, y = y, x
+		}
+		out = append(out, Frage{X: n.knoten[x], Y: n.knoten[y], Ich: y == n.ich, Kante: n.kanteZwischen(x, y), Kennen: true,
+			Weil: "Beide Karten nennen die Firma " + n.firmen[key]})
+	}
+	return out
+}
+
+// hatKante: x and y have a tie; n.mu is held.
+func (n *Netz) hatKante(x, y string) bool {
+	return slices.ContainsFunc(n.kanten[x], func(k *Kante) bool { return andererVon(k, x) == y })
 }
 
 // gruppenZeit orders group questions, the newest first; 0 for a pair.
@@ -485,7 +533,8 @@ func (n *Netz) vorschlag(x, y string, k *Kante) (string, string) {
 	case fest(bandAdresse) && jahre >= 0 && jahre < 12:
 		return "partner", "gleiche Adresse, " + abstand
 	case fest(bandFirma):
-		return "kollege", "gleiche Firma"
+		i := slices.IndexFunc(k.Fest, func(f festBand) bool { return f.Art == bandFirma })
+		return "kollege", strings.TrimSpace("beide Karten nennen die Firma " + n.firmaVon(k.Fest[i]))
 	case gArt != "":
 		return gArt, gWeil
 	case !fest(bandAdresse) && slices.ContainsFunc(mx.strassen, func(s string) bool { return slices.Contains(my.strassen, s) }):
@@ -531,7 +580,7 @@ func familienArt(jahre float64, aelter bool, jetzt, gx, gy time.Time) string {
 
 // gueltig: art is an answer one may give.
 func gueltig(art string) bool {
-	return art == artKeine || art == artFremd || art == artSpaeter || slices.Contains(arten, art)
+	return art == artKeine || art == artFremd || art == artSpaeter || art == artKennen || slices.Contains(arten, art)
 }
 
 // Beantworten keeps the person's answer about x and y: a kind (x is that

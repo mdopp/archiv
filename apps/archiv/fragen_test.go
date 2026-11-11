@@ -24,23 +24,27 @@ func fragenVon(fs []Frage) (out []string) {
 // books (Fritz is Anna's sibling, Anna Ben's partner: Fritz is Ben's
 // Schwager); then the family circle (Fritz, Anna's sibling; Kim and Ben
 // with her name). None where a phone book names a relation (Anna–Ben,
-// Anna–Fritz), none about a hidden person, and none for Carla: the same
-// firm as Anna, so they know each other — a reason, no question.
+// Anna–Fritz), none about a hidden person. Carla only shares Anna's
+// firm: no tie (owner 2026-11-11), but, last, „Kennst du Carla Wolf?“,
+// with the firm as its reason.
 func TestFragenOhneBeziehung(t *testing.T) {
 	ut := netzBox(t)
 	n := ut.u.Netz()
 	fs := n.Fragen()
-	if got := fragenVon(fs); !slices.Equal(got, []string{"Kim Berg>Anna Berg=", "Fritz Kurz>Ben Berg=schwager", "Fritz Kurz>Kim Berg=", "Ben Berg>Kim Berg="}) {
+	if got := fragenVon(fs); !slices.Equal(got, []string{"Kim Berg>Anna Berg=", "Fritz Kurz>Ben Berg=schwager", "Fritz Kurz>Kim Berg=", "Ben Berg>Kim Berg=", "Carla Wolf>Anna Berg="}) {
 		t.Fatalf("the questions: %v", got)
 	}
 	if !fs[1].Abgeleitet || fs[1].Weil != "du und Fritz Kurz Geschwister seid und du und Ben Berg Partner seid" || fs[0].Abgeleitet || !fs[0].Ich || fs[1].Ich || fs[2].Ich {
 		t.Fatalf("%+v", fs)
 	}
-	if carla := n.Von("haushalt/c"); !slices.ContainsFunc(n.Nahe("p-anna", 10), func(v Verbindung) bool { return v.Mit.ID == carla }) {
-		t.Fatal("Carla is no question, but still close")
+	if !fs[4].Kennen || !fs[4].Ich || fs[4].Weil != "Beide Karten nennen die Firma Werk AG" || fs[0].Kennen { // last: only a firm says it
+		t.Fatalf("carla: %+v", fs[4])
+	}
+	if carla := n.Von("haushalt/c"); slices.ContainsFunc(n.Nahe("p-anna", 10), func(v Verbindung) bool { return v.Mit.ID == carla }) {
+		t.Fatal("a firm alone is no tie")
 	}
 	ut.u.Verbergen(ut.innen, "p-kim", verbergenAus)
-	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Fritz Kurz>Ben Berg=schwager"}) {
+	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Fritz Kurz>Ben Berg=schwager", "Carla Wolf>Anna Berg="}) {
 		t.Fatalf("kim hidden: %v", got)
 	}
 }
@@ -66,7 +70,7 @@ func TestBeantworten(t *testing.T) {
 	if d := n.Gefolgerte(paarKey("p-anna", "p-kim")); len(d) != 1 || gegebenSatz(d[0]) != "Fritz Kurz ist Onkel/Tante von Kim Berg." {
 		t.Fatalf("followed: %+v", d)
 	}
-	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Ben Berg>Kim Berg=eltern", "Fritz Kurz>Ben Berg=schwager"}) {
+	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Ben Berg>Kim Berg=eltern", "Fritz Kurz>Ben Berg=schwager", "Carla Wolf>Anna Berg="}) {
 		t.Fatalf("after the first answer: %v", got)
 	}
 	if _, err := u.Beantworten(ut.innen, "p-kim", "p-ben", artKeine); err != nil {
@@ -78,8 +82,8 @@ func TestBeantworten(t *testing.T) {
 	if _, err := u.Beantworten(ut.innen, "p-gerd", "p-anna", "freund"); err != errFrageWeg {
 		t.Fatalf("gerd, one day only: %v", err)
 	}
-	if _, err := u.Beantworten(ut.innen, n.Von("haushalt/c"), "p-anna", "kollege"); err != errFrageWeg {
-		t.Fatalf("carla, they know each other: %v", err)
+	if _, err := u.Beantworten(ut.innen, n.Von("haushalt/c"), "p-anna", artFremd); err != nil {
+		t.Fatalf("carla, Nein: %v", err)
 	}
 	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Fritz Kurz>Ben Berg=schwager"}) {
 		t.Fatalf("after the answers: %v", got)
@@ -97,7 +101,7 @@ func TestBeantworten(t *testing.T) {
 	for _, m := range []*Netz{u.Netz(), again.Netz()} {
 		nahe := m.Nahe("p-kim", 10)
 		i := slices.IndexFunc(nahe, func(v Verbindung) bool { return v.Mit.ID == "p-anna" })
-		if got := fragenVon(m.Fragen()); len(got) != 1 || i < 0 || !strings.Contains(m.Gruende("p-kim", nahe[i].Kante), "Mutter/Vater (von dir angegeben)") ||
+		if got := fragenVon(m.Fragen()); len(got) != 1 || slices.ContainsFunc(m.Nahe("p-anna", 10), func(v Verbindung) bool { return v.Mit.ID == m.Von("haushalt/c") }) || i < 0 || !strings.Contains(m.Gruende("p-kim", nahe[i].Kante), "Mutter/Vater (von dir angegeben)") ||
 			len(m.Gefolgerte(paarKey("p-anna", "p-kim"))) != 1 {
 			t.Fatalf("kept: %v", got)
 		}
@@ -246,7 +250,7 @@ func wertNetz() *Netz {
 		st.Kontakte = append(st.Kontakte, c)
 	}
 	st.Fest = []festBand{{A: "h/ida", B: "h/udo", Art: bandBeziehung, Wie: beziehungsWort("Ehemann")}, {A: "h/udo", B: "h/mia", Art: bandBeziehung, Wie: beziehungsWort("Tochter")},
-		{A: "h/kai", B: "h/lea", Art: bandFirma}, {A: "h/vera", B: "h/tim", Art: bandAdresse}}
+		{A: "h/kai", B: "h/lea", Art: bandFirma, Wie: "Kern & Haas GmbH"}, {A: "h/vera", B: "h/tim", Art: bandAdresse}}
 	n := neuesNetz(st, nil, nil, time.UTC, func() time.Time { return time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC) })
 	band(n, "h/ida", "h/olaf", 6)
 	band(n, "h/phil", "h/lukas", 29)
@@ -259,16 +263,16 @@ func wertNetz() *Netz {
 // Only what has value (owner 2026-11-11): the person's family first (Mia,
 // whom Udo's card names his daughter, derived; Rolf and Wilma by their
 // names, without a tie), then the family circle among themselves, then
-// two others of one name with a tie. Photos, chats, a firm, a street
-// alone are „kennen sich“: Olaf, Phil–Lukas, Kai–Lea, Nora–Emil are no
-// question, and still a tie; Hans–Gabi has one photo day, too weak to
-// be a tie at all.
+// two others of one name with a tie. Photos, chats, a street alone are
+// „kennen sich“: Olaf, Phil–Lukas, Nora–Emil are no question, and still a
+// tie; Hans–Gabi has one photo day, too weak to be a tie at all. Kai–Lea
+// share only a firm: no tie, the last question, „Kennen sich …?“.
 func TestFragenNurFamilie(t *testing.T) {
 	n := wertNetz()
 	want := []string{
 		"Mia Wehr>Ida Roth=kind", "Rolf Roth>Ida Roth=", "Wilma Wehr>Ida Roth=",
 		"Mia Wehr>Rolf Roth=", "Mia Wehr>Wilma Wehr=", "Rolf Roth>Udo Wehr=", "Rolf Roth>Wilma Wehr=", "Udo Wehr>Wilma Wehr=",
-		"Nina Sand>Tom Sand=", "Tim Stein>Vera Stein=verwandt",
+		"Nina Sand>Tom Sand=", "Tim Stein>Vera Stein=verwandt", "Kai Kern>Lea Haas=",
 	}
 	if got := fragenVon(n.Fragen()); !slices.Equal(got, want) {
 		t.Fatalf("\n got %q\nwant %q", got, want)
@@ -276,7 +280,7 @@ func TestFragenNurFamilie(t *testing.T) {
 	if !slices.ContainsFunc(n.Nahe("h/phil", 5), func(v Verbindung) bool { return v.Mit.ID == "h/lukas" }) {
 		t.Fatal("Phil and Lukas know each other: still a tie")
 	}
-	if (&Kante{Tage: 1}).belegt() || !(&Kante{Tage: 2}).belegt() || !(&Kante{Fest: []festBand{{Art: bandFirma}}}).belegt() || !(&Kante{Chats: 1, Faeden: 1}).belegt() {
+	if (&Kante{Tage: 1}).belegt() || !(&Kante{Tage: 2}).belegt() || (&Kante{Fest: []festBand{{Art: bandFirma}}}).belegt() || !(&Kante{Fest: []festBand{{Art: bandAdresse}}}).belegt() || !(&Kante{Chats: 1, Faeden: 1}).belegt() {
 		t.Fatal("belegt: the threshold of a tie")
 	}
 }

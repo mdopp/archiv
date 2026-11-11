@@ -109,10 +109,10 @@ func TestEinTipp(t *testing.T) {
 	wt, _, homes, innen := eintragenBox(t)
 
 	page := wt.rufe("GET", "/tresor", anna, nil).Body.String()
-	for _, want := range []string{`<h1>Dein Archiv</h1>`, `action="/tresor/abschliessen"`, `action="/tresor/suche"`, `aria-current=page>Fragen <span class=anzahl>4</span>`,
+	for _, want := range []string{`<h1>Dein Archiv</h1>`, `action="/tresor/abschliessen"`, `action="/tresor/suche"`, `aria-current=page>Fragen <span class=anzahl>5</span>`,
 		`href="/tresor?tab=nahe"`, `href="/tresor?tab=stammbaum"`, `class="frage sofort"`, "Kim Berg ist für dich …", `name=art value=fremd class="chip"`,
 		"kenne ich nicht", "<summary>mehr …</summary>", `name=art value=expartner`, "kommt nur auf dein Handy",
-		"Später", "noch 4 Fragen", `<a class=quellen id=quellen-zeile data-live href="/tresor/quellen">`} {
+		"Später", "noch 5 Fragen", `<a class=quellen id=quellen-zeile data-live href="/tresor/quellen">`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}
@@ -126,7 +126,7 @@ func TestEinTipp(t *testing.T) {
 	if !strings.HasPrefix(ziel, "/tresor?") || !strings.Contains(ziel, "tab=fragen") ||
 		!strings.Contains(page, "✓ Kim Berg ist Kind von dir · eingetragen, kommt auf dein Handy · daraus: weil du und Fritz Kurz Geschwister seid und Kim Berg dein Kind ist, ist Fritz Kurz Onkel/Tante von Kim Berg") ||
 		!strings.Contains(page, `<button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button>`) || !strings.Contains(page, "Ben Berg ist für Kim Berg …") ||
-		!strings.Contains(page, "<span class=anzahl>2</span>") || !strings.Contains(page, "bleibt in deinem Archiv: Kim Berg steht in keinem Adressbuch, nur auf deinen Fotos") {
+		!strings.Contains(page, "<span class=anzahl>3</span>") || !strings.Contains(page, "bleibt in deinem Archiv: Kim Berg steht in keinem Adressbuch, nur auf deinen Fotos") {
 		t.Fatalf("after the tap: %s\n%s", ziel, page)
 	}
 	ps := homes.genommen()
@@ -147,7 +147,7 @@ func TestEinTipp(t *testing.T) {
 		!slices.ContainsFunc(ps[2:], func(p uebernahmePaket) bool { return p.Zeilen[0] == ps[1].Zeilen[0] }) {
 		t.Fatalf("Rückgängig at Homes: %+v", ps)
 	}
-	if !strings.Contains(page, "Rückgängig gemacht. Die Frage kommt wieder.") || !strings.Contains(page, "<span class=anzahl>4</span>") {
+	if !strings.Contains(page, "Rückgängig gemacht. Die Frage kommt wieder.") || !strings.Contains(page, "<span class=anzahl>5</span>") {
 		t.Fatalf("after Rückgängig: %s\n%s", ziel, page)
 	}
 	if b, _ := os.ReadFile(innen.umfeldAntworten()); strings.Contains(string(b), "kind") || strings.Contains(string(b), "onkel") {
@@ -156,7 +156,7 @@ func TestEinTipp(t *testing.T) {
 
 	// Später: nothing to Homes, the question waits behind the portion, the next comes
 	ziel, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"spaeter"}, "zurueck": {"/tresor"}}))
-	if ziel != "/tresor?tab=fragen" || !strings.Contains(page, "Fritz Kurz ist für Ben Berg …") || !strings.Contains(page, "<span class=anzahl>3</span>") || strings.Contains(page, "Kim Berg ist für") ||
+	if ziel != "/tresor?tab=fragen" || !strings.Contains(page, "Fritz Kurz ist für Ben Berg …") || !strings.Contains(page, "<span class=anzahl>4</span>") || strings.Contains(page, "Kim Berg ist für") ||
 		!strings.Contains(page, "Vorschlag, weil du und Fritz Kurz Geschwister seid und du und Ben Berg Partner seid.") {
 		t.Fatalf("Später: %s\n%s", ziel, page)
 	}
@@ -167,10 +167,21 @@ func TestEinTipp(t *testing.T) {
 
 	// kennen sich nicht, keine Beziehung: nothing to Homes; the portion is done, calmly, and nothing counts on
 	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-fritz"}, "y": {"p-kim"}, "art": {"fremd"}, "zurueck": {"/tresor"}}))
-	if !strings.Contains(page, "✓ Fritz Kurz und Kim Berg kennen sich nicht · gemerkt") || !strings.Contains(page, "die letzte Frage") {
+	if !strings.Contains(page, "✓ Fritz Kurz und Kim Berg kennen sich nicht · gemerkt") || !strings.Contains(page, "noch 2 Fragen") {
 		t.Fatalf("fremd:\n%s", page)
 	}
 	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-ben"}, "y": {"p-kim"}, "art": {"keine"}, "zurueck": {"/tresor"}}))
+	// last, what only a firm says (owner 2026-11-11): „Kennst du Carla Wolf?“, Ja or Nein, never to Homes
+	for _, want := range []string{"<h2>Kennst du Carla Wolf?</h2><p class=k>(Beide Karten nennen die Firma Werk AG)</p>", `<button name=art value=kennen class="chip vorschlag" data-laeuft="Ja …">Ja</button>`,
+		`<button name=art value=fremd class="chip" data-laeuft="Nein …">Nein</button>`, esc(saysKennenBleibt), "die letzte Frage"} {
+		if !strings.Contains(page, want) {
+			t.Fatalf("kennen %q missing:\n%s", want, page)
+		}
+	}
+	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"haushalt/c"}, "y": {"p-anna"}, "art": {"kennen"}, "zurueck": {"/tresor"}}))
+	if !strings.Contains(page, "✓ Du kennst Carla Wolf · gemerkt") || len(homes.genommen()) != 5 {
+		t.Fatalf("Ja: %d\n%s", len(homes.genommen()), page)
+	}
 	if !strings.Contains(page, esc(saysNachgebessert)) || !strings.Contains(page, `<a class=leise href="/tresor?tab=fragen&amp;mehr=1">weitere Fragen</a>`) ||
 		strings.Contains(page, "class=anzahl") || strings.Contains(page, `class="frage sofort"`) {
 		t.Fatalf("the portion done:\n%s", page)
@@ -190,7 +201,7 @@ func TestEinTipp(t *testing.T) {
 	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "zurueck": {"/tresor"}}); rec.Code != 400 || !strings.Contains(rec.Body.String(), esc(saysFrageOhneWahl)) {
 		t.Fatalf("no chip: %d", rec.Code)
 	}
-	for _, x := range []string{"p-gerd", "haushalt/c"} { // one photo day; the same firm only: they know each other, no question
+	for _, x := range []string{"p-gerd", "haushalt/c"} { // one photo day; Carla answered
 		if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"x": {x}, "y": {"p-anna"}, "art": {"keine"}}); rec.Code != 409 {
 			t.Fatalf("%s not asked: %d", x, rec.Code)
 		}
@@ -216,11 +227,11 @@ func TestBesuch(t *testing.T) {
 	wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"spaeter"}, "zurueck": {"/tresor"}}))
 	*ut.jetzt = ut.jetzt.Add(time.Minute)
 	for _, hdr := range []map[string]string{anna, innen} {
-		if page := wt.rufe("GET", "/tresor?tab=fragen", hdr, nil).Body.String(); !strings.Contains(page, "<span class=anzahl>3</span>") || strings.Contains(page, "Kim Berg ist für dich") {
+		if page := wt.rufe("GET", "/tresor?tab=fragen", hdr, nil).Body.String(); !strings.Contains(page, "<span class=anzahl>4</span>") || strings.Contains(page, "Kim Berg ist für dich") {
 			t.Fatalf("the same visit:\n%s", page)
 		}
 	}
-	if page := wt.rufe("GET", "/tresor", draussen, nil).Body.String(); !strings.Contains(page, "<span class=anzahl>4</span>") || !strings.Contains(page, "noch 4 Fragen") {
+	if page := wt.rufe("GET", "/tresor", draussen, nil).Body.String(); !strings.Contains(page, "<span class=anzahl>5</span>") || !strings.Contains(page, "noch 5 Fragen") {
 		t.Fatalf("a new visit:\n%s", page)
 	}
 	u := &Umfeld{Now: func() time.Time { return *ut.jetzt }}
@@ -253,7 +264,7 @@ func TestEinTippOhneHomes(t *testing.T) {
 	umfeld := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
 	nachtrag := strings.Index(umfeld, "2 Antworten noch nicht eingetragen ·</span><button name=tu value=alle-eintragen")
 	falte := strings.Index(umfeld, "<details id=antworten class=karte><summary>Deine Antworten (2)</summary>")
-	if nachtrag < 0 || falte < 0 || nachtrag > falte || strings.Contains(umfeld, "<details id=antworten class=karte open") || !strings.Contains(umfeld, "2 offene Fragen") {
+	if nachtrag < 0 || falte < 0 || nachtrag > falte || strings.Contains(umfeld, "<details id=antworten class=karte open") || !strings.Contains(umfeld, "3 offene Fragen") {
 		t.Fatalf("Deine Antworten folded, the retry one line outside (owner 2026-11-11):\n%s", umfeld)
 	}
 	if strings.Contains(umfeld, "value=eintragen") || strings.Count(umfeld, "noch nicht eingetragen") != 3 { // the line and the two answers' state inside the fold

@@ -38,9 +38,17 @@ const (
 	bandAdresse   = "adresse"
 	bandFirma     = "firma"
 	bandBeziehung = "beziehung"
+	bandKennen    = "kennen" // the person said the two know each other (fragen.go, artKennen)
 )
 
-var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandBeziehung: 3, bandName: 1, bandUeber: 0.5}
+var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandBeziehung: 3, bandName: 1, bandUeber: 0.5, bandKennen: 1}
+
+// firmenPlatzhalter are ORG values that say nothing about whom one knows
+// (klar): no tie, no question, no reason.
+var firmenPlatzhalter = map[string]bool{"privat": true, "private": true, "keine": true, "kein": true, "none": true, "na": true, "nv": true,
+	"selbststaendig": true, "selbstaendig": true, "freiberuflich": true, "freelancer": true, "student": true, "studentin": true,
+	"schueler": true, "schuelerin": true, "rentner": true, "rentnerin": true, "home": true, "zuhause": true, "familie": true,
+	"family": true, "arbeit": true, "work": true, "firma": true, "company": true, "unbekannt": true, "unknown": true}
 
 // Hiding: Aus is not shown and restorable; Nicht is taken out of the
 // photos before any tie is computed.
@@ -128,8 +136,10 @@ type Kante struct {
 
 // belegt: the tie has the evidence a tie needs to show at all: two photo
 // days, something a phone book or the person says, or two conversations.
+// A shared company alone is none (owner 2026-11-11): it is a question
+// (fragen.go, kennenFragen), never a tie.
 func (k *Kante) belegt() bool {
-	return k.Tage >= netzMinTage || len(k.Fest) > 0 || k.Chats+k.Faeden >= gespraecheMin
+	return k.Tage >= netzMinTage || slices.ContainsFunc(k.Fest, func(f festBand) bool { return f.Art != bandFirma }) || k.Chats+k.Faeden >= gespraecheMin
 }
 
 // Netz is the person's contact net, built from a table.
@@ -185,6 +195,9 @@ type Netz struct {
 	musterBaender []namensBand
 	// angelegt are the persons made by hand, by id (angelegt.go)
 	angelegt map[string]handPerson
+	// firmen are the pairs whose cards name one company, by paarKey: its
+	// ORG as written; a placeholder or one on many cards left out (festDazu)
+	firmen map[string]string
 }
 
 // neuesNetz builds the net of st with the hidden ones and the answers.
@@ -271,6 +284,7 @@ func (n *Netz) bauen() {
 	n.musterDazu(alle, nicht)
 	n.gespraecheDazu(alle, nicht)
 	n.gesagtDazu(alle, nicht)
+	maps.DeleteFunc(alle, func(_ [2]string, k *Kante) bool { return !k.belegt() }) // a company alone, perhaps with one chat
 	n.merkmaleBauen()
 	n.suchBauen()
 	for _, k := range alle {
@@ -331,11 +345,29 @@ func ort(f netzFoto) string {
 
 // festDazu adds the phone books' ties to alle, between the contacts'
 // nodes, those in nicht left out; the same tie twice (both books) once.
+// A company that says nothing (firmaAllgemein) is left out; the others
+// are kept in firmen, for the questions.
 func (n *Netz) festDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
+	n.firmen = map[string]string{}
+	karten := map[string]map[string]bool{} // the people (nodes) each company is on the cards of
+	for _, k := range n.st.Kontakte {
+		if o := klar(k.Firma); o != "" {
+			if karten[o] == nil {
+				karten[o] = map[string]bool{}
+			}
+			karten[o][n.von[k.Key]] = true
+		}
+	}
 	for _, f := range n.st.Fest {
 		a, b := n.von[f.A], n.von[f.B]
 		if a == "" || b == "" || a == b || nicht[a] || nicht[b] {
 			continue
+		}
+		if f.Art == bandFirma {
+			if f.Wie = n.firmaVon(f); firmaAllgemein(f.Wie, karten) {
+				continue
+			}
+			n.firmen[paarKey(a, b)] = f.Wie
 		}
 		key := [2]string{min(a, b), max(a, b)}
 		k := alle[key]
@@ -351,6 +383,27 @@ func (n *Netz) festDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
 		}
 		k.Fest = append(k.Fest, f)
 	}
+}
+
+// firmaVon is the company a firm band names: its own (Wie), else, from a
+// table read before it kept one, A's card's ORG; n.mu is held.
+func (n *Netz) firmaVon(f festBand) string {
+	if f.Wie != "" {
+		return f.Wie
+	}
+	for _, k := range n.st.Kontakte {
+		if k.Key == f.A {
+			return k.Firma
+		}
+	}
+	return ""
+}
+
+// firmaAllgemein: org links no two people in particular: a placeholder,
+// or on the cards of more than maxFirma people (karten, by klar ORG).
+func firmaAllgemein(org string, karten map[string]map[string]bool) bool {
+	o := klar(org)
+	return o == "" || firmenPlatzhalter[o] || len(karten[o]) > maxFirma
 }
 
 // selbstBauen finds the nodes that are the person (selbst); n.mu is held or n is new.
@@ -535,6 +588,8 @@ func (n *Netz) Kurz(mitte string, k Kante) string {
 	var out []string
 	if slices.Contains(arten, art) {
 		out = append(out, kurzWort(art))
+	} else if art == artKennen {
+		out = append(out, saysKennenGesagt)
 	}
 	gs := n.gruende(mitte, k, art, 1)
 	return strings.Join(append(out, gs[:min(kurzTeile, len(gs))]...), " · ")
@@ -564,24 +619,53 @@ func (n *Netz) ausserdem(mitte string, k Kante, art string) []string {
 		if a := buchArt(f.Wie); art != "" && (f.Gesagt || f.Art == bandBeziehung && a != "" && (a == art || gegen[a] == art)) {
 			continue
 		}
-		switch {
-		case f.Gesagt:
-			out = append(out, gesagtGrund(mitte, f))
-		case f.Art == bandName || f.Art == bandUeber:
-			out = append(out, "„"+f.Wie+"“ im Telefonbuch")
-		case f.Art == bandAdresse:
-			out = append(out, "gleiche Adresse")
-		case f.Art == bandFirma:
-			out = append(out, "gleiche Firma")
-		case f.Wie == "":
-			out = append(out, "im Telefonbuch verknüpft")
-		case n.von[f.A] == mitte:
-			out = append(out, f.Wie+" (Telefonbuch)")
-		default:
-			out = append(out, f.Wie+" von "+n.knoten[n.von[f.A]].Name+" (Telefonbuch)")
+		if g := n.buchGrund(mitte, f); !slices.Contains(out, g) {
+			out = append(out, g)
 		}
 	}
 	return out
+}
+
+// buchGrund is what a phone book (or the person) says of a tie, as a
+// sentence with its value (owner 2026-11-11: „Warum wurde Horst eine
+// Beziehung zu Christian attestiert?“): which company, which street,
+// which card's name, which card's relation. n.mu is held.
+func (n *Netz) buchGrund(mitte string, f festBand) string {
+	switch {
+	case f.Gesagt:
+		return gesagtGrund(mitte, f)
+	case f.Art == bandName || f.Art == bandUeber: // A and B are nodes; A's card's name says it
+		wer := n.knoten[f.A].Name
+		if klar(wer) == klar(f.Wie) {
+			return "Der Kontaktname sagt: „" + f.Wie + "“"
+		}
+		return n.wessen(f.A, "Dein", "Kontaktname") + " sagt: „" + f.Wie + "“"
+	case f.Art == bandAdresse && f.Wie != "":
+		return "Gleiche Adresse auf beiden Karten: " + f.Wie
+	case f.Art == bandAdresse:
+		return "Gleiche Adresse auf beiden Karten"
+	case f.Art == bandFirma:
+		return strings.TrimSpace("Beide Kontaktkarten nennen die Firma " + n.firmaVon(f))
+	}
+	a, b := n.von[f.A], n.von[f.B] // a relation: A's card names B
+	satz := n.wessen(a, "Deine", "Karte") + " nennt " + map[bool]string{true: "dich", false: n.knoten[b].Name}[b == n.ich]
+	if f.Wie != "" {
+		satz += " als " + f.Wie
+	}
+	return satz
+}
+
+// wessen is „Horsts Karte“, „Hans’ Karte“, or with dein „Deine Karte“
+// for the person's: the node id's thing; n.mu is held.
+func (n *Netz) wessen(id, dein, was string) string {
+	if id == n.ich {
+		return dein + " " + was
+	}
+	name := n.knoten[id].Name
+	if slices.ContainsFunc([]string{"s", "x", "z", "ß"}, func(e string) bool { return strings.HasSuffix(strings.ToLower(name), e) }) {
+		return name + "’ " + was
+	}
+	return name + "s " + was
 }
 
 // anzahlT is anzahl with the thousands point.

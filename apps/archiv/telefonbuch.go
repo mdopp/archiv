@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ import (
 // Groups larger than these are no tie (a block of flats, a big firm).
 const (
 	maxAdresse = 12
-	maxFirma   = 30
+	maxFirma   = 8 // a company on more cards is no sign two know each other (owner 2026-11-11)
 )
 
 // buchKarte is a card read: its key, name, what ties it, its relations
@@ -29,6 +30,7 @@ type buchKarte struct {
 	name     string
 	firma    string   // ORG's first part, as written
 	adressen []string // each ADR: street and code, else the whole line
+	adrText  []string // each ADR as a page says it: the street as written, else the whole line
 	emails   []string
 	tels     []string
 	rel      [][2]string
@@ -215,10 +217,11 @@ func karteAus(buch string, zeilen []vcardZeile) (buchKarte, bool) {
 			if a == "" {
 				continue
 			}
+			text := a
 			if strings.TrimSpace(p[2]) != "" {
-				a = strings.TrimSpace(p[2]) + strings.TrimSpace(p[5])
+				a, text = strings.TrimSpace(p[2])+strings.TrimSpace(p[5]), joinSome(" ", p[2])
 			}
-			k.adressen = append(k.adressen, a)
+			k.adressen, k.adrText = append(k.adressen, a), append(k.adrText, text)
 		case "EMAIL":
 			if v = strings.TrimSpace(strings.TrimPrefix(v, "mailto:")); v != "" {
 				k.emails = append(k.emails, v)
@@ -326,28 +329,32 @@ func relationen(zeilen []vcardZeile) (out [][2]string) {
 	return out
 }
 
-// gruppen are the ties of the same address and the same company.
+// gruppen are the ties of the same address and the same company, each
+// with its value as the first card wrote it (Wie: the street, the ORG),
+// so a page can say which (owner 2026-11-11).
 func gruppen(ks []buchKarte) (out []festBand) {
-	adr, firma := map[string][]string{}, map[string][]string{}
+	adr, firma, wie := map[string][]string{}, map[string][]string{}, map[string]string{}
 	for _, k := range ks {
-		for _, a := range k.adressen {
+		for i, a := range k.adressen {
 			if a = klar(a); a != "" {
 				adr[a] = append(adr[a], k.key)
+				wie[bandAdresse+a] = cmp.Or(wie[bandAdresse+a], k.adrText[i])
 			}
 		}
 		if f := klar(k.firma); f != "" {
 			firma[f] = append(firma[f], k.key)
+			wie[bandFirma+f] = cmp.Or(wie[bandFirma+f], k.firma)
 		}
 	}
 	for art, m := range map[string]map[string][]string{bandAdresse: adr, bandFirma: firma} {
 		grenze := map[string]int{bandAdresse: maxAdresse, bandFirma: maxFirma}[art]
-		for _, keys := range m {
+		for wert, keys := range m {
 			if len(keys) > grenze {
 				continue
 			}
 			for i, a := range keys {
 				for _, b := range keys[i+1:] {
-					out = append(out, festBand{A: a, B: b, Art: art})
+					out = append(out, festBand{A: a, B: b, Art: art, Wie: wie[art+wert]})
 				}
 			}
 		}
