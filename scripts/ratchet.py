@@ -51,12 +51,23 @@ and ruff's version are pinned here). ruff runs from a venv of its own
 Production means: not a _test.go or test_*.py file, not testdata/ or tests/,
 not a fake package. Neither a go.mod nor a ruff.toml: an error, never a
 green run that checked nothing.
+
+Mutation — a repo that lists Go packages in scripts/ratchet/mutation.pkgs
+(one directory per line) asks whether their tests bite (laib#1167):
+gremlins (GREMLINS, pinned) changes one condition, operator or constant at a
+time and runs the package's own tests. A mutant they do not notice
+survives: "lived" (the tests ran the line and stayed green) or
+"not-covered" (no test of the package runs it). A finding is a survivor's
+file, kind, mutator and the mutated line's text, the number how many. It
+takes minutes, so it runs only when named (`scripts/ratchet.py mutation`):
+in CI when a pull request touches those packages, and nightly.
 """
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -73,6 +84,8 @@ COGNIT_OVER = 30
 RUFF = "0.17.3"
 RUFF_SELECT = "E4,E7,E9,F,B"
 MCCABE_OVER = 10
+GREMLINS = "github.com/go-gremlins/gremlins/cmd/gremlins@v0.6.0"
+SURVIVED = {"LIVED": "lived", "NOT COVERED": "not-covered"}
 
 
 def run(args, ok=(0,), stdin=None, cwd=None):
@@ -212,10 +225,40 @@ def complexity():
     return found
 
 
+def mutation_pkgs():
+    p = ROOT / "scripts" / "ratchet" / "mutation.pkgs"
+    if not p.exists():
+        return []
+    return [line.strip().rstrip("/") for line in p.read_text().splitlines() if line.strip() and not line.startswith("#")]
+
+
+def mutation():
+    found = Counter()
+    for pkg in mutation_pkgs():
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d, "gremlins.json")
+            # -count=1: gremlins times each mutant against its coverage run, and a
+            # cached run takes no time, which times every slow mutant out
+            run(["env", "GOFLAGS=-count=1", "go", "run", GREMLINS, "unleash", "--silent", "--timeout-coefficient", "10",
+                 "-o", str(out), f"./{pkg}"])
+            result = json.loads(out.read_text())
+        if not result.get("files"):
+            sys.exit(f"mutation: gremlins found nothing to mutate in {pkg}")
+        for f in result["files"]:
+            path = f"{pkg}/{f['file_name']}"
+            src = (ROOT / path).read_text().splitlines()
+            for m in f["mutations"]:
+                if m["status"] in SURVIVED:
+                    found[f"{path}: {SURVIVED[m['status']]} {m['type']}: {src[m['line'] - 1].strip()}"] += 1
+    return found
+
+
 GO = {"deadcode": deadcode, "staticcheck": staticcheck, "dupl": dupl, "gocognit": gocognit}
 PYTHON = {"ruff": ruff, "complexity": complexity}
+ON_REQUEST = {"mutation": mutation}  # minutes, not seconds: run only when named
 TOOLS = None  # what the repo is (found()); the tests set their own
-UNIT = {"gocognit": "functions over %d, the number is the score" % COGNIT_OVER,
+UNIT = {"mutation": "surviving mutants, the number is how many on that line's text",
+        "gocognit": "functions over %d, the number is the score" % COGNIT_OVER,
         "complexity": "functions over %d, the number is the McCabe score" % MCCABE_OVER,
         "dupl": "file pairs, the number is the cloned fragments of %d tokens or more" % DUPL_TOKENS}
 
@@ -226,6 +269,8 @@ def found():
         tools.update(GO)
     if (ROOT / "ruff.toml").exists():
         tools.update(PYTHON)
+    if tools and mutation_pkgs():
+        tools.update(ON_REQUEST)
     if not tools:
         sys.exit("ratchet: neither a go.mod nor a ruff.toml at the root, nothing to check")
     return tools
@@ -262,7 +307,7 @@ def compare(base, now):
 def main(argv):
     update, accept = "--update" in argv, "--accept" in argv
     tools = TOOLS if TOOLS is not None else found()
-    pick = [a for a in argv if not a.startswith("--")] or list(tools)
+    pick = [a for a in argv if not a.startswith("--")] or [t for t in tools if t not in ON_REQUEST]
     unknown = [t for t in pick if t not in tools]
     if unknown:
         sys.exit(f"ratchet: no tool {', '.join(unknown)} for this repo; it has {', '.join(tools)}")
