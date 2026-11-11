@@ -425,8 +425,8 @@ func stammbaumTab(b *strings.Builder, n *Netz) {
 		}
 		b.WriteString(`</ul></section>`)
 	}
-	fmt.Fprintf(b, `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary><form method=get action="%s" class=feld><label>Wer?<input name=von list=namen autocomplete=off required placeholder="Name" value="Du"></label><label>Zu wem?<input name=wer list=namen autocomplete=off required placeholder="Name"></label><button>Weiter</button></form>%s</details>`,
-		kantePfad, namenListe(n))
+	fmt.Fprintf(b, `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary><form method=get action="%s" class=feld><label>Wer?%s</label><label>Zu wem?%s</label><button>Weiter</button></form>%s</details>`,
+		kantePfad, namenFeld("von", "Du"), namenFeld("wer", ""), namenListe(n))
 }
 
 // baumPaar is a line's two names: „Anna Berg und Ben Berg“.

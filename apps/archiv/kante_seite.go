@@ -309,14 +309,28 @@ func nachrichtAdresse(id string) string {
 // of k and that person, where one tap sets the kind. offen: unfolded.
 func beziehungDazu(n *Netz, k Knoten, offen bool) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, `<details class=karte id=dazu%s><summary>+ Beziehung von %s</summary><form method=get action="%s" class=feld><input type=hidden name=a value="%s"><label>Zu wem?<input name=wer list=namen autocomplete=off required placeholder="Name"></label><button>Weiter</button></form>`,
-		offenWenn(offen), esc(map[bool]string{true: "dir", false: k.Name}[k.ID == n.Ich()]), kantePfad, esc(k.ID))
+	fmt.Fprintf(&b, `<details class=karte id=dazu%s><summary>+ Beziehung von %s</summary><form method=get action="%s" class=feld><input type=hidden name=a value="%s"><label>Zu wem?%s</label><button>Weiter</button></form>`,
+		offenWenn(offen), esc(map[bool]string{true: "dir", false: k.Name}[k.ID == n.Ich()]), kantePfad, esc(k.ID), namenFeld("wer", ""))
 	b.WriteString(namenListe(n))
 	b.WriteString(`</details>`)
 	return b.String()
 }
 
-// namenListe is the datalist of the net's names.
+// namenFeld is a field for one of the net's names. The page's script
+// shows the names that match under it while typing, as rows to tap
+// (Android Chrome shows a datalist's suggestions only now and then,
+// owner 2026-11-11); without script the browser offers namenListe, and
+// the edge page finds the name on the server either way (Netz.Finden).
+func namenFeld(name, wert string) string {
+	v := ""
+	if wert != "" {
+		v = ` value="` + esc(wert) + `"`
+	}
+	return `<input name=` + name + ` list=namen data-namen autocomplete=off required placeholder="Name"` + v + `>`
+}
+
+// namenListe is the datalist of the net's names, once per page: the
+// suggestions namenFeld's script and the browser read.
 func namenListe(n *Netz) string {
 	var b strings.Builder
 	b.WriteString(`<datalist id=namen>`)

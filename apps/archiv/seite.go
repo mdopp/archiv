@@ -1056,8 +1056,30 @@ func seite(rw http.ResponseWriter, code int, titel, body, extra string) {
 // typing in waits for the next change. The Stammbaum's box scrolls „Du“
 // into the middle. The page in front of msgvault
 // while it starts (data-bis-bereit) asks /tresor/stand and goes on once
-// msgvault answers.
+// msgvault answers. A name field (namenFeld) shows up to six of the
+// datalist's names that hold every typed word, umlauts alike (klar and
+// flach, as Netz.Finden), as rows under it; a tap fills the field. The
+// field then drops its list, so the browser's own suggestions do not
+// cover the rows.
 const skript = `<script>
+(function(){
+function klar(s){s=s.toLowerCase().replace(/ä/g,'ae').replace(/ö/g,'oe').replace(/ü/g,'ue').replace(/ß/g,'ss').replace(/&/g,'und');try{s=s.normalize('NFD').replace(/[\u0300-\u036f]/g,'')}catch(e){}return s.replace(/[^\p{L}\p{N}]/gu,'')}
+function flach(s){s=s.toLowerCase().replace(/ß/g,'ss');try{s=s.normalize('NFD').replace(/[\u0300-\u036f]/g,'')}catch(e){}return s.replace(/[^\p{L}\p{N}]/gu,'')}
+function hat(name,w){return klar(name).indexOf(klar(w))>=0||flach(name).indexOf(flach(w))>=0}
+function feld(i){if(!i||!i.matches||!i.matches('input[data-namen]'))return null;if(i.hasAttribute('list')){i.dataset.liste=i.getAttribute('list');i.removeAttribute('list')}return i}
+function zeilen(i){var u=i.vorschlaege;if(u&&u.isConnected)return u;u=document.createElement('ul');u.className='vorschlaege';u.hidden=true;(i.closest('label')||i).after(u);i.vorschlaege=u;
+u.addEventListener('mousedown',function(e){e.preventDefault()});
+u.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;i.value=b.textContent;u.hidden=true;i.focus()});return u}
+function zeigen(i){var u=zeilen(i),d=document.getElementById(i.dataset.liste||'namen'),q=i.value,ws=q.split(/\s+/).filter(function(w){return klar(w)||flach(w)}),vorn=[],sonst=[];
+u.textContent='';if(!d||!ws.length){u.hidden=true;return}
+[].forEach.call(d.options,function(o){var n=o.value;if(!n||n===q||!ws.every(function(w){return hat(n,w)}))return;(n.split(/\s+/).some(function(t){return klar(t).indexOf(klar(ws[0]))===0})?vorn:sonst).push(n)});
+vorn.concat(sonst).slice(0,6).forEach(function(n){var l=document.createElement('li'),b=document.createElement('button');b.type='button';b.textContent=n;l.appendChild(b);u.appendChild(l)});u.hidden=!u.firstChild}
+document.addEventListener('DOMContentLoaded',function(){[].forEach.call(document.querySelectorAll('input[data-namen]'),feld)});
+document.addEventListener('focusin',function(e){feld(e.target)});
+document.addEventListener('input',function(e){var i=feld(e.target);if(i)zeigen(i)});
+document.addEventListener('keydown',function(e){var i=feld(e.target);if(i&&e.key==='Escape'&&i.vorschlaege)i.vorschlaege.hidden=true});
+document.addEventListener('focusout',function(e){var i=feld(e.target);if(!i||!i.vorschlaege)return;var u=i.vorschlaege;setTimeout(function(){if(document.activeElement!==i&&!u.contains(document.activeElement))u.hidden=true},150)});
+})();
 document.addEventListener('submit',function(e){var b=e.submitter||e.target.querySelector('button');if(!b||!b.dataset.laeuft)return;setTimeout(function(){b.textContent=b.dataset.laeuft;b.disabled=true;b.setAttribute('aria-busy','true')},0)});
 document.addEventListener('submit',function(e){var f=e.target,s=e.submitter;if(!f.classList.contains('sofort')||f.dataset.ohne||!window.fetch||!window.DOMParser||!window.URLSearchParams)return;e.preventDefault();
 var d=new FormData(f);if(s&&s.name)d.append(s.name,s.value);
@@ -1125,6 +1147,7 @@ a.zurueck{text-decoration:none;font-weight:600;min-height:44px;display:inline-fl
 button{font:inherit;font-size:.9rem;font-weight:600;color:var(--accent);background:var(--accent-soft);border:0;border-radius:999px;padding:0 16px;min-height:44px;cursor:pointer}
 button.voll{background:var(--accent);color:#fff}button.leise,button.k{background:none;color:var(--muted);font-weight:400;text-decoration:underline;padding:0 8px}
 button[disabled],button[aria-busy=true]{opacity:.6;cursor:progress}
+.vorschlaege{list-style:none;margin:4px 0 0;padding:4px;background:var(--panel);border:1px solid var(--edge);border-radius:12px}.vorschlaege[hidden]{display:none}.vorschlaege button{display:block;width:100%;text-align:left;color:var(--ink);background:none;font-size:1rem;font-weight:400;border-radius:8px;padding:0 10px}.vorschlaege button:hover,.vorschlaege button:focus{background:var(--accent-soft)}
 input,select{display:block;width:100%;max-width:100%;font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--edge);border-radius:12px;padding:0 14px;min-height:44px;margin-top:4px}
 input[type=checkbox]{display:inline;width:auto;min-height:0;margin:.3rem 0 0}
 form{margin:12px 0}.feld label{display:block;margin:10px 0;font-size:.95rem}.haken{display:flex!important;gap:.5rem;align-items:flex-start}
