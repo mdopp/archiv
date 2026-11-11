@@ -1,10 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -215,5 +218,71 @@ func TestKanteWenigerMitMehr(t *testing.T) {
 	nahe := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
 	if !strings.Contains(nahe, `>Ben Berg <span class=k>Partner/in · 3 Tage auf deinen Fotos seit 2019 · in 6 Gruppen-Chats · 80 Mails zusammen</span></a></li>`) || strings.Contains(nahe, "Was verbindet die beiden?") {
 		t.Fatalf("the row:\n%s", nahe)
+	}
+}
+
+// A phone book's nickname finds the person (owner 2026-11-11): NICKNAME is
+// a list (an escaped comma stays in its name), each name once; the round
+// keeps them in the vault's table, the search finds by them and says
+// „auch: Hasi“, and the person's page says them discreetly. A table kept
+// before nicknames were read has none and still loads.
+func TestSpitzname(t *testing.T) {
+	k := kartenLesen("privat/", karteMit("s", "Sabine Lang", "NICKNAME:Bine,Hasi\\, mein Schatz\r\nNICKNAME:bine,Sabine Lang\r\n"))
+	if len(k) != 1 || strings.Join(k[0].spitz, "|") != "Bine|Hasi, mein Schatz|Sabine Lang" {
+		t.Fatalf("NICKNAME read: %+v", k)
+	}
+
+	wt, ut, _, innen, _ := kanteBox(t)
+	tab, err := tabelleLaden(innen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.IndexFunc(tab.Kontakte, func(c netzKontakt) bool { return c.Key == "haushalt/b" }); i < 0 || !slices.Equal(tab.Kontakte[i].Spitz, []string{"Hasi"}) {
+		t.Fatalf("the round did not keep Ben's nickname: %+v", tab.Kontakte)
+	}
+	if roh, _ := os.ReadFile(innen.umfeldTabelle()); !strings.Contains(string(roh), `"sp":["Hasi"]`) {
+		t.Fatal("the nickname is not in the vault's table")
+	}
+	n := ut.u.Netz()
+	if ts, _ := n.Suchen("has", sucheHoechstens); len(ts) != 1 || ts[0].ID != "p-ben" || ts[0].Als != "Hasi" || !ts[0].Spitz {
+		t.Fatalf("hasi finds %+v", ts)
+	}
+	if ts, _ := n.Suchen("ben", sucheHoechstens); len(ts) != 1 || ts[0].Als != "" || ts[0].Spitz {
+		t.Fatalf("ben finds %+v", ts)
+	}
+	if rec := wt.rufe("GET", "/tresor/umfeld?suche=Hasi", anna, nil); rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != umfeldMitte("p-ben") {
+		t.Fatalf("Hasi: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+	if page := wt.rufe("GET", umfeldMitte("p-ben"), anna, nil).Body.String(); !strings.Contains(page, `<h2>Ben Berg</h2></div><p class="k auch">auch: Hasi</p>`) {
+		t.Fatalf("Ben's page does not say his nickname:\n%s", page)
+	}
+	var b strings.Builder
+	personenZeilen(&b, n, []Treffer{{Knoten: n.knoten["p-ben"], Als: "Hasi", Spitz: true}})
+	if !strings.Contains(b.String(), `<span class=k>auch: Hasi · Partner/in`) {
+		t.Fatalf("the row: %s", b.String())
+	}
+
+	// a table kept before: no "sp"; it loads, nobody has a nickname, nothing else changes
+	var alt map[string]any
+	roh, _ := os.ReadFile(innen.umfeldTabelle())
+	if err := json.Unmarshal(roh, &alt); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range alt["kontakte"].([]any) {
+		delete(c.(map[string]any), "sp")
+	}
+	if err := jsonImTresor(innen.umfeldTabelle(), alt); err != nil {
+		t.Fatal(err)
+	}
+	ut.u.laden(innen)
+	n = ut.u.Netz()
+	if ts, _ := n.Suchen("hasi", sucheHoechstens); len(ts) != 0 || len(n.Spitznamen("p-ben")) != 0 {
+		t.Fatalf("an old table has a nickname: %+v", ts)
+	}
+	if ts, _ := n.Suchen("Ben", sucheHoechstens); len(ts) != 1 || ts[0].ID != "p-ben" {
+		t.Fatalf("an old table: Ben is %+v", ts)
+	}
+	if page := wt.rufe("GET", umfeldMitte("p-ben"), anna, nil).Body.String(); strings.Contains(page, "auch:") || !strings.Contains(page, "<h2>Ben Berg</h2>") {
+		t.Fatalf("an old table's page:\n%s", page)
 	}
 }

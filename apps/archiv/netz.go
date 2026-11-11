@@ -72,6 +72,9 @@ type netzKontakt struct {
 	Strassen []string `json:"s,omitempty"`
 	Mails    []string `json:"m,omitempty"` // to find a LinkedIn connection's card (sozial.go)
 	Firma    string   `json:"o,omitempty"` // ORG: no employer is suggested (herkunft.go)
+	// Spitz are the card's NICKNAMEs („Hasi“): the person search finds by
+	// them and the person's page says them. A round kept before has none.
+	Spitz []string `json:"sp,omitempty"`
 }
 
 // festBand is a phone-book tie between two contacts' keys; for a

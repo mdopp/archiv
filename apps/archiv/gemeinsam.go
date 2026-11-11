@@ -101,6 +101,7 @@ func zeitraum(von, bis, jetzt time.Time) string {
 // as the page's script compares while typing).
 type suchName struct {
 	name, klar, flach string
+	spitz             bool        // a phone book's NICKNAME
 	woerter           [][2]string // each word, klar and flach
 }
 
@@ -110,11 +111,12 @@ func beides(s string) [2]string { return [2]string{klar(s), klar(flach(s))} }
 
 // suchBauen collects the names every node is found by: its own and each
 // of its cards' (a phone book's „Papa“ or „Ben Arbeit“ for the Immich
-// person Ben Berg); the person's other selves count as her. n.mu is held
+// person Ben Berg) and their nicknames („Hasi“, owner 2026-11-11); the
+// person's other selves count as her. n.mu is held
 // or n is new.
 func (n *Netz) suchBauen() {
 	n.such = map[string][]suchName{}
-	dazu := func(id, name string) {
+	dazu := func(id, name string, spitz bool) {
 		if n.selbst[id] {
 			id = n.ich
 		}
@@ -122,7 +124,7 @@ func (n *Netz) suchBauen() {
 		if k[0] == "" || slices.ContainsFunc(n.such[id], func(s suchName) bool { return s.klar == k[0] }) {
 			return
 		}
-		s := suchName{name: name, klar: k[0], flach: k[1]}
+		s := suchName{name: name, klar: k[0], flach: k[1], spitz: spitz}
 		for _, w := range strings.Fields(name) {
 			if w := beides(w); w[0] != "" {
 				s.woerter = append(s.woerter, w)
@@ -131,21 +133,29 @@ func (n *Netz) suchBauen() {
 		n.such[id] = append(n.such[id], s)
 	}
 	for id, k := range n.knoten {
-		dazu(id, k.Name)
+		dazu(id, k.Name, false)
 	}
 	for _, k := range n.st.Kontakte {
 		if id := n.von[k.Key]; id != "" {
-			dazu(id, k.Name)
+			dazu(id, k.Name, false)
+		}
+	}
+	for _, k := range n.st.Kontakte {
+		if id := n.von[k.Key]; id != "" {
+			for _, s := range k.Spitz {
+				dazu(id, s, true)
+			}
 		}
 	}
 }
 
 // Treffer is a person a search found: Als the name it was found by when
-// that is not the one shown (a phone book's), Genau when a name is
-// exactly what was typed.
+// that is not the one shown (a phone book's, Spitz: a nickname), Genau
+// when a name is exactly what was typed.
 type Treffer struct {
 	Knoten
 	Als   string
+	Spitz bool
 	Genau bool
 }
 
@@ -190,7 +200,7 @@ func (n *Netz) Suchen(q string, hoechstens int) (out []Treffer, mehr bool) {
 		f := fund{rang: 3}
 		for _, s := range namen {
 			if r := s.rang(ws, ganz); r < f.rang {
-				f.rang, f.Als = r, s.name
+				f.rang, f.Als, f.Spitz = r, s.name, s.spitz
 			}
 		}
 		if f.rang == 3 {
@@ -198,7 +208,7 @@ func (n *Netz) Suchen(q string, hoechstens int) (out []Treffer, mehr bool) {
 		}
 		f.Knoten, f.Genau = n.knoten[id], f.rang == 0
 		if f.Als == f.Name {
-			f.Als = ""
+			f.Als, f.Spitz = "", false
 		}
 		fs = append(fs, f)
 	}
@@ -241,4 +251,17 @@ func (n *Netz) KanteMit(a, b string) Kante {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.kanteZwischen(a, b)
+}
+
+// Spitznamen are the nicknames id's cards give („Hasi“), each once and
+// none that is its name; the person's other selves' count as hers.
+func (n *Netz) Spitznamen(id string) (out []string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, s := range n.such[id] {
+		if s.spitz && s.klar != klar(n.knoten[id].Name) {
+			out = append(out, s.name)
+		}
+	}
+	return out
 }
