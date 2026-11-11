@@ -69,6 +69,7 @@ type netzKontakt struct {
 	Family   string   `json:"f,omitempty"`
 	Geb      string   `json:"g,omitempty"`
 	Strassen []string `json:"s,omitempty"`
+	Mails    []string `json:"m,omitempty"` // to find a LinkedIn connection's card (sozial.go)
 }
 
 // festBand is a phone-book tie between two contacts' keys; for a
@@ -149,6 +150,10 @@ type Netz struct {
 	gruppen     map[string]gruppenAntwort
 	gelesen     map[string]gelesen
 	hinweise    map[string]paarHinweis
+	// sozial are the friends and connections of the social exports,
+	// sozialGrund their reasons by node (sozial.go, sozialBauen).
+	sozial      []sozialEintrag
+	sozialGrund map[string][]string
 	// selbst are the person's own node and the nodes that are her too: a
 	// card of hers (IchAuch), an Immich person or a card named as she is
 	// (umlauts alike). None is ever in „Steht nahe“ or a question but as „du“.
@@ -220,6 +225,7 @@ func (n *Netz) bauen() {
 		}
 		n.knoten[id], n.von[k.Key] = kn, id
 	}
+	n.sozialBauen()
 	n.ich = n.von[n.st.Ich]
 	n.selbstBauen()
 	alle := map[[2]string]*Kante{}
@@ -499,6 +505,7 @@ func (n *Netz) gruendeListe(mitte string, k Kante) []string {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	out = append(out, n.gruppenGruende(k)...)
+	out = append(out, n.sozialGruende(k)...)
 	for _, f := range k.Fest {
 		switch {
 		case f.Gesagt:

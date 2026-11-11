@@ -211,7 +211,7 @@ func (w *Web) quellenZeile(b *strings.Builder, offen bool) {
 func (w *Web) quellenProbleme(offen bool) (p []string) {
 	ein, f, _ := w.Protokoll.Kopie()
 	if f != nil {
-		p = append(p, map[string]string{"signal": "Signal", "mail": "E-Mail", "sms": "SMS", "whatsapp": "WhatsApp"}[f.Quelle]+" meldet einen Fehler")
+		p = append(p, map[string]string{"signal": "Signal", "mail": "E-Mail", "sms": "SMS", "whatsapp": "WhatsApp", "sozial": "Facebook/LinkedIn"}[f.Quelle]+" meldet einen Fehler")
 	}
 	if w.fehlenSignalSchluessel() {
 		p = append(p, "Signal: Schlüssel fehlt")
@@ -256,6 +256,7 @@ func (w *Web) quellenSeite(rw http.ResponseWriter, r *http.Request, code int, me
 	w.mailKarte(&b, offen)
 	w.smsKarte(&b)
 	w.whatsappKarte(&b)
+	w.sozialKarte(&b, offen)
 	w.kontakteKarte(&b, offen)
 	if offen {
 		w.umfeldKarte(&b)

@@ -281,6 +281,56 @@ Contacts take another way: Homes mirrors the phone's contacts into the
 person's Radicale address book `handy-kontakte`, outside the vault; the
 archive reads them from there (below, "Contacts and calendars").
 
+### Facebook and LinkedIn: shared from the phone (`sozial.go`)
+
+Owner, 2026-11-11 („Runterladen würde ich ja, aber das ist entweder ein
+‚Teilen' mit der Homes-App oder eine E-Mail-Weiterleitung und das System
+macht den Rest“).
+
+1. The person downloads Facebook's „Deine Informationen herunterladen“
+   (format **JSON**, at least „Freunde“) or LinkedIn's „Kopie deiner Daten
+   anfordern“ (with „Kontakte“) on the phone, and shares the file (the
+   ZIP as it is, or the friends JSON or `Connections.csv` alone) to the
+   Homes app's „Ins Archiv“.
+2. The app tells the export by its structure (a ZIP by its entry names,
+   a single file by its first bytes), refuses anything else on the spot,
+   encrypts it on the phone with age to the Briefkasten's key (as the
+   SMS) and uploads it through `/napi/sicherung/uploads` to
+   `/eingang/sozial/<facebook|linkedin>-<UTC>.<zip|json|csv>.age`.
+   Homes stores ciphertext only and never reads it.
+3. While the vault is open, the Postbote decrypts each into the work
+   folder (removed on every path), reads it **by its content**: Facebook's
+   `connections/friends/your_friends.json` (2024),
+   `friends_and_followers/friends.json` (2022) or `friends/friends.json`,
+   `{"friends_v2": [{"name", "timestamp"}]}` with Facebook's byte-wise
+   escaping of non-ASCII names undone; LinkedIn's `Connections.csv` after
+   its „Notes:“ preamble, columns by name (First Name, Last Name, Email
+   Address, Company, Position, Connected On; the profile URL is not kept).
+4. The entries go into `/run/tresor/umfeld/sozial.json` (0600, format
+   `archiv-sozial` version 1), additive: a new one is added, a known one
+   (source, name, e-mail) takes the new company and position, none is
+   removed. The file leaves the inbox. One that cannot be decrypted stays
+   and the card says so; one that is no export (or Facebook's HTML
+   format) is taken out with the sentence, since no later try could read it.
+
+What they do in Umfeld: a LinkedIn connection is the card with its e-mail
+(if the connection shared one), else, as a Facebook friend, the one node of
+the same name (umlauts and case alike; two of that name: neither). There
+it is a reason on the person's tie — „Kollege bei ACME GmbH (Entwickler,
+LinkedIn seit 2019)“, „kennen sich (Facebook seit 2014)“ — on „Steht nahe“
+and the edge page; it adds no strength and makes no tie by itself. An
+entry matching nobody becomes a node of its own (`sozial:<name>`, no tie,
+no contact), so „+ Beziehung“ suggests and finds it; an answer about it
+stays in the vault. Nothing is written to an address book, no contact is
+made, nothing goes to Homes (homes ADR 0002: Homes' „Wer ist das?“ keeps
+suggesting the phone's contacts only; feeding the social names there too
+would be a separate decision).
+
+**Mail forwarding does not work for these:** both platforms send only a
+notice with a link to their own download page, which needs their login;
+the data is never attached. So there is nothing to forward to
+`<login>+doc+import@…`; the sources' card says so.
+
 ### WhatsApp: only while open, the key inside the vault
 
 The person enters the 64-digit key of their WhatsApp backup on the page

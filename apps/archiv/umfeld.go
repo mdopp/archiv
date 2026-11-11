@@ -227,6 +227,7 @@ func (u *Umfeld) netzBauen(innen Innen, tab netzTabelle) *Netz {
 	n := neuesNetz(tab, verborgenLaden(innen), antwortenLaden(innen), u.Loc, u.Now)
 	n.gruppen = gruppenLaden(innen)
 	n.hinweiseSetzen(hinweiseLaden(innen))
+	n.sozialSetzen(sozialLaden(innen))
 	return n
 }
 
@@ -425,7 +426,7 @@ func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) []buch
 	}
 	tab.Kontakte = nil
 	for _, k := range ks {
-		tab.Kontakte = append(tab.Kontakte, netzKontakt{Key: k.key, Name: k.name, Person: nachName[klar(k.name)], Family: k.family, Geb: k.geb, Strassen: k.strassen})
+		tab.Kontakte = append(tab.Kontakte, netzKontakt{Key: k.key, Name: k.name, Person: nachName[klar(k.name)], Family: k.family, Geb: k.geb, Strassen: k.strassen, Mails: k.emails})
 	}
 	nummer, _ := u.Schluessel.Lesen(SchluesselTelefon)
 	tab.Ich = eigeneKarte(ks, func(k buchKarte) bool {
