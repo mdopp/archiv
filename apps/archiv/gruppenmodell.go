@@ -3,12 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log"
 	"maps"
-	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
@@ -99,16 +97,9 @@ func (m *MsgvaultAPI) GruppenProben(ctx context.Context, ids []string) (map[stri
 	if m == nil || len(ids) == 0 {
 		return nil, nil
 	}
-	var r abfrageAntwort
-	err := m.rufe(ctx, http.MethodPost, "/api/v1/query", nil, map[string]string{"sql": gruppenProbenSQL(ids)}, &r)
-	var f *apiFehler
-	switch {
-	case errors.As(err, &f) && f.Status == http.StatusServiceUnavailable:
-		return nil, errGespraecheSpaeter
-	case err != nil:
+	r, err := m.abfrage(ctx, gruppenProbenSQL(ids))
+	if err != nil {
 		return nil, err
-	case r.Columns == nil:
-		return nil, errGespraecheSpaeter
 	}
 	return probenLesen(r)
 }

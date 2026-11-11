@@ -116,16 +116,9 @@ type rohMail struct {
 
 // HerkunftMails reads the newest mails of each sender through msgvault's API.
 func (m *MsgvaultAPI) HerkunftMails(ctx context.Context) ([]rohMail, error) {
-	var r abfrageAntwort
-	err := m.rufe(ctx, http.MethodPost, "/api/v1/query", nil, map[string]string{"sql": herkunftSQL()}, &r)
-	var f *apiFehler
-	switch {
-	case errors.As(err, &f) && f.Status == http.StatusServiceUnavailable:
-		return nil, errGespraecheSpaeter
-	case err != nil:
+	r, err := m.abfrage(ctx, herkunftSQL())
+	if err != nil {
 		return nil, err
-	case r.Columns == nil:
-		return nil, errGespraecheSpaeter
 	}
 	return mailsLesen(r)
 }
