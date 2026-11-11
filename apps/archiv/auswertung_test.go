@@ -395,3 +395,12 @@ func TestGruppenWerkzeug(t *testing.T) {
 		t.Fatalf("%q", aus.String())
 	}
 }
+
+// Gruende are the tie's reasons as seen from mitte, in one line: every
+// one, as the tests of the net read them (a row says Kurz, the edge page
+// counts and says the rest once).
+func (n *Netz) Gruende(mitte string, k Kante) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return strings.Join(n.gruende(mitte, k, "", 2), " · ")
+}

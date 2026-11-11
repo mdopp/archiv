@@ -155,25 +155,25 @@ func TestSocialEntriesGiveReasonsAndNamesButNoTies(t *testing.T) {
 	n := sozialNetz(es)
 	ich := n.Ich()
 	p, ok := n.Paar(ich, "privat/stefan")
-	if !ok || !slices.Contains(p.Gruende, "Kollege bei ACME GmbH (Entwickler, LinkedIn seit 2019)") {
-		t.Fatalf("LinkedIn by e-mail: %q", p.Gruende)
+	if !ok || !slices.Contains(p.Ausserdem, "Kollege bei ACME GmbH (Entwickler, LinkedIn seit 2019)") {
+		t.Fatalf("LinkedIn by e-mail: %q", p.Ausserdem)
 	}
-	if slices.Contains(p.Gruende, "kennen sich (Facebook seit 2014)") {
-		t.Fatalf("Facebook's „Stefan Ostermann“ is not the card „Stefan O.“: %q", p.Gruende)
+	if slices.Contains(p.Ausserdem, "kennen sich (Facebook seit 2014)") {
+		t.Fatalf("Facebook's „Stefan Ostermann“ is not the card „Stefan O.“: %q", p.Ausserdem)
 	}
-	if p, _ := n.Paar(ich, "p-juergen"); !slices.Contains(p.Gruende, "kennen sich (Facebook seit 2010)") {
-		t.Fatalf("Facebook by the name, umlauts alike: %q", p.Gruende)
+	if p, _ := n.Paar(ich, "p-juergen"); !slices.Contains(p.Ausserdem, "kennen sich (Facebook seit 2010)") {
+		t.Fatalf("Facebook by the name, umlauts alike: %q", p.Ausserdem)
 	}
 	for _, k := range []string{"privat/kim1", "privat/kim2"} {
-		if p, _ := n.Paar(ich, k); slices.ContainsFunc(p.Gruende, func(g string) bool { return strings.Contains(g, "Facebook") }) {
-			t.Fatalf("two cards named Kim: neither is Facebook's Kim: %q", p.Gruende)
+		if p, _ := n.Paar(ich, k); slices.ContainsFunc(p.Ausserdem, func(g string) bool { return strings.Contains(g, "Facebook") }) {
+			t.Fatalf("two cards named Kim: neither is Facebook's Kim: %q", p.Ausserdem)
 		}
 	}
 	ks := n.Finden("lea fremd")
 	if len(ks) != 1 || ks[0].ID != "sozial:leafremd" || !slices.Contains(n.Namen(), "Lea Fremd") || !slices.Contains(n.Namen(), "Stefan Ostermann") {
 		t.Fatalf("names for „+ Beziehung“: %+v %q", ks, n.Namen())
 	}
-	if p, ok := n.Paar(ich, "sozial:leafremd"); !ok || p.Kante.belegt() || !slices.Contains(p.Gruende, "kennen sich (Facebook)") {
+	if p, ok := n.Paar(ich, "sozial:leafremd"); !ok || p.Kante.belegt() || !slices.Contains(p.Ausserdem, "kennen sich (Facebook)") {
 		t.Fatalf("a Facebook friend alone is a node to name, with its reason, no tie: %+v", p)
 	}
 	if personen, _ := n.Groesse(); personen != 2 {

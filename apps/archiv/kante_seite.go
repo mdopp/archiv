@@ -17,12 +17,13 @@ import (
 // person's detail, a question card („Warum?“) and every line of the
 // Stammbaum. On top both faces and the relation as the question card's
 // chips, the current kind chosen; one tap sets it (Festlegen: the same
-// write to Homes, the same chain, the same Rückgängig). Under it the
-// shared photo days as thumbnails (Immich's, through the archive with the
+// write to Homes, the same chain, the same Rückgängig). Under it
+// „Gemeinsam“ (kanteGemeinsam): one sentence that counts what the two
+// share, three thumbnails (Immich's, through the archive with the
 // person's own key, never kept; a tap opens the photo in Immich), the
-// shared group chats and mail threads with their last line (a tap opens
-// it in msgvault's view), the cue the box's model read first, and why
-// the two are tied. „+ Beziehung“ picks anyone else by name. No script
+// cue the box's model read, the newest group chats and the mail threads
+// with their last line (a tap opens it in msgvault's view); the rest
+// folded. „+ Beziehung“ picks anyone else by name. No script
 // needed; the page's script only sends a chip in the background.
 
 const (
@@ -31,9 +32,12 @@ const (
 	saysKanteNiemand    = "Niemanden mit diesem Namen gefunden. Zur Wahl steht, wer in deinen Telefonbüchern steht oder auf deinen Fotos einen Namen hat."
 	saysKanteSichSelbst = "Das ist dieselbe Person. Wähle eine andere."
 	saysKantePruefen    = "Diese Linie passt nicht zu den anderen im Stammbaum (sie ergäbe einen Kreis oder eine andere Generation). Stimmt sie? Ein Tipp bessert sie nach."
-	saysKanteFotosOhne  = "Keine gemeinsamen Fotos."
+	saysKanteNichts     = "Noch nichts Gemeinsames: keine Fotos, Gruppen oder Mails mit beiden."
 	saysKanteZurueck    = "Rückgängig gemacht."
 )
+
+// kanteVorn: the examples of a kind the edge page shows before „alle zeigen“.
+const kanteVorn = 3
 
 // vonErkannt: the edge page was opened from the suggestions; its Fertig goes back there.
 const vonErkannt = "erkannt"
@@ -161,15 +165,7 @@ func (w *Web) kanteSeite(rw http.ResponseWriter, r *http.Request, code int, a, b
 	w.kanteFrage(&s, n, p, hier, r.URL.Query().Get("pruefen") != "")
 	s.WriteString(kanteFertig(von))
 	s.WriteString(w.toast(n, r.URL.Query().Get("getan"), hier))
-	w.kanteFotos(&s, p)
-	w.kanteNachrichten(&s, r, p)
-	if len(p.Gruende) > 0 {
-		s.WriteString(`<section class=karte id=warum><h2>Warum</h2><ul>`)
-		for _, g := range p.Gruende {
-			fmt.Fprintf(&s, `<li>%s</li>`, esc(g))
-		}
-		s.WriteString(`</ul></section>`)
-	}
+	w.kanteGemeinsam(&s, r, p)
 	s.WriteString(beziehungDazu(n, p.X, false, "", hier))
 	seite(rw, code, "Was verbindet die beiden?", s.String(), "")
 }
@@ -255,29 +251,53 @@ func chipGewaehlt(art, text, klasse string) string {
 	return fmt.Sprintf(`<button name=art value=%s class="chip%s"%s data-laeuft="%s">%s</button>`, art, klasse, gedrueckt, esc(text+" …"), esc(text))
 }
 
-// kanteFotos are the shared photo days, the newest first, each day's
-// thumbnails loaded lazily through the archive; a tap opens the photo in
-// Immich (IMMICH_PUBLIC_URL), without it the thumbnail is all.
+// kanteGemeinsam is what the two share, less with more (owner
+// 2026-11-11): one sentence that counts it (Gemeinsam.Satz), then the
+// most telling of each kind — the newest photo of the last three days,
+// the cue the model read, the newest group chats, the mail threads as
+// one row — and „alle zeigen“ for the rest, folded. What no count says
+// (the same address, a phone book's word) is one line at the end; the
+// relation above is never said again.
+func (w *Web) kanteGemeinsam(s *strings.Builder, r *http.Request, p PaarSicht) {
+	fmt.Fprintf(s, `<section class=karte id=gemeinsam><h2>Gemeinsam</h2><p class=summe>%s</p>`, esc(cmp.Or(p.Satz, saysKanteNichts)))
+	w.kanteFotos(s, p)
+	w.kanteNachrichten(s, r, p)
+	if len(p.Ausserdem) > 0 {
+		fmt.Fprintf(s, `<p class=k id=ausserdem>Außerdem: %s</p>`, esc(strings.Join(p.Ausserdem, " · ")))
+	}
+	s.WriteString(`</section>`)
+}
+
+// kanteFotos are kanteVorn thumbnails, the newest photo of each of the
+// last days, loaded lazily through the archive (a tap opens the photo in
+// Immich, IMMICH_PUBLIC_URL; without it the thumbnail is all); every
+// shared day with its date is folded under them.
 func (w *Web) kanteFotos(s *strings.Builder, p PaarSicht) {
-	fmt.Fprintf(s, `<section class=karte id=fotos><h2>Fotos%s</h2>`, map[bool]string{true: " (" + anzahlT(p.FotoTage, "Tag", "Tage") + ")"}[p.FotoTage > 0])
 	if len(p.Fotos) == 0 {
-		fmt.Fprintf(s, `<p class=ruhig><span class="punkt grau"></span>%s</p></section>`, esc(saysKanteFotosOhne))
 		return
 	}
-	oeffentlich := ""
-	if w.Umfeld != nil {
-		oeffentlich = w.Umfeld.Oeffentlich
+	oeffentlich := w.Umfeld.Oeffentlich
+	bild := func(id, tag string) string {
+		img := fmt.Sprintf(`<img src="%s" loading=lazy decoding=async width=88 height=88 alt="%s">`, esc(kantePfad+"/bild?"+url.Values{"id": {id}}.Encode()), esc("Foto vom "+tag))
+		if oeffentlich != "" {
+			img = `<a href="` + esc(oeffentlich+"/photos/"+url.PathEscape(id)) + `" target=_blank rel=noopener>` + img + `</a>`
+		}
+		return img
 	}
-	s.WriteString(`<div class=fototage>`)
+	s.WriteString(`<div class="bilder vorn">`)
+	for _, t := range p.Fotos[:min(kanteVorn, len(p.Fotos))] {
+		s.WriteString(bild(t.IDs[0], datumVon(t.Tag).Format("02.01.2006")))
+	}
+	s.WriteString(`</div>`)
+	if p.Gemeinsam.Fotos <= min(kanteVorn, len(p.Fotos)) {
+		return
+	}
+	fmt.Fprintf(s, `<details class=alle id=alle-fotos><summary>alle zeigen (%s)</summary><div class=fototage>`, esc(anzahlT(p.FotoTage, "Tag", "Tage")))
 	for _, t := range p.Fotos {
 		tag := datumVon(t.Tag).Format("02.01.2006")
 		fmt.Fprintf(s, `<div class=fototag><span class=k>%s</span><div class=bilder>`, tag)
 		for _, id := range t.IDs {
-			img := fmt.Sprintf(`<img src="%s" loading=lazy decoding=async width=88 height=88 alt="%s">`, esc(kantePfad+"/bild?"+url.Values{"id": {id}}.Encode()), esc("Foto vom "+tag))
-			if oeffentlich != "" {
-				img = `<a href="` + esc(oeffentlich+"/photos/"+url.PathEscape(id)) + `" target=_blank rel=noopener>` + img + `</a>`
-			}
-			s.WriteString(img)
+			s.WriteString(bild(id, tag))
 		}
 		s.WriteString(`</div></div>`)
 	}
@@ -285,18 +305,20 @@ func (w *Web) kanteFotos(s *strings.Builder, p PaarSicht) {
 	if p.FotoTage > len(p.Fotos) {
 		fmt.Fprintf(s, `<p class=k>Die %d neuesten von %s.</p>`, len(p.Fotos), esc(anzahlT(p.FotoTage, "Tag", "Tagen")))
 	}
-	s.WriteString(`</section>`)
+	s.WriteString(`</details>`)
 }
 
-// kanteNachrichten are the cues first („Hallo Mama“), then the shared
-// group chats and mail threads with their last line, each a link into
-// msgvault's own view.
+// kanteNachrichten are the messages' most telling rows: the first cue
+// („Hallo Mama“), the kanteVorn newest group chats with their category
+// and last line, and the mail threads as one row (the newest's last
+// line); the other cues, groups and every thread are folded. Each row is
+// a link into msgvault's own view.
 func (w *Web) kanteNachrichten(s *strings.Builder, r *http.Request, p PaarSicht) {
 	if len(p.Zitate) == 0 && len(p.Gespraeche) == 0 {
 		return
 	}
 	var letzte map[string]letzteNachricht
-	if w.Umfeld != nil && w.Umfeld.Msgvault != nil && len(p.Gespraeche) > 0 {
+	if w.Umfeld.Msgvault != nil && len(p.Gespraeche) > 0 {
 		var ids []string
 		for _, g := range p.Gespraeche {
 			ids = append(ids, g.ID)
@@ -306,31 +328,72 @@ func (w *Web) kanteNachrichten(s *strings.Builder, r *http.Request, p PaarSicht)
 			log.Printf("archiv: Kante: letzte Nachrichten aus msgvault: %v", err)
 		}
 	}
-	s.WriteString(`<section class=karte id=nachrichten><h2>Nachrichten</h2><ul class=gespraeche>`)
-	for _, z := range p.Zitate {
-		fmt.Fprintf(s, `<li><a href="%s"><b>%s</b><span class=k>%s</span></a></li>`, esc(nachrichtAdresse(z.ID)), esc("„"+z.Text+"“"),
+	var vorn, rest []string
+	for i, z := range p.Zitate {
+		zeile := fmt.Sprintf(`<li><a href="%s"><b>%s</b><span class=k>%s</span></a></li>`, esc(nachrichtAdresse(z.ID)), esc("„"+z.Text+"“"),
 			esc("Hinweis auf die Beziehung, in einer Nachricht vom "+z.Am.Format("02.01.2006")))
+		if i == 0 {
+			vorn = append(vorn, zeile)
+		} else {
+			rest = append(rest, zeile)
+		}
 	}
+	var mails []netzGespraech
+	gruppen := 0
 	for _, g := range p.Gespraeche {
-		titel := g.Titel
 		switch {
 		case g.Art == gespraechMail:
-			titel = "Mail-Verlauf mit " + anzahl(g.Groesse, "Person", "Personen")
-		case titel == "":
-			titel = "Gruppe mit " + anzahl(g.Groesse, "Person", "Personen")
+			mails = append(mails, g)
+		case gruppen < kanteVorn:
+			gruppen++
+			vorn = append(vorn, gespraechZeile(p, g, letzte))
+		default:
+			rest = append(rest, gespraechZeile(p, g, letzte))
 		}
-		ziel, zeile := msgvaultSuche(cmp.Or(g.Titel, p.X.Name)), anzahlT(g.Nachrichten, "Nachricht", "Nachrichten")+", zuletzt am "+g.Zuletzt.Format("02.01.2006")
-		if l, da := letzte[g.ID]; da && nurZiffern.MatchString(l.ID) {
-			ziel = nachrichtAdresse(l.ID)
-			text := bisZu(l.Text, letzteZeichen)
-			if l.VonMir {
-				text = "Du: " + text
-			}
-			zeile = cmp.Or(text, "(ohne Text)") + " · " + l.Am.Format("02.01.2006")
-		}
-		fmt.Fprintf(s, `<li><a href="%s"><b>%s</b><span class=k>%s</span></a></li>`, esc(ziel), esc(titel), esc(zeile))
 	}
-	s.WriteString(`</ul></section>`)
+	if len(mails) == 1 {
+		vorn = append(vorn, gespraechZeile(p, mails[0], letzte))
+	} else if len(mails) > 1 {
+		ziel, zeile := gespraechLetzte(p, mails[0], letzte)
+		vorn = append(vorn, fmt.Sprintf(`<li><a href="%s"><b>%s</b><span class=k>%s</span></a></li>`, esc(ziel), esc(anzahlT(len(mails), "Mail-Verlauf", "Mail-Verläufe")), esc("Zuletzt: "+zeile)))
+		for _, g := range mails {
+			rest = append(rest, gespraechZeile(p, g, letzte))
+		}
+	}
+	fmt.Fprintf(s, `<ul class=gespraeche>%s</ul>`, strings.Join(vorn, ""))
+	if len(rest) > 0 {
+		fmt.Fprintf(s, `<details class=alle id=alle-nachrichten><summary>alle zeigen (%d)</summary><ul class=gespraeche>%s</ul></details>`, len(rest), strings.Join(rest, ""))
+	}
+}
+
+// gespraechZeile is a shared conversation as a row: a group chat by its
+// title and its category (unless the title says it), a mail thread by its size, each with its last line.
+func gespraechZeile(p PaarSicht, g netzGespraech, letzte map[string]letzteNachricht) string {
+	titel := g.Titel
+	switch {
+	case g.Art == gespraechMail:
+		titel = "Mail-Verlauf, " + anzahlT(g.Nachrichten, "Nachricht", "Nachrichten")
+	case titel == "":
+		titel = "Gruppe mit " + anzahl(g.Groesse, "Person", "Personen")
+	}
+	if kat := p.Kategorie[g.ID]; kat != "" && !strings.Contains(klar(titel), klar(kat)) {
+		titel += " (" + kat + ")"
+	}
+	ziel, zeile := gespraechLetzte(p, g, letzte)
+	return fmt.Sprintf(`<li><a href="%s"><b>%s</b><span class=k>%s</span></a></li>`, esc(ziel), esc(titel), esc(zeile))
+}
+
+// gespraechLetzte is a conversation's last line and the link to it in
+// msgvault's view; without msgvault's answer, its count and day and a search.
+func gespraechLetzte(p PaarSicht, g netzGespraech, letzte map[string]letzteNachricht) (ziel, zeile string) {
+	if l, da := letzte[g.ID]; da && nurZiffern.MatchString(l.ID) {
+		text := bisZu(l.Text, letzteZeichen)
+		if l.VonMir {
+			text = "Du: " + text
+		}
+		return nachrichtAdresse(l.ID), cmp.Or(text, "(ohne Text)") + " · " + l.Am.Format("02.01.2006")
+	}
+	return msgvaultSuche(cmp.Or(g.Titel, p.X.Name)), anzahlT(g.Nachrichten, "Nachricht", "Nachrichten") + ", zuletzt am " + g.Zuletzt.Format("02.01.2006")
 }
 
 // nachrichtAdresse is a message in msgvault's own view, in its conversation.

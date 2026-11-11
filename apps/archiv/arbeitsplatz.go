@@ -121,6 +121,7 @@ func naheListe(b *strings.Builder, n *Netz) {
 		b.WriteString(`<p class=ruhig><span class="punkt grau"></span>Noch keine Verbindungen: Ein Paar zählt, sobald es an zwei Tagen zusammen auf deinen Fotos ist oder die Telefonbücher etwas über die beiden sagen.</p>`)
 		return
 	}
+	b.WriteString(personSuchen(n, "", true))
 	titel, wer := "Steht dir nahe", "dich"
 	if k, _ := n.Person(mitte); mitte != n.Ich() {
 		titel, wer = "Steht "+k.Name+" nahe", k.Name
@@ -129,7 +130,7 @@ func naheListe(b *strings.Builder, n *Netz) {
 	for _, v := range vs {
 		fmt.Fprintf(b, `<li class=zwei><a href="%s">%s<span class=wer>%s</span></a><a class=warum href="%s" aria-label="%s"><span class=k>%s</span><span class=balken><b style="width:%.0f%%"></b></span></a></li>`,
 			esc(umfeldMitte(v.Mit.ID)), gesicht(v.Mit.Name), esc(n.Anzeige(v.Mit)), esc(kanteAdresse(mitte, v.Mit.ID)), esc("Was verbindet "+wer+" und "+v.Mit.Name+"?"),
-			esc(n.Gruende(mitte, v.Kante)), 100*v.Kante.Staerke/vs[0].Kante.Staerke)
+			esc(n.Kurz(mitte, v.Kante)), 100*v.Kante.Staerke/vs[0].Kante.Staerke)
 	}
 	b.WriteString(`</ul></section><p class=weiter-in><a href="/tresor/umfeld">Bild, alle und Ausgeblendete</a><span class=k>Tipp auf eine Person: wer ihr nahe steht.</span></p>`)
 }
@@ -159,6 +160,13 @@ func (w *Web) suche(rw http.ResponseWriter, r *http.Request) {
 	}
 	var b strings.Builder
 	b.WriteString(sucheForm(q))
+	if n := w.Umfeld.Netz(); n != nil {
+		if ts, _ := n.Suchen(q, 5); len(ts) > 0 {
+			b.WriteString(`<section class=karte><h2>Personen</h2>`)
+			personenZeilen(&b, n, ts)
+			b.WriteString(`</section>`)
+		}
+	}
 	if treffer := kontakteFinden(innen, q, 20); len(treffer) > 0 {
 		b.WriteString(`<section class=karte><h2>Kontakte</h2><ul class=leute>`)
 		for _, n := range treffer {
