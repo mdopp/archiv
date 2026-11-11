@@ -1,0 +1,6 @@
+# scripts/ratchet.py staticcheck: the number is how often
+# written by `scripts/ratchet.py --update`; lowered in the PR that fixes one, raised only with --accept
+# total 3
+1 apps/archiv/briefkasten.go: func (*Briefkasten).geaendert is unused (U1000)
+1 apps/archiv/postbote.go: this value of err is never used (SA4006)
+1 apps/archiv/seite_test.go: this value of rec is never used (SA4006)

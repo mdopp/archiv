@@ -8,6 +8,16 @@ Outside the Werkstatt, the same guide is `werkstatt/guide/` in github.com/mdopp/
 - Before a push: the app's tests and `laib template lint templates/<name>`.
 - Conventional Commits, scope = the app: `feat(<name>): …`.
 - No secrets in the tree: a template declares them, the box generates or stores them.
+- The gates (laib#1170), in CI; run them before a PR. `scripts/loc.sh`: production lines
+  under the one cap in `scripts/loc.txt` (crossing it: raise it there in the same PR, the
+  reason beside it, the owner's yes). `scripts/ratchet.py`: deadcode, staticcheck, dupl and
+  gocognit (over 30), pinned, against today's findings in `scripts/ratchet/`. A new or higher
+  finding fails: fix it, or `scripts/ratchet.py --update --accept <tool>` with the reason in
+  the PR and the owner's yes; a finding that went away fails until the same PR lowers the
+  baseline (`scripts/ratchet.py --update`, commit `scripts/ratchet/`).
+- `ratchet.py`, `test_ratchet.py`, `pins.sh`, `copies.sh` and `loc.sh` are copies of laib's
+  `werkstatt/scaffold/repo/scripts/`: `scripts/copies.sh` fails CI when one differs from
+  laib's main. A change goes to laib first, then here as a copy.
 
 ## archiv
 
