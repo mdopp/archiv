@@ -735,3 +735,71 @@ func TestHomesSecretReadsBothEnvNames(t *testing.T) {
 		}
 	}
 }
+
+// The start is the workplace (owner 2026-11-11): a browser opening / goes
+// to /tresor, open or locked. msgvault keeps everything else: its links
+// to / with their state in the query, its fetches and assets, the agent's
+// bearer; the workplace links to it at /nachrichten, which msgvault gets as /.
+func TestTheStartIsTheWorkplace(t *testing.T) {
+	wt := neuesWeb(t)
+	mit := func(extra map[string]string) map[string]string {
+		h := map[string]string{proxyHeader: "s3cret", "Remote-User": "anna"}
+		for k, v := range extra {
+			h[k] = v
+		}
+		return h
+	}
+	navigiert := mit(map[string]string{"Sec-Fetch-Mode": "navigate", "Accept": "text/html,application/xhtml+xml"})
+	ohneFetchKopf := mit(map[string]string{"Accept": "text/html,application/xhtml+xml,*/*;q=0.8"})
+	zurTresor := func(was string, rec *httptest.ResponseRecorder) {
+		t.Helper()
+		if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/tresor" {
+			t.Fatalf("%s: %d %q", was, rec.Code, rec.Header().Get("Location"))
+		}
+	}
+	zurTresor("locked, navigate", wt.rufe("GET", "/", navigiert, nil))
+
+	wt.oeffnen(t)
+	if !wt.tt.Stand().Bereit {
+		t.Fatal("msgvault is not ready in the test")
+	}
+	zurTresor("open, navigate", wt.rufe("GET", "/", navigiert, nil))
+	zurTresor("open, an older browser without Sec-Fetch-*", wt.rufe("GET", "/", ohneFetchKopf, nil))
+	zurTresor("open, HEAD", wt.rufe("HEAD", "/", navigiert, nil))
+
+	n := len(wt.gesehn)
+	for _, c := range []struct {
+		was, methode, pfad string
+		hdr                map[string]string
+		msgvault           string
+	}{
+		{"msgvault's search in the address", "GET", "/?workspace=everything&mode=full_text", navigiert, "msgvault /"},
+		{"the workplace's link", "GET", "/nachrichten", navigiert, "msgvault /"},
+		{"the workplace's search link", "GET", msgvaultSuche("Oma"), navigiert, "msgvault /"},
+		{"a message opened in a tab", "GET", "/messages/12", navigiert, "msgvault /messages/12"},
+		{"a fetch of /", "GET", "/", mit(map[string]string{"Sec-Fetch-Mode": "cors", "Accept": "text/html"}), "msgvault /"},
+		{"an asset", "GET", "/assets/index-abc.js", mit(map[string]string{"Sec-Fetch-Mode": "no-cors"}), "msgvault /assets/index-abc.js"},
+		{"the API", "GET", "/api/v1/stats", mit(map[string]string{"Sec-Fetch-Mode": "cors", "Accept": "application/json"}), "msgvault /api/v1/stats"},
+		{"a POST to /", "POST", "/", mit(map[string]string{"Sec-Fetch-Mode": "navigate", "Origin": "http://example.com"}), "msgvault /"},
+		{"the agent's bearer on /", "GET", "/", map[string]string{"Authorization": "Bearer k", "Sec-Fetch-Mode": "navigate", "Accept": "text/html"}, "msgvault /"},
+	} {
+		rec := wt.rufe(c.methode, c.pfad, c.hdr, nil)
+		if rec.Code != http.StatusOK || rec.Body.String() != c.msgvault {
+			t.Errorf("%s: %d %q, want msgvault's %q", c.was, rec.Code, rec.Body.String(), c.msgvault)
+		}
+	}
+	if len(wt.gesehn) != n+9 {
+		t.Fatalf("msgvault saw %d requests, want 9", len(wt.gesehn)-n)
+	}
+	if q := wt.gesehn[n+2].URL.RawQuery; !strings.Contains(q, "explore=") || wt.gesehn[n+2].URL.Path != "/" {
+		t.Errorf("the search link reached msgvault as %s?%s", wt.gesehn[n+2].URL.Path, q)
+	}
+	if k := wt.gesehn[n+1].Header.Get("X-Api-Key"); k == "" || k != wt.tt.APIKey() {
+		t.Errorf("the link reached msgvault without its key: %q", k)
+	}
+
+	body := wt.rufe("GET", "/tresor", navigiert, nil).Body.String()
+	if strings.Count(body, `href="/nachrichten"`) != 1 || !strings.Contains(body, "Alle Nachrichten (msgvault)</a>") {
+		t.Fatalf("the workplace has no one link to msgvault:\n%s", body)
+	}
+}
