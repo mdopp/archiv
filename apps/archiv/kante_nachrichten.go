@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"regexp"
 	"slices"
 	"strings"
@@ -69,16 +67,9 @@ func (m *MsgvaultAPI) Letzte(ctx context.Context, ids []string) (map[string]letz
 	}
 	ctx, fertig := context.WithTimeout(ctx, letzteWarten)
 	defer fertig()
-	var r abfrageAntwort
-	err := m.rufe(ctx, http.MethodPost, "/api/v1/query", nil, map[string]string{"sql": letzteSQL(ids)}, &r)
-	var f *apiFehler
-	switch {
-	case errors.As(err, &f) && f.Status == http.StatusServiceUnavailable:
-		return nil, errGespraecheSpaeter
-	case err != nil:
+	r, err := m.abfrage(ctx, letzteSQL(ids))
+	if err != nil {
 		return nil, err
-	case r.Columns == nil:
-		return nil, errGespraecheSpaeter
 	}
 	return letzteLesen(r)
 }

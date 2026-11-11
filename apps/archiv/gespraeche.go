@@ -142,18 +142,29 @@ type abfrageAntwort struct {
 	Rows    [][]any  `json:"rows"`
 }
 
-// Gespraeche reads the group chats and mail threads through msgvault's API.
-func (m *MsgvaultAPI) Gespraeche(ctx context.Context) ([]rohGespraech, error) {
+// abfrage runs one read-only statement through msgvault's POST
+// /api/v1/query; errGespraecheSpaeter while the analytics are not
+// ready (503, or 202: a build was started, nothing to read yet).
+func (m *MsgvaultAPI) abfrage(ctx context.Context, sql string) (abfrageAntwort, error) {
 	var r abfrageAntwort
-	err := m.rufe(ctx, http.MethodPost, "/api/v1/query", nil, map[string]string{"sql": gespraecheSQL()}, &r)
+	err := m.rufe(ctx, http.MethodPost, "/api/v1/query", nil, map[string]string{"sql": sql}, &r)
 	var f *apiFehler
 	switch {
 	case errors.As(err, &f) && f.Status == http.StatusServiceUnavailable:
-		return nil, errGespraecheSpaeter
+		return r, errGespraecheSpaeter
 	case err != nil:
+		return r, err
+	case r.Columns == nil:
+		return r, errGespraecheSpaeter
+	}
+	return r, nil
+}
+
+// Gespraeche reads the group chats and mail threads through msgvault's API.
+func (m *MsgvaultAPI) Gespraeche(ctx context.Context) ([]rohGespraech, error) {
+	r, err := m.abfrage(ctx, gespraecheSQL())
+	if err != nil {
 		return nil, err
-	case r.Columns == nil: // 202: a build was started, nothing to read yet
-		return nil, errGespraecheSpaeter
 	}
 	return gespraecheLesen(r)
 }

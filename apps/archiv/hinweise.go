@@ -342,16 +342,9 @@ ORDER BY m.sent_at DESC, m.id, rolle DESC`, strings.ReplaceAll(muster, "'", "''"
 
 // Schlagwortnachrichten reads the messages with a relation word through msgvault's API.
 func (m *MsgvaultAPI) Schlagwortnachrichten(ctx context.Context, muster string) ([]rohNachricht, error) {
-	var r abfrageAntwort
-	err := m.rufe(ctx, http.MethodPost, "/api/v1/query", nil, map[string]string{"sql": hinweiseSQL(muster)}, &r)
-	var f *apiFehler
-	switch {
-	case errors.As(err, &f) && f.Status == http.StatusServiceUnavailable:
-		return nil, errGespraecheSpaeter
-	case err != nil:
+	r, err := m.abfrage(ctx, hinweiseSQL(muster))
+	if err != nil {
 		return nil, err
-	case r.Columns == nil:
-		return nil, errGespraecheSpaeter
 	}
 	return nachrichtenLesen(r)
 }
