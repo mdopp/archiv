@@ -3,6 +3,7 @@ baseline, --update lowers only, --accept writes a new one; the tools are
 what the repo is (laib#1170)."""
 import importlib.util
 import io
+import json
 import subprocess
 import tempfile
 import unittest
@@ -120,6 +121,33 @@ class WhatTheRepoIs(unittest.TestCase):
                 ratchet.complexity()
         finally:
             ratchet.ruff_findings = saved
+
+    def test_mutation_runs_where_packages_are_listed_and_only_when_named(self):
+        self.track("go.mod", "internal/p/p.go")
+        self.assertNotIn("mutation", ratchet.found())
+        (self.root / "internal/p/p.go").write_text("package p\n\nfunc F(a int) bool {\n\treturn a > 0\n}\n")
+        (self.root / "scripts/ratchet").mkdir(parents=True)
+        (self.root / "scripts/ratchet/mutation.pkgs").write_text("# the trust kernel\ninternal/p\n")
+        self.assertIn("mutation", ratchet.found())
+
+        def gremlins(args, **kw):
+            Path(args[args.index("-o") + 1]).write_text(json.dumps({"files": [{"file_name": "p.go", "mutations": [
+                {"type": "CONDITIONALS_BOUNDARY", "status": "LIVED", "line": 4, "column": 11},
+                {"type": "CONDITIONALS_NEGATION", "status": "KILLED", "line": 4, "column": 11},
+                {"type": "INVERT_NEGATIVES", "status": "NOT COVERED", "line": 4, "column": 11},
+                {"type": "ARITHMETIC_BASE", "status": "TIMED OUT", "line": 4, "column": 11}]}]}))
+            return ""
+        saved = ratchet.run
+        ratchet.run = gremlins
+        try:
+            self.assertEqual(ratchet.mutation(), Counter({
+                "internal/p/p.go: lived CONDITIONALS_BOUNDARY: return a > 0": 1,
+                "internal/p/p.go: not-covered INVERT_NEGATIVES: return a > 0": 1}))
+            ratchet.run = lambda args, **kw: Path(args[args.index("-o") + 1]).write_text("{}")
+            with self.assertRaises(SystemExit):  # nothing mutated is an error, never zero survivors
+                ratchet.mutation()
+        finally:
+            ratchet.run = saved
 
 
 if __name__ == "__main__":
