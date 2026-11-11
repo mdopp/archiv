@@ -228,7 +228,7 @@ func TestUebernahmeWohin(t *testing.T) {
 func band(n *Netz, a, b string, tage int) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	k := &Kante{A: min(a, b), B: max(a, b), Staerke: float64(tage), Rang: float64(tage), Tage: tage, Seit: 2020}
+	k := &Kante{A: min(a, b), B: max(a, b), Staerke: float64(tage), Rang: float64(tage), Tage: tage, Seit: 2020, Beleg: float64(tage)}
 	n.kanten[a], n.kanten[b] = append(n.kanten[a], k), append(n.kanten[b], k)
 }
 
@@ -280,7 +280,8 @@ func TestFragenNurFamilie(t *testing.T) {
 	if !slices.ContainsFunc(n.Nahe("h/phil", 5), func(v Verbindung) bool { return v.Mit.ID == "h/lukas" }) {
 		t.Fatal("Phil and Lukas know each other: still a tie")
 	}
-	if (&Kante{Tage: 1}).belegt() || !(&Kante{Tage: 2}).belegt() || (&Kante{Fest: []festBand{{Art: bandFirma}}}).belegt() || !(&Kante{Fest: []festBand{{Art: bandAdresse}}}).belegt() || !(&Kante{Chats: 1, Faeden: 1}).belegt() {
+	if (&Kante{Tage: 1, Beleg: 1}).belegt() || !(&Kante{Tage: 2, Beleg: 0.5}).belegt() || (&Kante{Tage: 2, Beleg: 0.2}).belegt() || (&Kante{Fest: []festBand{{Art: bandFirma}}}).belegt() ||
+		!(&Kante{Fest: []festBand{{Art: bandAdresse}}}).belegt() || !(&Kante{Chats: 1, Faeden: 1, Beleg: 0.5}).belegt() || (&Kante{Chats: 2, Beleg: 4.0 / 29}).belegt() || !(&Kante{Direkt: direktMin}).belegt() {
 		t.Fatal("belegt: the threshold of a tie")
 	}
 }

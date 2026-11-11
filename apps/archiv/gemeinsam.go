@@ -51,9 +51,10 @@ func (n *Netz) gemeinsam(a, b string, gs []netzGespraech) (g Gemeinsam) {
 	}
 	g.Zuletzt = g.Letztes
 	for _, c := range gs {
-		if c.Art == gespraechMail {
+		switch c.Art {
+		case gespraechMail:
 			g.Faeden++
-		} else {
+		case gespraechChat: // a chat of two adds only its messages
 			g.Gruppen++
 		}
 		g.Nachrichten += c.Nachrichten

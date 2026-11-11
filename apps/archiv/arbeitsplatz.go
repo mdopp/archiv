@@ -118,7 +118,7 @@ func naheListe(b *strings.Builder, n *Netz) {
 	mitte := n.Mitte()
 	vs := n.Nahe(mitte, 12)
 	if len(vs) == 0 {
-		b.WriteString(`<p class=ruhig><span class="punkt grau"></span>Noch keine Verbindungen: Ein Paar zählt, sobald es an zwei Tagen zusammen auf deinen Fotos ist oder die Telefonbücher etwas über die beiden sagen.</p>`)
+		b.WriteString(`<p class=ruhig><span class="punkt grau"></span>Noch keine Verbindungen: Ein Paar zählt, sobald es an zwei Tagen im kleinen Kreis zusammen auf deinen Fotos ist oder die Telefonbücher etwas über die beiden sagen.</p>`)
 		return
 	}
 	b.WriteString(personSuchen(n, "", true))
@@ -127,12 +127,16 @@ func naheListe(b *strings.Builder, n *Netz) {
 		titel, wer = "Steht "+k.Name+" nahe", k.Name
 	}
 	fmt.Fprintf(b, `<section class=karte><h2>%s</h2><ul class=leute>`, esc(titel))
+	staerkste := 1e-9
+	for _, v := range vs {
+		staerkste = max(staerkste, v.Kante.Staerke)
+	}
 	for _, v := range vs {
 		fmt.Fprintf(b, `<li class=zwei><a href="%s">%s<span class=wer>%s</span></a><a class=warum href="%s" aria-label="%s"><span class=k>%s</span><span class=balken><b style="width:%.0f%%"></b></span></a></li>`,
 			esc(umfeldMitte(v.Mit.ID)), gesicht(v.Mit.Name), esc(n.Anzeige(v.Mit)), esc(kanteAdresse(mitte, v.Mit.ID)), esc("Was verbindet "+wer+" und "+v.Mit.Name+"?"),
-			esc(n.Kurz(mitte, v.Kante)), 100*v.Kante.Staerke/vs[0].Kante.Staerke)
+			esc(n.Kurz(mitte, v.Kante)), 100*v.Kante.Staerke/staerkste)
 	}
-	b.WriteString(`</ul></section><p class=weiter-in><a href="/tresor/umfeld">Bild, alle und Ausgeblendete</a><span class=k>Tipp auf eine Person: wer ihr nahe steht.</span></p>`)
+	b.WriteString(`</ul></section>` + stilleListe(n) + `<p class=weiter-in><a href="/tresor/umfeld">Bild, alle und Ausgeblendete</a><span class=k>Tipp auf eine Person: wer ihr nahe steht.</span></p>`)
 }
 
 // sucheForm is the search on top, q in it.

@@ -38,18 +38,23 @@ import (
 // weighs a quarter of that: mail is cheap, and threads with the same
 // people come by the dozen. What chats and mail add to a pair is capped
 // at gespraechDeckel, below a phone book's relation (3), so a busy inbox
-// cannot outrank the family. A tie from chats and mail alone shows from
-// gespraecheMin conversations on, as a tie from photos from two days.
+// cannot outrank the family. A tie from chats and mail alone needs two
+// conversations that weigh belegMin together (Kante.belegt): two chats of
+// nine or two threads of three, never two class chats of thirty. A mail
+// thread only one of its people wrote in is no conversation (Sender): an
+// invoice, a circular. A chat of two (gespraechDirekt) is the person's
+// own conversation with one other: a tie from direktMin messages on when
+// both wrote, and the best sign of who is close (naehe.go).
 
 const (
 	gespraechChat   = "chat"
 	gespraechMail   = "mail"
+	gespraechDirekt = "direkt"
 	gruppeMin       = 3  // a chat of two is no group
 	gruppeMax       = 30 // a bigger chat is a club, a class, a street
 	fadenMin        = 2
 	fadenMax        = 10 // a mail to more is a circular
 	gespraechDeckel = 2.0
-	gespraecheMin   = 2
 )
 
 var gespraechGewicht = map[string]float64{gespraechChat: 2, gespraechMail: 0.5}
@@ -66,6 +71,9 @@ type netzGespraech struct {
 	Nachrichten int       `json:"n"`
 	Zuletzt     time.Time `json:"z"`
 	Wer         []string  `json:"w"`
+	// Sender: how many of its people wrote in it; 0 a table read before
+	// the archive asked (counted as before)
+	Sender int `json:"s,omitempty"`
 }
 
 // zaehlt: the conversation is within its kind's size.
@@ -74,7 +82,9 @@ func (g netzGespraech) zaehlt() bool {
 	case gespraechChat:
 		return g.Groesse >= gruppeMin && g.Groesse <= gruppeMax
 	case gespraechMail:
-		return g.Groesse >= fadenMin && g.Groesse <= fadenMax
+		return g.Groesse >= fadenMin && g.Groesse <= fadenMax && g.Sender != 1
+	case gespraechDirekt:
+		return g.Groesse == direktGroesse && g.Sender >= 2
 	}
 	return false
 }
@@ -93,13 +103,14 @@ type rohGespraech struct {
 	Groesse     int
 	Nachrichten int
 	Zuletzt     time.Time
+	Sender      int  // distinct senders among its messages
 	Liste       bool // a message of it came through a mailing list (List-Id)
 	Wer         []gespraechsTeilnehmer
 }
 
-// gespraecheSQL is the one read-only statement: the group chats (a chat
-// of gruppeMin..gruppeMax members; msgvault calls an MMS group a
-// direct_chat) and the mail threads (fadenMin..fadenMax addresses among
+// gespraecheSQL is the one read-only statement: the chats (of
+// direktGroesse..gruppeMax members: the person's chats with one other and
+// the groups; msgvault calls an MMS group a direct_chat) and the mail threads (fadenMin..fadenMax addresses among
 // From, To and Cc), one row per conversation and participant. Size is
 // cut here too, so a big inbox does not send every newsletter's rows.
 func gespraecheSQL() string {
@@ -122,14 +133,14 @@ func gespraecheSQL() string {
 ), groesse AS (
   SELECT g, count(*) AS k FROM wer GROUP BY g
 ), nach AS (
-  SELECT conversation_id AS g, count(*) AS n, max(sent_at) AS zuletzt, bool_or(liste) AS liste FROM m GROUP BY conversation_id
+  SELECT conversation_id AS g, count(*) AS n, max(sent_at) AS zuletzt, bool_or(liste) AS liste, count(DISTINCT sender_id) AS sender FROM m GROUP BY conversation_id
 )
 SELECT CAST(c.id AS VARCHAR) AS gespraech, c.art, c.titel, groesse.k AS groesse, nach.n AS nachrichten,
-  strftime(nach.zuletzt, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS zuletzt, nach.liste,
+  strftime(nach.zuletzt, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS zuletzt, nach.liste, nach.sender,
   CAST(p.id AS VARCHAR) AS teilnehmer, COALESCE(p.phone_number, '') AS telefon, COALESCE(p.email_address, '') AS mail
 FROM c JOIN nach ON nach.g = c.id JOIN groesse ON groesse.g = c.id JOIN wer ON wer.g = c.id JOIN participants p ON p.id = wer.p
 WHERE (c.art = '%[2]s' AND groesse.k BETWEEN %[3]d AND %[4]d) OR (c.art = '%[1]s' AND groesse.k BETWEEN %[5]d AND %[6]d)
-ORDER BY c.id, p.id`, gespraechMail, gespraechChat, gruppeMin, gruppeMax, fadenMin, fadenMax)
+ORDER BY c.id, p.id`, gespraechMail, gespraechChat, direktGroesse, gruppeMax, fadenMin, fadenMax)
 }
 
 // errGespraecheSpaeter: msgvault is still building its analytics (202)
@@ -175,7 +186,7 @@ func gespraecheLesen(r abfrageAntwort) ([]rohGespraech, error) {
 	for i, c := range r.Columns {
 		spalte[c] = i
 	}
-	for _, c := range []string{"gespraech", "art", "titel", "groesse", "nachrichten", "zuletzt", "liste", "teilnehmer", "telefon", "mail"} {
+	for _, c := range []string{"gespraech", "art", "titel", "groesse", "nachrichten", "zuletzt", "liste", "sender", "teilnehmer", "telefon", "mail"} {
 		if _, da := spalte[c]; !da {
 			return nil, fmt.Errorf("msgvault-Abfrage ohne Spalte %q", c)
 		}
@@ -206,7 +217,7 @@ func gespraecheLesen(r abfrageAntwort) ([]rohGespraech, error) {
 			t, _ := time.Parse(time.RFC3339, text(z, "zuletzt"))
 			liste, _ := z[spalte["liste"]].(bool)
 			out = append(out, rohGespraech{ID: id, Art: text(z, "art"), Titel: strings.TrimSpace(text(z, "titel")), Groesse: zahl(z, "groesse"),
-				Nachrichten: zahl(z, "nachrichten"), Zuletzt: t, Liste: liste})
+				Nachrichten: zahl(z, "nachrichten"), Zuletzt: t, Sender: zahl(z, "sender"), Liste: liste})
 		}
 		g := &out[len(out)-1]
 		g.Wer = append(g.Wer, gespraechsTeilnehmer{ID: text(z, "teilnehmer"), Telefon: strings.TrimSpace(text(z, "telefon")), Mail: strings.TrimSpace(text(z, "mail"))})
@@ -237,8 +248,11 @@ func massenAdresse(mail string) bool {
 func gespraecheZuordnen(roh []rohGespraech, ks []buchKarte) []netzGespraech {
 	var out []netzGespraech
 	for _, r := range roh {
-		g := netzGespraech{ID: r.ID, Art: r.Art, Groesse: r.Groesse, Nachrichten: r.Nachrichten, Zuletzt: r.Zuletzt}
-		if r.Art == gespraechChat {
+		g := netzGespraech{ID: r.ID, Art: r.Art, Groesse: r.Groesse, Nachrichten: r.Nachrichten, Zuletzt: r.Zuletzt, Sender: r.Sender}
+		switch {
+		case r.Art == gespraechChat && r.Groesse == direktGroesse:
+			g.Art = gespraechDirekt
+		case r.Art == gespraechChat:
 			g.Titel = r.Titel
 		}
 		if !g.zaehlt() || r.Liste || slices.ContainsFunc(r.Wer, func(t gespraechsTeilnehmer) bool { return massenAdresse(t.Mail) }) {
@@ -301,8 +315,32 @@ func (u *Umfeld) gespraeche(ctx context.Context, tab *netzTabelle, ks []buchKart
 
 // gespraechSumme is what a pair's chats and threads add up to.
 type gespraechSumme struct {
-	s                    float64
+	s, roh, zuZweit      float64
 	chats, faeden, mails int
+	direkt               int
+	kontakt              time.Time
+}
+
+// dazu adds the conversation g to a pair's sum; true for a group chat.
+func (s *gespraechSumme) dazu(g netzGespraech, jetzt time.Time) bool {
+	verfall := math.Pow(0.5, max(0, jetzt.Sub(g.Zuletzt).Hours())/netzHalbwert.Hours())
+	if g.Groesse <= kontaktGroesse && g.Zuletzt.After(s.kontakt) {
+		s.kontakt = g.Zuletzt
+	}
+	if g.Art == gespraechDirekt {
+		s.direkt += g.Nachrichten
+		s.zuZweit += direktGewicht(g.Nachrichten) * verfall
+		return false
+	}
+	roh := gespraechGewicht[g.Art] / float64(max(1, g.Groesse-1))
+	s.s, s.roh = s.s+roh*verfall, s.roh+roh
+	if g.Art == gespraechChat {
+		s.chats++
+		return true
+	}
+	s.faeden++
+	s.mails += g.Nachrichten
+	return false
 }
 
 // gespraecheDazu adds the chats and threads to alle, between the
@@ -317,13 +355,15 @@ func (n *Netz) gespraecheDazu(alle map[[2]string]*Kante, nicht map[string]bool) 
 		}
 		var wer []string
 		for _, key := range g.Wer {
-			if id := n.von[key]; id != "" && !nicht[id] && !slices.Contains(wer, id) {
+			id := n.von[key]
+			if n.selbst[id] { // any card of hers is the person
+				id = n.ich
+			}
+			if id != "" && !nicht[id] && !slices.Contains(wer, id) {
 				wer = append(wer, id)
 			}
 		}
 		slices.Sort(wer)
-		alter := max(0, n.now().Sub(g.Zuletzt).Hours()) / netzHalbwert.Hours()
-		w := gespraechGewicht[g.Art] / float64(max(1, g.Groesse-1)) * math.Pow(0.5, alter)
 		for i, a := range wer {
 			for _, b := range wer[i+1:] {
 				s := summen[[2]string{a, b}]
@@ -331,28 +371,23 @@ func (n *Netz) gespraecheDazu(alle map[[2]string]*Kante, nicht map[string]bool) 
 					s = &gespraechSumme{}
 					summen[[2]string{a, b}] = s
 				}
-				s.s += w
-				if g.Art == gespraechChat {
-					s.chats++
+				if s.dazu(g, n.now()) {
 					n.paarGruppen[paarKey(a, b)] = append(n.paarGruppen[paarKey(a, b)], g.ID)
-				} else {
-					s.faeden++
-					s.mails += g.Nachrichten
 				}
 			}
 		}
 	}
 	for key, s := range summen {
-		k := alle[key]
+		k := alle[key] // one without the evidence of a tie leaves again (bauen, belegt)
 		if k == nil {
-			if s.chats+s.faeden < gespraecheMin {
-				continue
-			}
 			k = &Kante{A: key[0], B: key[1]}
 			alle[key] = k
 		}
-		add := min(s.s, gespraechDeckel)
-		k.Staerke, k.Rang = k.Staerke+add, k.Rang+add
+		add := min(s.s, gespraechDeckel) + min(s.zuZweit, direktDeckel)
+		k.Staerke, k.Rang, k.Beleg, k.Direkt = k.Staerke+add, k.Rang+add, k.Beleg+s.roh, s.direkt
+		if s.kontakt.After(k.Kontakt) {
+			k.Kontakt = s.kontakt
+		}
 		k.Chats, k.Mails, k.Faeden, k.Gruppen = s.chats, s.mails, s.faeden, n.paarGruppen[paarKey(key[0], key[1])]
 	}
 }
@@ -360,6 +395,9 @@ func (n *Netz) gespraecheDazu(alle map[[2]string]*Kante, nicht map[string]bool) 
 // gespraechGruende are the tie's chats and mails as reasons: „in 3
 // Gruppen-Chats“, „12 Mails zusammen“.
 func gespraechGruende(k Kante) (out []string) {
+	if k.Direkt > 0 {
+		out = append(out, anzahlT(k.Direkt, "Nachricht", "Nachrichten")+" zu zweit")
+	}
 	switch {
 	case k.Chats == 1:
 		out = append(out, "in einem Gruppen-Chat")
@@ -394,15 +432,18 @@ func gespraecheWerkzeug(args []string, ein io.Reader, aus io.Writer) int {
 		return 1
 	}
 	for _, g := range gs {
-		n := netzGespraech{Art: g.Art, Groesse: g.Groesse}
+		n := netzGespraech{Art: g.Art, Groesse: g.Groesse, Sender: 2} // listed whoever wrote
+		titel := ""
+		switch {
+		case g.Art == gespraechChat && g.Groesse == direktGroesse:
+			n.Art, titel = gespraechDirekt, fmt.Sprintf(" %d", g.Sender) // a chat of two with how many of them wrote
+		case g.Art == gespraechChat:
+			titel = " " + g.Titel
+		}
 		if !n.zaehlt() {
 			continue
 		}
-		titel := ""
-		if g.Art == gespraechChat {
-			titel = " " + g.Titel
-		}
-		fmt.Fprintf(aus, "%s %d %d %t%s\n", g.Art, g.Groesse, g.Nachrichten, g.Liste, titel)
+		fmt.Fprintf(aus, "%s %d %d %t%s\n", n.Art, g.Groesse, g.Nachrichten, g.Liste, titel)
 	}
 	return 0
 }
