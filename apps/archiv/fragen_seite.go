@@ -30,6 +30,7 @@ const (
 	saysNichtZurueck  = "Das ließ sich nicht rückgängig machen: Homes antwortet gerade nicht. Versuch es gleich noch einmal."
 	saysNichtEin      = "Homes hat es gerade nicht eingetragen. Versuch es gleich noch einmal."
 	antwortPfad       = "/tresor/umfeld/antwort"
+	saysGruppeBleibt  = "bleibt in deinem Archiv: hilft bei den Fragen zu ihren Mitgliedern, kommt in kein Adressbuch"
 )
 
 // haeufig are the kinds offered first, after the suggestion.
@@ -83,6 +84,9 @@ func nochZu(rest int) string {
 // frageKarte is the question f as one form: of the visit's portion with
 // rest left in it, or (mehr) one beyond it, with a way out, no count.
 func (w *Web) frageKarte(n *Netz, f Frage, rest int, mehr bool) string {
+	if f.Gruppe != nil {
+		return gruppenKarte(*f.Gruppe, rest, mehr)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, `<form method=post action="%s" class="frage sofort" id=frage><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value=/tresor>`,
 		antwortPfad, esc(f.X.ID), esc(f.Y.ID))
@@ -112,11 +116,50 @@ func (w *Web) frageKarte(n *Netz, f Frage, rest int, mehr bool) string {
 	}
 	punkt, satz := w.wohinSatz(n.Uebernahme(f.X.ID, f.Y.ID, ""))
 	fmt.Fprintf(&b, `<p class=wohin><span class="punkt %s"></span>%s</p>`, punkt, esc(satz))
+	b.WriteString(kartenFuss(rest, mehr))
+	return b.String()
+}
+
+// kartenFuss is a question card's footer: Später, and the portion's rest
+// or (mehr) the way out.
+func kartenFuss(rest int, mehr bool) string {
 	fuss := `<span class=k>` + esc(nochZu(rest)) + `</span>`
 	if mehr {
 		fuss = `<a class=k href="/tresor?tab=fragen">Genug für jetzt</a>`
 	}
-	fmt.Fprintf(&b, `<div class=fuss><button name=art value=spaeter class=leise data-laeuft="Legt es nach hinten …">Später</button>%s</div></form>`, fuss)
+	return fmt.Sprintf(`<div class=fuss><button name=art value=spaeter class=leise data-laeuft="Legt es nach hinten …">Später</button>%s</div></form>`, fuss)
+}
+
+// gruppenGesichter is how many members' initials a group card shows.
+const gruppenGesichter = 6
+
+// gruppenKarte is „Wie würdest du die Gruppe „…“ nennen?“ (gruppen.go):
+// the members' initials (never a message), the categories as chips, the
+// title's suggestion marked, and that the answer stays in the archive.
+func gruppenKarte(g GruppenFrage, rest int, mehr bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<form method=post action="%s" class="frage sofort" id=frage><input type=hidden name=gruppe value="%s"><input type=hidden name=zurueck value=/tresor>`,
+		antwortPfad, esc(g.ID))
+	if mehr {
+		b.WriteString(`<input type=hidden name=mehr value=1>`)
+	}
+	b.WriteString(`<div class=gesichter>`)
+	for _, k := range g.Mitglieder[:min(len(g.Mitglieder), gruppenGesichter)] {
+		b.WriteString(gesicht(k.Name))
+	}
+	if uebrig := len(g.Mitglieder) - gruppenGesichter; uebrig > 0 {
+		fmt.Fprintf(&b, `<span class=k>+%d</span>`, uebrig)
+	}
+	fmt.Fprintf(&b, `</div><h2>%s</h2><div class=chips>`, esc("Wie würdest du die Gruppe „"+g.Titel+"“ nennen?"))
+	for _, k := range kategorien {
+		b.WriteString(chip(k, kategorieWorte[k], map[bool]string{true: " vorschlag"}[k == g.Vorschlag]))
+	}
+	b.WriteString(`</div>`)
+	if g.Vorschlag != "" {
+		fmt.Fprintf(&b, `<p class=k>%s</p>`, esc("Vorschlag, weil „"+g.Wort+"“ im Namen der Gruppe steht."))
+	}
+	fmt.Fprintf(&b, `<p class=wohin><span class="punkt grau"></span>%s</p>`, esc(saysGruppeBleibt))
+	b.WriteString(kartenFuss(rest, mehr))
 	return b.String()
 }
 
@@ -160,38 +203,72 @@ func (w *Web) standSatz(g Gegeben) string {
 // after ten seconds (the stylesheet), the answer stays undoable under
 // „Deine Antworten“. One Rückgängig takes back the answer and its chain.
 func (w *Web) toast(n *Netz, key, zurueck string) string {
-	g, ok := n.Gegebenes(key)
-	if !ok {
-		return ""
-	}
-	text := strings.TrimSuffix(gegebenSatz(g), ".") + " · " + w.standSatz(g)
-	for _, d := range n.Gefolgerte(key) {
-		text += " · daraus: weil " + d.Weil + ", ist " + d.X.Name + " " + kurzWort(d.Art) + " von " + duOder(d.Y, d.Ich)
+	text := ""
+	if id, gruppe := strings.CutPrefix(key, "gruppe:"); gruppe {
+		e, ok := n.Eingeordnetes(id)
+		if !ok {
+			return ""
+		}
+		text = strings.TrimSuffix(eingeordnetSatz(e), ".") + " · gemerkt, kommt in kein Adressbuch"
+	} else {
+		g, ok := n.Gegebenes(key)
+		if !ok {
+			return ""
+		}
+		text = strings.TrimSuffix(gegebenSatz(g), ".") + " · " + w.standSatz(g)
+		for _, d := range n.Gefolgerte(key) {
+			text += " · daraus: weil " + d.Weil + ", ist " + d.X.Name + " " + kurzWort(d.Art) + " von " + duOder(d.Y, d.Ich)
+		}
 	}
 	return fmt.Sprintf(`<div class=toast role=status><span>✓ %s</span><form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s"><button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button></form></div>`,
 		esc(text), antwortPfad, esc(key), esc(zurueck))
 }
 
-// antwortenListe is „Deine Antworten“: each with what the phone books say,
-// what became of it, Eintragen when Homes has not, and Vergessen.
+// offenEinzutragen: Homes has not taken g, though it goes somewhere.
+func (w *Web) offenEinzutragen(g Gegeben) bool {
+	return g.Eingetragen == nil && g.Karte.Wohin != "" && slices.Contains(arten, g.Art) && w.homesVerbunden()
+}
+
+// antwortenListe is „Deine Antworten (N)“, folded by default (owner
+// 2026-11-11: „viel Text mit wenig Wert“; <details>, no script needed),
+// the newest first when open, each with what became of it and Vergessen.
+// Answers Homes has not taken are one line outside the fold, with one
+// „erneut versuchen“ for all of them.
 func (w *Web) antwortenListe(b *strings.Builder, n *Netz, zurueck string) {
 	gs := n.Gegebene()
 	if len(gs) == 0 {
 		return
 	}
-	b.WriteString(`<section id=antworten class=karte><h2>Deine Antworten</h2><ul>`)
+	offen := 0
 	for _, g := range gs {
-		fmt.Fprintf(b, `<li class=tu><div>%s<span class=k>%s`, esc(gegebenSatz(g)), esc(w.standSatz(g)))
-		if g.Buch != "" {
-			fmt.Fprintf(b, ` · im Telefonbuch: %s`, esc(g.Buch))
+		if w.offenEinzutragen(g) {
+			offen++
 		}
-		fmt.Fprintf(b, `</span></div><form method=post action="%s" class="knoepfe sofort"><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s">`, antwortPfad, esc(g.Key), esc(zurueck))
-		if g.Eingetragen == nil && g.Karte.Wohin != "" && w.homesVerbunden() {
-			b.WriteString(`<button name=tu value=eintragen data-laeuft="Trägt ein …">Eintragen</button>`)
-		}
-		b.WriteString(`<button name=tu value=vergessen class=leise data-laeuft="Vergisst …">Vergessen</button></form></li>`)
 	}
-	b.WriteString(`</ul><p class=k>Vergessen nimmt eine Antwort zurück, auch aus dem Adressbuch, und die Frage kommt wieder.</p></section>`)
+	if offen > 0 {
+		fmt.Fprintf(b, `<form method=post action="%s" class="knoepfe sofort nachtrag"><input type=hidden name=zurueck value="%s"><span>%s ·</span><button name=tu value=alle-eintragen class=leise data-laeuft="Trägt ein …">erneut versuchen</button></form>`,
+			antwortPfad, esc(zurueck), esc(anzahl(offen, "Antwort", "Antworten")+" noch nicht eingetragen"))
+	}
+	fmt.Fprintf(b, `<details id=antworten class=karte><summary>Deine Antworten (%d)</summary><ul>`, len(gs))
+	for _, g := range gs {
+		fmt.Fprintf(b, `<li class=tu><div>%s<span class=k>%s</span></div><form method=post action="%s" class="knoepfe sofort"><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s"><button name=tu value=vergessen class=leise data-laeuft="Vergisst …">Vergessen</button></form></li>`,
+			esc(gegebenSatz(g)), esc(w.standSatz(g)), antwortPfad, esc(g.Key), esc(zurueck))
+	}
+	b.WriteString(`</ul><p class=k>Vergessen nimmt eine Antwort zurück, auch aus dem Adressbuch, und die Frage kommt wieder.</p></details>`)
+}
+
+// gruppenListe is „Deine Gruppen“: each group the person named, with Vergessen.
+func gruppenListe(b *strings.Builder, n *Netz, zurueck string) {
+	es := n.Eingeordnete()
+	if len(es) == 0 {
+		return
+	}
+	fmt.Fprintf(b, `<details id=gruppen class=karte><summary>Deine Gruppen (%d)</summary><ul>`, len(es))
+	for _, e := range es {
+		fmt.Fprintf(b, `<li class=tu><div>%s</div><form method=post action="%s" class="knoepfe sofort"><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s"><button name=tu value=vergessen class=leise data-laeuft="Vergisst …">Vergessen</button></form></li>`,
+			esc(eingeordnetSatz(e)), antwortPfad, esc(gruppeKey(e.ID)), esc(zurueck))
+	}
+	b.WriteString(`</ul><p class=k>Gruppen bleiben in deinem Archiv; Vergessen stellt die Frage wieder.</p></details>`)
 }
 
 // zurueckNach is where an answer's form goes back to: the main page's
@@ -225,6 +302,27 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		}
 		return mitAnfrage(zurueck, v)
 	}
+	if id, gruppe := strings.CutPrefix(key, "gruppe:"); gruppe && r.PostFormValue("tu") == "vergessen" { // a group's category: only in the vault
+		if err := w.Umfeld.Ausordnen(innen, id); err != nil {
+			w.antwortFehler(rw, r, zurueck, err)
+			return
+		}
+		http.Redirect(rw, r, weiter(url.Values{"m": {"zurueck"}}), http.StatusSeeOther)
+		return
+	}
+	if id := r.PostFormValue("gruppe"); id != "" {
+		kat := r.PostFormValue("art")
+		if _, err := w.Umfeld.Einordnen(innen, id, kat); err != nil {
+			w.antwortFehler(rw, r, zurueck, err)
+			return
+		}
+		v := url.Values{"getan": {gruppeKey(id)}}
+		if kat == artSpaeter {
+			v = url.Values{}
+		}
+		http.Redirect(rw, r, weiter(v), http.StatusSeeOther)
+		return
+	}
 	switch r.PostFormValue("tu") {
 	case "vergessen":
 		if err := w.ausHomes(r.Context(), innen, key); err != nil {
@@ -237,6 +335,18 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 		http.Redirect(rw, r, weiter(url.Values{"m": {"zurueck"}}), http.StatusSeeOther)
+		return
+	case "alle-eintragen": // the line outside „Deine Antworten“: every answer Homes has not taken
+		for _, g := range w.Umfeld.Netz().Gegebene() {
+			if !w.offenEinzutragen(g) {
+				continue
+			}
+			if err := w.eintragen(r.Context(), innen, g.Key); err != nil {
+				w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtEin)
+				return
+			}
+		}
+		http.Redirect(rw, r, weiter(url.Values{}), http.StatusSeeOther)
 		return
 	case "eintragen":
 		if err := w.eintragen(r.Context(), innen, key); err != nil {

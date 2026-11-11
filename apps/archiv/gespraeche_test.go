@@ -247,7 +247,7 @@ func TestGespraecheImNetz(t *testing.T) {
 	if want := 2.0/4 + 2.0/2*0.5; math.Abs(k.Staerke-want) > 1e-9 || k.Rang != k.Staerke || k.Chats != 2 || k.Mails != 0 {
 		t.Fatalf("Anna–Ben: %+v, want %v", k, want)
 	}
-	if g := n.Gruende("haushalt/a", k); g != "in 2 Gruppen-Chats" {
+	if g := n.Gruende("haushalt/a", k); g != "in 2 Gruppen-Chats · Familie (Gruppe „Familie“) · Reisegruppe „Urlaub“" { // the titles' categories (gruppen.go)
 		t.Fatalf("reasons: %q", g)
 	}
 

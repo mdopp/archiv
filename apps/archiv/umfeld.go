@@ -27,7 +27,9 @@ import (
 // It reads, never writes: Immich (search/metadata, api-keys/me,
 // users/me), the archive's own contact store (handy-kontakte), through
 // the archive's Radicale login the household book homes/haushalt-kontakte,
-// and msgvault's group chats and mail threads (gespraeche.go).
+// and msgvault's group chats and mail threads (gespraeche.go) and the
+// messages with a relation word, which it asks the box's model about
+// (hinweise.go).
 
 const (
 	netzFormat             = "archiv-umfeld"
@@ -62,6 +64,7 @@ type Umfeld struct {
 	URL        string       // IMMICH_URL; "" not set up
 	Radicale   *Radicale    // for the household book; nil: not set up
 	Msgvault   *MsgvaultAPI // the group chats and mail threads (gespraeche.go); nil: not read
+	Modell     *Modell      // the box's model, for the relation hints (hinweise.go); nil: none
 	Schluessel Schluessel   // the person's own number (outside), to find their card
 	// Takt is UMFELD_TAKT. A round is not Tresor.Arbeit: hourly rounds
 	// would keep the vault from ever closing by idleness (LEERLAUF, 2 h);
@@ -206,13 +209,22 @@ func (u *Umfeld) laden(innen Innen) {
 		return
 	}
 	u.halt.Lock()
-	n := neuesNetz(tab, verborgenLaden(innen), antwortenLaden(innen), u.Loc, u.Now)
+	n := u.netzBauen(innen, tab)
 	u.mu.Lock()
 	u.netz = n
 	u.stand.Am, u.stand.Fotos = tab.Geholt, len(tab.Fotos)
 	u.mu.Unlock()
 	u.halt.Unlock()
 	u.geaendert()
+}
+
+// netzBauen is the net of tab with what the vault keeps beside it: who is
+// hidden, the answers, the groups' categories and what the model read.
+func (u *Umfeld) netzBauen(innen Innen, tab netzTabelle) *Netz {
+	n := neuesNetz(tab, verborgenLaden(innen), antwortenLaden(innen), u.Loc, u.Now)
+	n.gruppen = gruppenLaden(innen)
+	n.hinweiseSetzen(hinweiseLaden(innen))
+	return n
 }
 
 func tabelleLaden(innen Innen) (netzTabelle, error) {
@@ -332,7 +344,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 		fehler = cmp.Or(fehler, saysUmfeldSpeichern)
 	}
 	u.halt.Lock()
-	n := neuesNetz(tab, verborgenLaden(innen), antwortenLaden(innen), u.Loc, u.Now)
+	n := u.netzBauen(innen, tab)
 	u.mu.Lock()
 	u.netz = n
 	u.halt.Unlock()
@@ -346,6 +358,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 		personen, kanten := n.Groesse()
 		log.Printf("archiv: Umfeld gerechnet: %d Fotos mit Personen, %d Personen, %d Verbindungen", len(tab.Fotos), personen, kanten)
 	}
+	u.hinweiseRunde(ctx, innen, n, ks)
 }
 
 // haushalt reads the household book into tab.Haushalt; on a refusal or
@@ -420,8 +433,36 @@ func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) []buch
 			return slices.ContainsFunc(k.tels, func(t string) bool { return gleicheEndziffern(t, string(nummer)) })
 		})
 	}
+	tab.IchAuch = selbstKarten(ks, tab.Ich)
 	tab.Fest = append(gruppen(ks), beziehungen(ks)...)
 	return ks
+}
+
+// selbstKarten are the keys of the other cards that are the person's too
+// (owner 2026-11-11: she was „Steht nahe“'s first): the same name
+// (umlauts alike), or a number or an address of her own card.
+func selbstKarten(ks []buchKarte, ich string) (out []string) {
+	i := slices.IndexFunc(ks, func(k buchKarte) bool { return k.key == ich })
+	if i < 0 {
+		return nil
+	}
+	eigen := ks[i]
+	for _, k := range ks {
+		if k.key == ich {
+			continue
+		}
+		gleich := klar(k.name) == klar(eigen.name) ||
+			slices.ContainsFunc(k.tels, func(t string) bool {
+				return slices.ContainsFunc(eigen.tels, func(e string) bool { return gleicheEndziffern(t, e) })
+			}) ||
+			slices.ContainsFunc(k.emails, func(m string) bool {
+				return slices.ContainsFunc(eigen.emails, func(e string) bool { return strings.EqualFold(strings.TrimSpace(m), strings.TrimSpace(e)) })
+			})
+		if gleich {
+			out = append(out, k.key)
+		}
+	}
+	return out
 }
 
 // eigeneKarte is the first card that is the person's, a household card
@@ -501,4 +542,34 @@ func (u *Umfeld) Vergessen(innen Innen, key string) error {
 		return err
 	}
 	return jsonImTresor(innen.umfeldAntworten(), alle)
+}
+
+// Einordnen keeps the person's category of the group id in the open vault (gruppen.go).
+func (u *Umfeld) Einordnen(innen Innen, id, kat string) (Frage, error) {
+	u.halt.Lock()
+	defer u.halt.Unlock()
+	n := u.Netz()
+	if n == nil {
+		return Frage{}, errUmfeldZu
+	}
+	f, alle, err := n.Einordnen(id, kat)
+	if err != nil {
+		return f, err
+	}
+	return f, jsonImTresor(innen.umfeldGruppen(), alle)
+}
+
+// Ausordnen drops the category of the group id from the open vault.
+func (u *Umfeld) Ausordnen(innen Innen, id string) error {
+	u.halt.Lock()
+	defer u.halt.Unlock()
+	n := u.Netz()
+	if n == nil {
+		return errUmfeldZu
+	}
+	alle, err := n.Ausordnen(id)
+	if err != nil {
+		return err
+	}
+	return jsonImTresor(innen.umfeldGruppen(), alle)
 }

@@ -1128,5 +1128,5 @@ ol{padding-left:1.2rem}li{margin:.3rem 0}form.zeile{display:flex;justify-content
 .vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0}
 .netzbild{display:block;width:100%;max-width:400px;height:auto;margin:1rem auto 0}.netzbild line{stroke:var(--muted);stroke-linecap:round}.netzbild line.zw{stroke:var(--line);stroke-width:.6}
 .netzbild circle{fill:var(--bg);stroke:var(--accent);stroke-width:1.5}.netzbild .mitte circle{fill:var(--accent)}.netzbild text{fill:var(--ink);font-size:10px;text-anchor:middle}.netzbild a:focus circle,.netzbild a:hover circle{fill:var(--accent)}
-ol.nahe,ul.nahe{padding-left:1.4rem}.nahe li{margin:.7rem 0}.nahe form.knoepfe{margin:.2rem 0 0}.nahe button{min-height:36px;padding:0 12px;font-size:.85rem}
+ol.nahe,ul.nahe{padding-left:1.4rem}.nahe li{margin:.7rem 0}details.karte>summary{padding:0 14px}details.karte ul{list-style:none;margin:0;padding:0}.nachtrag{margin:10px 0}.nahe a.zeile{display:block;min-height:44px;padding:4px 0;text-decoration:none}.nahe a.zeile .k{display:block}.aktionen{display:flex;flex-wrap:wrap;gap:24px;margin:12px 0 4px}.aktionen form{margin:0}.nahe form.knoepfe{margin:.2rem 0 0}.nahe button{min-height:36px;padding:0 12px;font-size:.85rem}
 `

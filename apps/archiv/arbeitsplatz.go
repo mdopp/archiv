@@ -121,7 +121,7 @@ func naheListe(b *strings.Builder, n *Netz) {
 	fmt.Fprintf(b, `<section class=karte><h2>%s</h2><ul class=leute>`, esc(titel))
 	for _, v := range vs {
 		fmt.Fprintf(b, `<li><a href="%s">%s<span class=wer>%s<span class=k>%s</span></span><span class=balken><b style="width:%.0f%%"></b></span></a></li>`,
-			esc(umfeldMitte(v.Mit.ID)), gesicht(v.Mit.Name), esc(v.Mit.Name), esc(n.Gruende(mitte, v.Kante)), 100*v.Kante.Staerke/vs[0].Kante.Staerke)
+			esc(umfeldMitte(v.Mit.ID)), gesicht(v.Mit.Name), esc(n.Anzeige(v.Mit)), esc(n.Gruende(mitte, v.Kante)), 100*v.Kante.Staerke/vs[0].Kante.Staerke)
 	}
 	b.WriteString(`</ul></section><p class=weiter-in><a href="/tresor/umfeld">Bild, alle und Ausgeblendete</a><span class=k>Tipp auf eine Person: wer ihr nahe steht.</span></p>`)
 }

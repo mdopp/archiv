@@ -236,8 +236,8 @@ func TestBesuch(t *testing.T) {
 }
 
 // Homes down: the answer stays in the vault, the toast says it is not
-// written, „Deine Antworten“ offers Eintragen, which writes once Homes is
-// back; a Rückgängig Homes did not take leaves both as they were. Without
+// written, one line outside the folded „Deine Antworten“ offers „erneut
+// versuchen“, which writes all of them once Homes is back; a Rückgängig Homes did not take leaves both as they were. Without
 // Homes the card says the answer stays in the archive for now.
 func TestEinTippOhneHomes(t *testing.T) {
 	wt, _, homes, innen := eintragenBox(t)
@@ -251,20 +251,29 @@ func TestEinTippOhneHomes(t *testing.T) {
 		t.Fatalf("the vault: %s", b)
 	}
 	umfeld := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
-	if !strings.Contains(umfeld, "<h2>Deine Antworten</h2>") || !strings.Contains(umfeld, `<button name=tu value=eintragen`) || !strings.Contains(umfeld, "2 Fragen zum Nachbessern") {
-		t.Fatalf("Deine Antworten:\n%s", umfeld)
+	nachtrag := strings.Index(umfeld, "2 Antworten noch nicht eingetragen ·</span><button name=tu value=alle-eintragen")
+	falte := strings.Index(umfeld, "<details id=antworten class=karte><summary>Deine Antworten (2)</summary>")
+	if nachtrag < 0 || falte < 0 || nachtrag > falte || strings.Contains(umfeld, "<details id=antworten class=karte open") || !strings.Contains(umfeld, "2 Fragen zum Nachbessern") {
+		t.Fatalf("Deine Antworten folded, the retry one line outside (owner 2026-11-11):\n%s", umfeld)
 	}
-	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {key}, "tu": {"eintragen"}, "zurueck": {"/tresor/umfeld"}}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), esc(saysNichtEin)) {
-		t.Fatalf("Eintragen while down: %d", rec.Code)
+	if strings.Contains(umfeld, "value=eintragen") || strings.Count(umfeld, "noch nicht eingetragen") != 3 { // the line and the two answers' state inside the fold
+		t.Fatalf("one retry line only:\n%s", umfeld)
+	}
+	if i, j := strings.Index(umfeld, "Kim Berg ist Kind von dir."), strings.Index(umfeld, "Fritz Kurz ist Onkel/Tante von Kim Berg."); i < 0 || j < 0 {
+		t.Fatalf("the answers inside:\n%s", umfeld)
+	}
+	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"tu": {"alle-eintragen"}, "zurueck": {"/tresor/umfeld"}}); rec.Code != http.StatusBadGateway || !strings.Contains(rec.Body.String(), esc(saysNichtEin)) {
+		t.Fatalf("erneut versuchen while down: %d", rec.Code)
+	}
+	if rec := wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {key}, "tu": {"eintragen"}, "zurueck": {"/tresor/umfeld"}}); rec.Code != http.StatusBadGateway {
+		t.Fatalf("Eintragen of one while down: %d", rec.Code)
 	}
 	homes.kaputt = false
-	for i, k := range []string{key, paarKey("p-fritz", "p-kim")} {
-		ziel, umfeld := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {k}, "tu": {"eintragen"}, "zurueck": {"/tresor/umfeld"}}))
-		if !strings.HasPrefix(ziel, "/tresor/umfeld?") || len(homes.genommen()) != i+1 || strings.Count(umfeld, ">eingetragen, kommt auf dein Handy</span>") != i+1 {
-			t.Fatalf("Eintragen %s: %s %d\n%s", k, ziel, len(homes.genommen()), umfeld)
-		}
+	ziel, umfeld := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"tu": {"alle-eintragen"}, "zurueck": {"/tresor/umfeld"}}))
+	if !strings.HasPrefix(ziel, "/tresor/umfeld") || len(homes.genommen()) != 2 || strings.Count(umfeld, ">eingetragen, kommt auf dein Handy</span>") != 2 {
+		t.Fatalf("erneut versuchen: %s %d\n%s", ziel, len(homes.genommen()), umfeld)
 	}
-	if umfeld := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String(); strings.Contains(umfeld, "value=eintragen") {
+	if umfeld := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String(); strings.Contains(umfeld, "alle-eintragen") || strings.Contains(umfeld, "noch nicht eingetragen") {
 		t.Fatal("still offered after both were written")
 	}
 	homes.kaputt = true

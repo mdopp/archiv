@@ -1,0 +1,208 @@
+# Beziehungswörter (archiv#27, owner 2026-11-11): the words that hint at
+# how two people relate, in the languages the family writes in. Edit
+# freely; the archive reads this file as it is built (woerter.go), and
+# `go test` checks it (TestWoerterDatei).
+#
+# - Each word is one word, letters only (no spaces, no hyphen). Case and
+#   umlauts do not matter: „Schwägerin“ also finds „SCHWAEGERIN“ and
+#   „Schwagerin“, „kardeşim“ also „kardesim“.
+# - beziehung: the kinds a word hints at, as the archive's question
+#   names them, seen from the one who writes or saves it: „Mama“ is the
+#   writer's Mutter/Vater (eltern). A word may stand under several kinds;
+#   the first one it stands under is the suggestion.
+#   Kinds: partner, expartner, eltern, kind, geschwister, grosseltern,
+#   enkel, onkel (Onkel/Tante), neffe (Neffe/Nichte), cousin,
+#   schwiegereltern, schwiegerkind, schwager, verwandt.
+# - A word found in a message only sends that message to the box's own
+#   model, which judges it; nothing is set without the person's tap.
+#   A contact whose name begins with one („Oma Hilde“, „Mama“) gets the
+#   suggestion without the model, unless the word is in nicht_im_namen.
+# - gruppe: words in a group chat's title that suggest its category; the
+#   first category of this list that a title has wins („Eltern 3b“ is an
+#   Elterngruppe, not a Klasse). A title with a family word of beziehung
+#   („Oma & Opa“) is a Familie.
+
+beziehung:
+  - art: partner
+    de: [Schatz, Schatzi, Schätzchen, Schatzili, Liebling, Liebste, Liebster, Hasi, Häschen, Mausi, Bärchen, Herzblatt, Ehemann, Ehefrau, Gatte, Gattin, Partner, Partnerin, Verlobte, Verlobter]
+    en: [honey, sweetheart, darling, babe, hubby, wifey, husband, wife, fiance, fiancee, sweetie]
+    es: [cariño, amor, esposo, esposa, marido, novio, novia]
+    fr: [chéri, chérie, amour, mari, épouse]
+    tr: [aşkım, canım, sevgilim, kocam, karım, eşim]
+    pl: [kochanie, skarbie, misiu, mąż, żona]
+    ru: [любимая, любимый, милая, милый, муж, жена, lyubimaya, lyubimy, muzh, zhena]
+    ar: [habibi, habibti, hayati, zawji, zawjati, حبيبي, حبيبتي, زوجي, زوجتي]
+  - art: expartner
+    de: [Exmann, Exfrau, Exfreund, Exfreundin]
+    en: [exwife, exhusband]
+  - art: eltern
+    de: [Mama, Mami, Mutti, Mutter, Mamma, Papa, Papi, Vati, Vater, Paps]
+    en: [mom, mum, mommy, mummy, mother, dad, daddy, father]
+    es: [mamá, papá, madre, padre]
+    fr: [maman, mère, père]
+    tr: [anne, annem, anneciğim, baba, babam, babacığım]
+    pl: [mamo, mamusia, tato, tata, tatuś]
+    ru: [мама, папа, мамочка, папочка, мать, отец, mamochka, papochka]
+    ar: [ummi, umi, yamma, ماما, بابا, أمي, أبي]
+  - art: kind
+    de: [Sohn, Sohnemann, Tochter, Töchterchen, Spatz, Schatz, Mausi]
+    en: [son, daughter, sonny]
+    es: [hijo, hija, mijo, mija]
+    fr: [fils, fille]
+    tr: [oğlum, kızım]
+    pl: [syn, synu, synku, córka, córeczko]
+    ru: [сын, сынок, дочь, доченька, synok, dochka, docha]
+    ar: [ibni, binti]
+  - art: geschwister
+    de: [Bruder, Bruderherz, Brüderchen, Schwester, Schwesterherz, Schwesterchen, Bro, Sis, Geschwister]
+    en: [brother, sister, sibling, siblings]
+    es: [hermano, hermana, hermanito, hermanita]
+    fr: [frère, sœur, frangin, frangine]
+    tr: [kardeşim, abla, ablam, abi, abim, ağabey]
+    pl: [brat, brachu, siostra, siostrzyczko, siora]
+    ru: [брат, сестра, братик, сестрёнка, bratik, sestra, sestrenka]
+    ar: [akhi, ukhti, akhoya, okhti, أخي, أختي]
+  - art: grosseltern
+    de: [Oma, Omi, Omma, Opa, Opi, Oppa, Großmutter, Großvater, Uroma, Uropa]
+    en: [grandma, grandpa, granny, grandmother, grandfather, nana, grampa]
+    es: [abuela, abuelo, abuelita, abuelito]
+    fr: [mamie, mémé, papi, pépé]
+    tr: [babaanne, anneanne, dede, dedem, ninem]
+    pl: [babcia, babciu, dziadek, dziadku]
+    ru: [бабушка, дедушка, babushka, dedushka, babulya, deda]
+    ar: [jiddo, jedo, teta, sitti, sitto, تيتا, جدي, جدتي]
+  - art: enkel
+    de: [Enkel, Enkelin, Enkelkind, Enkelchen]
+    en: [grandson, granddaughter, grandchild]
+    es: [nieto, nieta]
+    tr: [torun, torunum]
+    pl: [wnuk, wnuczka, wnusiu]
+    ru: [внук, внучка, vnuk, vnuchka]
+  - art: onkel
+    de: [Onkel, Onkelchen, Tante, Tantchen]
+    en: [uncle, aunt, auntie, aunty]
+    es: [tío, tía]
+    fr: [oncle, tonton, tata]
+    tr: [amca, dayı, teyze, hala, enişte, yenge]
+    pl: [wujek, wujku, ciocia, ciociu, stryjek]
+    ru: [дядя, тётя, dyadya, tyotya, tetya]
+    ar: [ammo, khalo, khalto, khalti, ammti, amto, عمي, خالي, عمتي, خالتي]
+  - art: neffe
+    de: [Neffe, Nichte]
+    en: [nephew, niece]
+    es: [sobrino, sobrina]
+    fr: [neveu, nièce]
+    tr: [yeğen, yeğenim]
+    pl: [bratanek, bratanica, siostrzeniec, siostrzenica]
+    ru: [племянник, племянница, plemyannik, plemyannitsa]
+  - art: cousin
+    de: [Cousin, Cousine, Kusine, Vetter]
+    es: [primito, primita]
+    fr: [cousine]
+    tr: [kuzen, kuzenim]
+    pl: [kuzyn, kuzynka]
+    ru: [кузен, кузина, kuzen]
+  - art: schwiegereltern
+    de: [Schwiegermutter, Schwiegervater, Schwiegermama, Schwiegerpapa, Schwiegermutti, Schwiegereltern]
+    es: [suegra, suegro]
+    tr: [kaynana, kaynanam, kayınvalide, kayınpeder]
+    pl: [teściowa, teść, teściu]
+    ru: [свекровь, свёкор, тёща, тесть, svekrov]
+    ar: [hamati, hamaya]
+  - art: schwiegerkind
+    de: [Schwiegersohn, Schwiegertochter]
+    es: [yerno, nuera]
+    fr: [gendre]
+    tr: [damat, gelin]
+    pl: [zięć, synowa]
+    ru: [зять, невестка, zyat, nevestka]
+  - art: schwager
+    de: [Schwager, Schwägerin, Schwippschwager]
+    es: [cuñado, cuñada]
+    tr: [enişte, yenge, baldız, görümce, bacanak, elti]
+    pl: [szwagier, szwagierka, bratowa]
+    ru: [шурин, деверь, золовка, свояченица, shurin]
+  - art: verwandt
+    de: [Verwandte, Verwandter, Verwandtschaft]
+    en: [relative, relatives]
+    es: [pariente, parientes]
+    tr: [akraba, akrabam]
+    pl: [krewny, krewna]
+    ru: [родственник, родственница]
+
+# Words that are also given or family names: they send a message to the
+# model, but a contact named so („Anne Berg“) gets no suggestion.
+nicht_im_namen: [Anne, Hala, Abi, Bro, Sis, Brat, Mari, Amor, Nana, Sonny, Gelin, Damat, Tata, Vetter, Spatz, Partner]
+
+gruppe:
+  - kategorie: elterngruppe
+    de: [Eltern, Elternabend, Elternbeirat, Elternrat, Elternvertreter, Kita, Kiga, Kindergarten, Krippe, Hort]
+    en: [parents, daycare, kindergarten, nursery, preschool, pta]
+    es: [padres, guardería]
+    fr: [parents, crèche, maternelle]
+    tr: [veli, veliler]
+    pl: [rodzice, przedszkole]
+    ru: [родители]
+  - kategorie: familie
+    de: [Familie, Familienchat, Fam, Sippe, Clan, Family]
+    en: [family, fam]
+    es: [familia]
+    fr: [famille]
+    tr: [aile, ailem]
+    pl: [rodzina, rodzinka]
+    ru: [семья, semya]
+    ar: [عائلة]
+  - kategorie: klasse
+    de: [Klasse, Klassentreffen, Jahrgang, Abi, Abitur, Abschluss, Schule, Stufe, Kurs, Semester, Uni, Studium]
+    en: [class, classmates, school, reunion, college]
+    es: [clase, colegio, escuela, cole]
+    fr: [classe, école, promo, lycée, fac]
+    tr: [sınıf, okul]
+    pl: [klasa, szkoła]
+    ru: [класс, klass]
+  - kategorie: arbeit
+    de: [Arbeit, Büro, Firma, Kollegen, Team, Abteilung, Projekt, Schicht, Praxis, Kanzlei]
+    en: [work, office, team, colleagues, project, staff]
+    es: [trabajo, oficina]
+    fr: [travail, boulot, bureau, collègues]
+    tr: [ofis]
+    pl: [praca, biuro]
+    ru: [работа, rabota]
+  - kategorie: verein
+    de: [Verein, Club, Klub, FC, SV, TSV, Turnverein, Chor, Mannschaft, Training, Feuerwehr, Musikverein, Kapelle, Fußball, Handball, Tennis, Lauftreff]
+    en: [club, choir, football, soccer]
+    es: [equipo]
+    fr: [chorale, équipe]
+    tr: [kulüp, takım]
+    pl: [klub, drużyna]
+  - kategorie: nachbarschaft
+    de: [Nachbarn, Nachbarschaft, Hausgemeinschaft, Siedlung]
+    en: [neighbours, neighbors, neighbourhood, neighborhood]
+    es: [vecinos]
+    fr: [voisins, immeuble]
+    tr: [komşular]
+    pl: [sąsiedzi]
+    ru: [соседи]
+  - kategorie: reisegruppe
+    de: [Urlaub, Reise, Ausflug, Trip, Tour, Wandern, Skiurlaub, Camping]
+    en: [trip, holiday, holidays, vacation, travel]
+    es: [viaje, vacaciones]
+    fr: [voyage, vacances, rando]
+    tr: [tatil, gezi]
+    pl: [wycieczka, wakacje]
+    ru: [поездка, отпуск]
+  - kategorie: politik
+    de: [Partei, Fraktion, Ortsverein, Ortsverband, Kreisverband, Stadtrat, Gemeinderat, Politik, Bürgerinitiative, SPD, CDU, CSU, FDP, Grüne]
+    en: [politics, campaign, council]
+    es: [partido, política]
+    fr: [parti, politique, mairie]
+    tr: [siyaset]
+    pl: [partia, polityka]
+  - kategorie: freundeskreis
+    de: [Freunde, Freundeskreis, Clique, Mädels, Jungs, Stammtisch, Crew, Bande]
+    en: [friends, buddies, squad, besties]
+    es: [amigos, amigas]
+    fr: [amis, copains, copines, potes]
+    tr: [arkadaşlar]
+    pl: [przyjaciele, ekipa]
+    ru: [друзья, druzya]

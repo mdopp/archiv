@@ -45,6 +45,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "umfeld-gespraeche" {
 		os.Exit(gespraecheWerkzeug(os.Args[2:], os.Stdin, os.Stdout))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "umfeld-hinweise" {
+		os.Exit(hinweiseWerkzeug(os.Args[2:], os.Stdin, os.Stdout))
+	}
 	person := os.Getenv("ARCHIV_PERSON")
 	if person == "" {
 		log.Fatal("archiv: ARCHIV_PERSON fehlt: die Instanz gehört genau einer Person")
@@ -88,7 +91,7 @@ func main() {
 		ab.Relais = &Relais{Person: person, Port: relaisPort}
 	}
 	tresor.Vorbereiten = ab.Vorbereiten
-	um := &Umfeld{URL: immichURL(), Radicale: rad, Msgvault: api, Schluessel: schluessel, Takt: sekunden("UMFELD_TAKT", time.Hour)}
+	um := &Umfeld{URL: immichURL(), Radicale: rad, Msgvault: api, Modell: modellAus(os.Getenv), Schluessel: schluessel, Takt: sekunden("UMFELD_TAKT", time.Hour)}
 	if os.Getenv("IMMICH_URL") != "" && um.URL == "" {
 		log.Printf("archiv: IMMICH_URL %q ist keine http(s)-Adresse: Umfeld aus", os.Getenv("IMMICH_URL"))
 	}

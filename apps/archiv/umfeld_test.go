@@ -544,25 +544,45 @@ func TestUmfeldSeite(t *testing.T) {
 	ut.u.laden(innen)
 
 	page := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
-	for _, want := range []string{"<h3>Steht dir nahe</h3>", `<svg class=netzbild`, "Ben Berg</a> <span class=k>3 Tage auf deinen Fotos seit 2019 · gleiche Adresse · Ehepartner/in (Telefonbuch)",
-		`action="/tresor/umfeld/verbergen"`, "Nicht berechnen", "Zuletzt gerechnet um", `id=umfeld-netz data-live`} {
+	for _, want := range []string{"<h3>Steht dir nahe</h3>", `<svg class=netzbild`, `<a class=zeile href="/tresor/umfeld?mitte=p-ben">Ben Berg <span class=k>3 Tage auf deinen Fotos seit 2019 · gleiche Adresse · Ehepartner/in (Telefonbuch)</span></a>`,
+		"Zuletzt gerechnet um", `id=umfeld-netz data-live`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}
 	}
-	if i, j := strings.Index(page, "Ben Berg</a>"), strings.Index(page, "Kim Berg</a>"); i < 0 || j < i {
+	if strings.Contains(page, `action="/tresor/umfeld/verbergen"`) || strings.Contains(page, `value="nicht"`) {
+		t.Fatal("an action on a row of the list (owner 2026-11-11: „dicke Finger“)")
+	}
+	if i, j := strings.Index(page, ">Ben Berg <span"), strings.Index(page, ">Kim Berg <span"); i < 0 || j < i {
 		t.Fatal("not ranked")
+	}
+	ben := wt.rufe("GET", "/tresor/umfeld?mitte=p-ben", anna, nil).Body.String()
+	for _, want := range []string{`<div class=aktionen>`, `name=id value="p-ben"><button name=art value="aus"`, `<button class=leise name=art value="nicht"`, "Beides lässt sich zurückholen."} {
+		if !strings.Contains(ben, want) {
+			t.Fatalf("Ben's detail lacks %q:\n%s", want, ben)
+		}
+	}
+	if !strings.Contains(css, ".aktionen{display:flex;flex-wrap:wrap;gap:24px") || !strings.Contains(css, ".nahe a.zeile{display:block;min-height:44px") {
+		t.Fatal("the targets are not big and apart")
 	}
 	fritz := wt.rufe("GET", "/tresor/umfeld?mitte=p-fritz", anna, nil).Body.String()
 	if !strings.Contains(fritz, "<h3>Steht Fritz Kurz nahe</h3>") || !strings.Contains(fritz, "Wieder dich in die Mitte") {
 		t.Fatalf("fritz in the middle:\n%s", fritz)
 	}
-	rec := wt.rufe("POST", "/tresor/umfeld/verbergen", anna, url.Values{"id": {"p-ben"}, "art": {verbergenAus}, "mitte": {"p-anna"}})
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Ben Berg ist ausgeblendet") || !strings.Contains(rec.Body.String(), "<h3>Ausgeblendet</h3>") || strings.Contains(rec.Body.String(), "Ben Berg</a>") {
+	rec := wt.rufe("POST", "/tresor/umfeld/verbergen", anna, url.Values{"id": {"p-ben"}, "art": {verbergenAus}})
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<div class=toast role=status><span>✓ Ben Berg ausgeblendet</span>") || !strings.Contains(rec.Body.String(), `<input type=hidden name=art value=""><button data-laeuft="Holt zurück …">Rückgängig</button>`) ||
+		!strings.Contains(rec.Body.String(), "<h3>Steht dir nahe</h3>") || !strings.Contains(rec.Body.String(), "<h3>Ausgeblendet</h3>") || strings.Contains(rec.Body.String(), ">Ben Berg <span") {
 		t.Fatalf("hide: %d %s", rec.Code, rec.Body)
 	}
 	if b, _ := os.ReadFile(innen.umfeldVerborgen()); !strings.Contains(string(b), "p-ben") {
 		t.Fatalf("not kept in the vault: %s", b)
+	}
+	rec = wt.rufe("POST", "/tresor/umfeld/verbergen", anna, url.Values{"id": {"p-ben"}, "art": {""}})
+	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "Ben Berg ist wieder da.") || !strings.Contains(rec.Body.String(), "<h3>Steht Ben Berg nahe</h3>") {
+		t.Fatalf("Rückgängig: %d %s", rec.Code, rec.Body)
+	}
+	if b, _ := os.ReadFile(innen.umfeldVerborgen()); strings.Contains(string(b), "p-ben") {
+		t.Fatalf("still hidden: %s", b)
 	}
 	if rec := wt.rufe("POST", "/tresor/umfeld/verbergen", anna, url.Values{"id": {"p-ben"}, "art": {"alles"}}); rec.Code != 400 {
 		t.Fatalf("an unknown art: %d", rec.Code)
