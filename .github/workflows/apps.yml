@@ -126,7 +126,7 @@ jobs:
     # one source for the gates: the copies are laib's scaffold's; one cap on the lines (laib#1170)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash scripts/copies.sh
       - run: sh scripts/loc.sh
   ratchet:
@@ -134,8 +134,8 @@ jobs:
     # pinned in the script, today's findings in scripts/ratchet/ (laib#1170)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: apps/archiv/go.mod
       - run: python3 -m unittest scripts/test_ratchet.py

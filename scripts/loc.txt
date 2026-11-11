@@ -1,5 +1,6 @@
 # scripts/loc.sh: one cap on the production lines, then the folders it counts.
 # Raising it: the reason here, the owner's yes in the PR.
-# 18,000: the first cap (laib#1170), 2026-11-11: apps/ at 17,060 production lines (archiv), plus
-# about 5 %, under the 95 % warning; owner's approval asked in the PR that sets it
-18000 apps
+# 22,200: the first cap (laib#1170), recomputed 2026-11-11 after archiv#34, #45 and #46:
+# apps/ at 21,046 production lines (archiv), plus about 5 %, under the 95 % warning;
+# owner's approval asked in the PR that sets it
+22200 apps
