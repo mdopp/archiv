@@ -206,3 +206,49 @@ gruppe:
     tr: [arkadaşlar]
     pl: [przyjaciele, ekipa]
     ru: [друзья, druzya]
+
+# Name patterns (archiv#42, owner 2026-11-11): a contact saved as
+# „Mama von Lena“ is a parent of Lena, not of the person; „Freundin von
+# Lena“ is Lena's Freund/in, „Ex-Freund von Tom“ Tom's Ex-Partner/in.
+# The word before a „von“ word is any word of beziehung above or of
+# worte here, seen from the one named after it; „Ex“ before Freund/in or
+# a partner's word makes it Ex-Partner/in. The one named after it gets a
+# person even when no card has that name (Lena is often a child without
+# one), the same person when a name matches (umlauts alike). „Peter via
+# Lena“ (an ueber word) says only that the contact is known through
+# Lena: a tie „kennt über“, never a relation. Names after „von“ split at
+# „und“, „&“, „and“: „Mama von Lena und Tom“ is both's. Everything stays
+# a suggestion until the person taps. These words never send a message
+# to the model; they are read in names only.
+namensmuster:
+  von: [von, vom, de, del, of, di, du, od]
+  ueber: [via, über, ueber, durch]
+  ex: [Ex]
+  und: [und, and, y, et, i, ve]
+  worte:
+    - art: eltern
+      de: [Eltern]
+      en: [parents]
+      es: [padres]
+      fr: [parents]
+    - art: freund
+      de: [Freund, Freundin, Kumpel, Kumpeline]
+      en: [friend, buddy, bestie]
+      es: [amigo, amiga]
+      fr: [ami, amie, copain, copine]
+      tr: [arkadaşı, arkadaş]
+      pl: [przyjaciel, przyjaciółka, kolega, koleżanka]
+      ru: [друг, подруга, drug, podruga]
+    - art: bekannt
+      de: [Bekannter, Bekannte]
+      en: [acquaintance]
+    - art: kollege
+      de: [Kollege, Kollegin, Chef, Chefin]
+      en: [colleague, boss]
+      es: [colega, compañero, compañera]
+      fr: [collègue]
+    - art: nachbar
+      de: [Nachbar, Nachbarin]
+      en: [neighbour, neighbor]
+      es: [vecino, vecina]
+      fr: [voisin, voisine]

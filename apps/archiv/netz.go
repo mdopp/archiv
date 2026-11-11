@@ -39,7 +39,7 @@ const (
 	bandBeziehung = "beziehung"
 )
 
-var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandBeziehung: 3}
+var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandBeziehung: 3, bandName: 1, bandUeber: 0.5}
 
 // Hiding: Aus is not shown and restorable; Nicht is taken out of the
 // photos before any tie is computed.
@@ -158,6 +158,8 @@ type Netz struct {
 	// card of hers (IchAuch), an Immich person or a card named as she is
 	// (umlauts alike). None is ever in „Steht nahe“ or a question but as „du“.
 	selbst map[string]bool
+	// musterBaender are what the cards' names say („Mama von Lena“, namensmuster.go)
+	musterBaender []namensBand
 }
 
 // neuesNetz builds the net of st with the hidden ones and the answers.
@@ -225,6 +227,7 @@ func (n *Netz) bauen() {
 		}
 		n.knoten[id], n.von[k.Key] = kn, id
 	}
+	n.musterBauen()
 	n.sozialBauen()
 	n.ich = n.von[n.st.Ich]
 	n.selbstBauen()
@@ -236,6 +239,7 @@ func (n *Netz) bauen() {
 		}
 	}
 	n.festDazu(alle, nicht)
+	n.musterDazu(alle, nicht)
 	n.gespraecheDazu(alle, nicht)
 	n.gesagtDazu(alle, nicht)
 	n.merkmaleBauen()
@@ -510,6 +514,8 @@ func (n *Netz) gruendeListe(mitte string, k Kante) []string {
 		switch {
 		case f.Gesagt:
 			out = append(out, gesagtGrund(mitte, f))
+		case f.Art == bandName || f.Art == bandUeber:
+			out = append(out, "„"+f.Wie+"“ im Telefonbuch")
 		case f.Art == bandAdresse:
 			out = append(out, "gleiche Adresse")
 		case f.Art == bandFirma:

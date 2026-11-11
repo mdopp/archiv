@@ -136,6 +136,9 @@ func datumVon(s string) time.Time { t, _ := time.Parse("2006-01-02", s); return 
 // none for „Oma Hilde“ (a given name).
 func nachname(family, name string) string {
 	ws := strings.Fields(name)
+	if _, muster := woerter.imMuster(name); muster { // „Mama von Lena“: no family name in it
+		return klar(family)
+	}
 	if wort, _ := woerter.imNamen(name); family == "" && len(ws) > 1 && wort == "" {
 		family = ws[len(ws)-1]
 	}
@@ -335,7 +338,7 @@ func (n *Netz) offen() (out []Frage) {
 	}
 	kreis := n.familienkreis()
 	fragen := func(x, y string, k Kante, nurFamilie bool) {
-		if x == n.ich {
+		if x == n.ich || y != n.ich && n.musterVon(y, x) { // „Sabine ist für Lena …“, as her card says
 			x, y = y, x
 		}
 		art, weil := n.vorschlag(x, y, &k)
@@ -352,7 +355,8 @@ func (n *Netz) offen() (out []Frage) {
 				continue
 			}
 			gesehen[key] = true
-			fragen(k.A, k.B, *k, !n.gleicherName(k.A, k.B) && !(kreis[k.A] && kreis[k.B]))
+			muster, _ := n.musterFuer(k.A, k.B) // „Freundin von Lena“ is asked, as a family kind is
+			fragen(k.A, k.B, *k, !n.gleicherName(k.A, k.B) && !(kreis[k.A] && kreis[k.B]) && muster == "")
 		}
 	}
 	ids := slices.Sorted(maps.Keys(kreis))
@@ -391,6 +395,8 @@ func (n *Netz) offen() (out []Frage) {
 			return 1
 		case f.Abgeleitet:
 			return 2
+		case f.Gruppe == nil && n.ausMuster(f):
+			return 2 // a card's name says it (owner 2026-11-11: before the model's)
 		case kreis[f.X.ID] && kreis[f.Y.ID]:
 			return 3
 		}
@@ -457,8 +463,11 @@ func (n *Netz) vorschlag(x, y string, k *Kante) (string, string) {
 		h.Art = cmp.Or(gegen[h.Art], h.Art)
 	}
 	gArt, gWeil := n.gruppenVorschlag(k)
+	mArt, mWeil := n.musterFuer(x, y)
 	const weilFamilie = "gleicher Nachname und gleiche Adresse"
 	switch {
+	case mArt != "":
+		return mArt, mWeil
 	case y == n.ich && wort != "":
 		return wortArten[0], "„" + wort + "“ im Namen"
 	case hinweis:
