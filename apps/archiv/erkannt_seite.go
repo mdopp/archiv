@@ -16,15 +16,16 @@ import (
 // same Rückgängig as everywhere.
 
 const (
-	erkanntPfad      = "/tresor/erkannt"
-	gruppenTabPfad   = "/tresor?tab=gruppen"
-	gruppenZeigen    = 30 // groups the tab shows before „alle“
-	erkanntZeigen    = 20 // rows of a section of the suggestions' page
-	saysGruppenTab   = "Wie du eine Gruppe nennst, hilft bei den Fragen zu ihren Mitgliedern. Es bleibt in deinem Archiv und kommt in kein Adressbuch."
-	saysGruppenLeer  = "Noch keine Gruppen: Gruppen-Chats mit Namen und mindestens zwei Mitgliedern aus deinen Telefonbüchern erscheinen hier, sobald das Archiv sie in deinen Nachrichten gelesen hat."
-	saysErkanntLeer  = "Gerade gibt es nichts zu bestätigen. Was dein Archiv neu erkennt, erscheint hier."
-	saysErkanntRegel = "Alles hier ist nur ein Vorschlag: Eingetragen wird erst, was du bestätigst. Gelesen wird nur in deinem Tresor; Nachrichten gehen dazu nur an das Modell deiner Box."
-	saysGebBleibt    = "Bestätigte Geburtstage bleiben in deinem Archiv; ins Adressbuch kommen sie noch nicht."
+	erkanntPfad        = "/tresor/erkannt"
+	gruppenTabPfad     = "/tresor?tab=gruppen"
+	gruppenZeigen      = 30 // groups the tab shows before „alle“
+	erkanntZeigen      = 20 // rows of a section of the suggestions' page
+	saysGruppenTab     = "Wie du eine Gruppe nennst, hilft bei den Fragen zu ihren Mitgliedern. Es bleibt in deinem Archiv und kommt in kein Adressbuch."
+	saysGruppenLeer    = "Noch keine Gruppen: Gruppen-Chats mit Namen und mindestens zwei Mitgliedern aus deinen Telefonbüchern erscheinen hier, sobald das Archiv sie in deinen Nachrichten gelesen hat."
+	saysErkanntLeer    = "Gerade gibt es nichts zu bestätigen. Was dein Archiv neu erkennt, erscheint hier."
+	saysErkanntRegel   = "Alles hier ist nur ein Vorschlag: Eingetragen wird erst, was du bestätigst. Gelesen wird nur in deinem Tresor; Nachrichten gehen dazu nur an das Modell deiner Box."
+	saysGebBleibt      = "Bestätigte Geburtstage bleiben in deinem Archiv; ins Adressbuch kommen sie noch nicht."
+	saysHerkunftBleibt = "Bestätigte Wohnorte und Arbeitgeber bleiben in deinem Archiv; ins Adressbuch kommen sie noch nicht."
 )
 
 // erkanntZeile is the workplace's one line of what was recognised, a
@@ -81,16 +82,19 @@ func (w *Web) erkanntSeite(rw http.ResponseWriter, r *http.Request, code int, me
 	case e.Modell && e.Gelesen > 0:
 		fmt.Fprintf(&b, `<p class=k>Das Modell deiner Box hat %s mit Beziehungswörtern gelesen.</p>`, esc(anzahlT(e.Gelesen, "Nachricht", "Nachrichten")))
 	}
-	bs, gs, gebs := n.ErkannteBeziehungen(), GruppenVorschlaege(n.Gruppenliste()), n.GeburtstagVorschlaege()
-	if len(bs)+len(gs)+len(gebs) == 0 {
+	bs, gs, gebs, hs := n.ErkannteBeziehungen(), GruppenVorschlaege(n.Gruppenliste()), n.GeburtstagVorschlaege(), n.HerkunftVorschlaege()
+	if len(bs)+len(gs)+len(gebs)+len(hs) == 0 {
 		fmt.Fprintf(&b, `<div class=gut><span class=punkt></span><p>%s</p></div>`, esc(saysErkanntLeer))
 	}
 	if len(bs) > 0 {
 		fmt.Fprintf(&b, `<section class=karte><h2>Beziehungen (%d)</h2><ul>`, len(bs))
 		for _, x := range bs[:min(len(bs), erkanntZeigen)] {
-			kante := kanteAdresse(x.X.ID, x.Y.ID)
-			fmt.Fprintf(&b, `<li class=tu><div>%s<span class=k>%s</span></div><form method=post action="%s" class=knoepfe><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value="%s"><button name=art value="%s" data-laeuft="Trägt ein …">Stimmt</button><a class=k href="%s">Ansehen</a></form></li>`,
-				esc(bezugSatz(x)), esc("Vorschlag, weil "+x.Weil+"."), antwortPfad, esc(x.X.ID), esc(x.Y.ID), esc(kante), esc(x.Art), esc(kante))
+			kante, nicht := kanteAdresse(x.X.ID, x.Y.ID), ""
+			if x.Quelle == "wir" { // a couple is discarded here; the others by an answer on their question
+				nicht = fmt.Sprintf(`<button formaction="%s/paar" class=leise data-laeuft="Merkt es …">Stimmt nicht</button>`, erkanntPfad)
+			}
+			fmt.Fprintf(&b, `<li class=tu><div>%s<span class=k>%s</span></div><form method=post action="%s" class=knoepfe><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value="%s"><button name=art value="%s" data-laeuft="Trägt ein …">Stimmt</button>%s<a class=k href="%s">Ansehen</a></form></li>`,
+				esc(bezugSatz(x)), esc("Vorschlag, weil "+x.Weil+"."), antwortPfad, esc(x.X.ID), esc(x.Y.ID), esc(kante), esc(x.Art), nicht, esc(kante))
 		}
 		b.WriteString(`</ul></section>`)
 	}
@@ -126,6 +130,7 @@ func (w *Web) erkanntSeite(rw http.ResponseWriter, r *http.Request, code int, me
 		}
 		fmt.Fprintf(&b, `</ul><p class=k>%s</p></details>`, esc(saysGebBleibt))
 	}
+	herkunftAbschnitt(&b, hs, n.HerkunftBestaetigt())
 	b.WriteString(w.toast(n, r.URL.Query().Get("getan"), erkanntPfad))
 	fmt.Fprintf(&b, `<p class=hinweis>%s</p>`, esc(saysErkanntRegel))
 	seite(rw, code, "Erkannt", b.String(), "")
@@ -248,3 +253,82 @@ func (u *Umfeld) GruppeSetzen(innen Innen, id, kat, eigen string) error {
 
 // modellDa: the box gave the archive its model.
 func (u *Umfeld) modellDa() bool { return u != nil && u.Modell.eingerichtet() }
+
+// herkunftSatz is a town or an employer as a question or a statement.
+func herkunftSatz(z HerkunftZeile) string {
+	if z.Feld == feldOrt {
+		return z.Wer.Name + " wohnt in " + z.Wert
+	}
+	return z.Wer.Name + " arbeitet bei " + z.Wert
+}
+
+// herkunftAbschnitt are the suggested towns and employers, each with
+// Stimmt and Stimmt nicht, and the confirmed ones, folded, with Vergessen.
+func herkunftAbschnitt(b *strings.Builder, hs, bestaetigt []HerkunftZeile) {
+	knoepfe := func(z HerkunftZeile) string {
+		return fmt.Sprintf(`<form method=post action="%s/herkunft" class=knoepfe><input type=hidden name=id value="%s"><input type=hidden name=feld value="%s"><input type=hidden name=wert value="%s">`,
+			erkanntPfad, esc(z.Wer.ID), esc(z.Feld), esc(z.Wert))
+	}
+	if len(hs) > 0 {
+		fmt.Fprintf(b, `<section class=karte><h2>Wohnort und Arbeit (%d)</h2><ul>`, len(hs))
+		for _, z := range hs {
+			grund := "Vorschlag aus " + anzahl(z.Belege, "Mail", "Mails")
+			if !z.Zuletzt.IsZero() {
+				grund += ", die letzte vom " + z.Zuletzt.Format("02.01.2006")
+			}
+			fmt.Fprintf(b, `<li class=tu><div>%s<span class=k>%s</span></div>%s<button name=ja value=1 data-laeuft="Merkt es …">Stimmt</button><button name=ja value=0 class=leise data-laeuft="Merkt es …">Stimmt nicht</button></form></li>`,
+				esc(herkunftSatz(z)+"?"), esc(grund+"."), knoepfe(z))
+		}
+		b.WriteString(`</ul></section>`)
+	}
+	if len(bestaetigt) > 0 {
+		fmt.Fprintf(b, `<details class=karte><summary>Bestätigte Wohnorte und Arbeitgeber (%d)</summary><ul>`, len(bestaetigt))
+		for _, z := range bestaetigt {
+			fmt.Fprintf(b, `<li class=tu><div>%s</div>%s<button name=tu value=vergessen class=leise data-laeuft="Vergisst …">Vergessen</button></form></li>`, esc(herkunftSatz(z)), knoepfe(z))
+		}
+		fmt.Fprintf(b, `</ul><p class=k>%s</p></details>`, esc(saysHerkunftBleibt))
+	}
+}
+
+// erkanntHerkunft takes „Stimmt“, „Stimmt nicht“ or „Vergessen“ of a town or an employer.
+func (w *Web) erkanntHerkunft(rw http.ResponseWriter, r *http.Request) {
+	innen, ok := w.Tresor.Innen()
+	if !ok {
+		w.antwort(rw, r, http.StatusLocked, "", saysZu)
+		return
+	}
+	vergessen, ja := r.PostFormValue("tu") == "vergessen", r.PostFormValue("ja") == "1"
+	err := w.Umfeld.HerkunftSagen(innen, r.PostFormValue("id"), r.PostFormValue("feld"), r.PostFormValue("wert"), ja, vergessen)
+	if !w.erkanntFehler(rw, r, err) {
+		return
+	}
+	m := map[bool]string{true: "herkunft-weg", false: map[bool]string{true: "herkunft-ja", false: "herkunft-nein"}[ja]}[vergessen]
+	http.Redirect(rw, r, erkanntPfad+"?"+url.Values{"m": {m}}.Encode(), http.StatusSeeOther)
+}
+
+// erkanntPaar takes „Stimmt nicht“ of a couple.
+func (w *Web) erkanntPaar(rw http.ResponseWriter, r *http.Request) {
+	innen, ok := w.Tresor.Innen()
+	if !ok {
+		w.antwort(rw, r, http.StatusLocked, "", saysZu)
+		return
+	}
+	if !w.erkanntFehler(rw, r, w.Umfeld.PaarVerwerfen(innen, r.PostFormValue("x"), r.PostFormValue("y"))) {
+		return
+	}
+	http.Redirect(rw, r, erkanntPfad+"?"+url.Values{"m": {"paar-nein"}}.Encode(), http.StatusSeeOther)
+}
+
+// erkanntFehler answers an answer's error with the page; true: none.
+func (w *Web) erkanntFehler(rw http.ResponseWriter, r *http.Request, err error) bool {
+	switch {
+	case errors.Is(err, errFrageWeg) || errors.Is(err, errUmfeldZu):
+		w.erkanntSeite(rw, r, http.StatusConflict, "", saysFrageWeg)
+		return false
+	case err != nil:
+		log.Printf("archiv: Umfeld: eine Antwort unter Erkannt nicht gespeichert: %v", err)
+		w.erkanntSeite(rw, r, http.StatusInternalServerError, "", saysUmfeldVerbergen)
+		return false
+	}
+	return true
+}

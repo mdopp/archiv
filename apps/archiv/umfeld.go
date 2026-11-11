@@ -234,6 +234,8 @@ func (u *Umfeld) netzBauen(innen Innen, tab netzTabelle) *Netz {
 	n.gruppenModell = gruppenModellLaden(innen)
 	n.gebSetzen(gebHinweiseLaden(innen), geburtstageLaden(innen))
 	n.hinweiseSetzen(hinweiseLaden(innen))
+	n.herkunftSetzen(herkunftLaden(innen), herkunftAntwortenLaden(innen))
+	n.paareSetzen(paareLaden(innen), paareWegLaden(innen))
 	n.sozialSetzen(sozialLaden(innen))
 	return n
 }
@@ -371,7 +373,9 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 	}
 	u.geburtstageRunde(ctx, innen, n, ks)
 	u.gruppenRunde(ctx, innen, n)
+	u.paareRunde(ctx, innen, n, ks)
 	u.hinweiseRunde(ctx, innen, n, ks)
+	u.herkunftRunde(ctx, innen, n, ks)
 }
 
 // haushalt reads the household book into tab.Haushalt; on a refusal or
@@ -435,7 +439,7 @@ func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) []buch
 	}
 	tab.Kontakte = nil
 	for _, k := range ks {
-		tab.Kontakte = append(tab.Kontakte, netzKontakt{Key: k.key, Name: k.name, Person: nachName[klar(k.name)], Family: k.family, Geb: k.geb, Strassen: k.strassen, Mails: k.emails})
+		tab.Kontakte = append(tab.Kontakte, netzKontakt{Key: k.key, Name: k.name, Person: nachName[klar(k.name)], Family: k.family, Geb: k.geb, Strassen: k.strassen, Mails: k.emails, Firma: k.firma})
 	}
 	nummer, _ := u.Schluessel.Lesen(SchluesselTelefon)
 	tab.Ich = eigeneKarte(ks, func(k buchKarte) bool {

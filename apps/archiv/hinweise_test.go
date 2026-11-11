@@ -27,6 +27,10 @@ type fakeMsgvaultHinweise struct {
 	// wuensche answer the birthday wishes' statement (geburtstage.go),
 	// proben the groups' newest messages (gruppenmodell.go)
 	wuensche, proben [][]any
+	// paare answer the couples' statement (paare.go), herkunft the mails'
+	// (herkunft.go), koerper GET /api/v1/messages/{id}'s body
+	paare, herkunft [][]any
+	koerper         map[string]string
 }
 
 var hinweisSpalten = []string{"nachricht", "art", "am", "von_mir", "text", "rolle", "telefon", "mail"}
@@ -40,8 +44,24 @@ func neuesMsgvaultHinweise(t *testing.T) (*fakeMsgvaultHinweise, *MsgvaultAPI) {
 			SQL string `json:"sql"`
 		}
 		json.NewDecoder(r.Body).Decode(&q)
+		if id, ok := strings.CutPrefix(r.URL.Path, "/api/v1/messages/"); ok && r.Method == http.MethodGet && r.Header.Get("X-API-Key") == "vault-key" {
+			if body, da := f.koerper[id]; da {
+				jsonAus(w, http.StatusOK, map[string]any{"id": id, "body": body})
+			} else {
+				jsonAus(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+			}
+			return
+		}
 		if r.Header.Get("X-API-Key") != "vault-key" || r.URL.Path != "/api/v1/query" {
 			jsonAus(w, http.StatusUnauthorized, map[string]string{"error": "nein"})
+			return
+		}
+		if strings.Contains(q.SQL, "PARTITION BY m.sender_id") {
+			jsonAus(w, http.StatusOK, map[string]any{"columns": []string{"nachricht", "am", "mail"}, "rows": f.herkunft})
+			return
+		}
+		if strings.Contains(q.SQL, `(&|\+)`) {
+			jsonAus(w, http.StatusOK, map[string]any{"columns": hinweisSpalten, "rows": f.paare})
 			return
 		}
 		if strings.Contains(q.SQL, "WHERE r <= ") {

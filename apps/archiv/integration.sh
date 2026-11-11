@@ -329,6 +329,23 @@ code=$(curl -s -o "$D/geburtstag-antwort.json" -w '%{http_code}' "${H[@]}" -H 'C
 [ "$code" = 200 ] || { cat "$D/geburtstag-antwort.json"; fail "msgvault refuses the birthday wishes' statement: $code"; }
 docker exec -i archiv archiv umfeld-hinweise <"$D/geburtstag-antwort.json" || fail "the birthday wishes' answer does not read"
 
+echo "Umfeld (archiv#44): the couples' statement, the mails for home town and employer, and a mail's body, against the real msgvault"
+docker exec archiv archiv umfeld-hinweise -sql -paare >"$D/paare.json"
+code=$(curl -s -o "$D/paare-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/paare.json" "$U/api/v1/query")
+[ "$code" = 200 ] || { cat "$D/paare-antwort.json"; fail "msgvault refuses the couples' statement: $code"; }
+paare=$(docker exec -i archiv archiv umfeld-hinweise <"$D/paare-antwort.json") || fail "the couples' answer does not read"
+# no fixture says „mein Mann …“ or ends signed by two: the filter must not take „Hallo eins“ for one
+[ -z "$paare" ] || { cat "$D/paare-antwort.json"; fail "the couples' filter takes messages without a couple: $paare"; }
+docker exec archiv archiv umfeld-hinweise -sql -herkunft >"$D/herkunft.json"
+code=$(curl -s -o "$D/herkunft-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/herkunft.json" "$U/api/v1/query")
+[ "$code" = 200 ] || { cat "$D/herkunft-antwort.json"; fail "msgvault refuses the mails' statement: $code"; }
+herkunft=$(docker exec -i archiv archiv umfeld-hinweise -herkunft <"$D/herkunft-antwort.json") || fail "the mails' answer does not read: $herkunft"
+echo "$herkunft"
+# Ben's two mails to Anna, each with its date and Ben's address
+[ "$(grep -c "^mail am=true adresse=true$" <<<"$herkunft")" = 2 ] || { cat "$D/herkunft-antwort.json"; fail "Ben's two mails not found for home town and employer"; }
+mid=$(jq -r '.columns as $c | ($c | index("nachricht")) as $i | .rows[0][$i]' "$D/herkunft-antwort.json")
+curl -fsS "${H[@]}" "$U/api/v1/messages/$mid" | jq -e '.body | test("MAILTEXT-")' >/dev/null || fail "a mail's body does not read through GET /api/v1/messages/{id}"
+
 docker stop -t 90 archiv >/dev/null
 docker logs archiv >"$D/log" 2>&1
 grep -q "abgeschlossen (Container hält an)" "$D/log" || fail "stopping the container did not close the vault"

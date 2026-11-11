@@ -70,6 +70,7 @@ type netzKontakt struct {
 	Geb      string   `json:"g,omitempty"`
 	Strassen []string `json:"s,omitempty"`
 	Mails    []string `json:"m,omitempty"` // to find a LinkedIn connection's card (sozial.go)
+	Firma    string   `json:"o,omitempty"` // ORG: no employer is suggested (herkunft.go)
 }
 
 // festBand is a phone-book tie between two contacts' keys; for a
@@ -154,8 +155,16 @@ type Netz struct {
 	// person's answers to them, by node (geburtstage.go)
 	gebHinweise  map[string]gebHinweis
 	gebAntworten map[string]gebAntwort
-	gelesen      map[string]gelesen
-	hinweise     map[string]paarHinweis
+	// herkunft are the towns and employers the model read in mail, by
+	// node|field, herkunftAntworten the person's answers (herkunft.go);
+	// paare the couples „wir“ messages suggest by pair, paareWeg those the
+	// person discarded (paare.go)
+	herkunft          map[string]herkunftVorschlag
+	herkunftAntworten map[string]herkunftAntwort
+	paare             map[string]paarVorschlag
+	paareWeg          map[string]time.Time
+	gelesen           map[string]gelesen
+	hinweise          map[string]paarHinweis
 	// sozial are the friends and connections of the social exports,
 	// sozialGrund their reasons by node (sozial.go, sozialBauen).
 	sozial      []sozialEintrag
@@ -182,6 +191,8 @@ func neuesNetz(st netzTabelle, verborgen map[string]string, antworten map[string
 	}
 	n.gruppen, n.gelesen, n.hinweise, n.gruppenModell = map[string]gruppenAntwort{}, map[string]gelesen{}, map[string]paarHinweis{}, map[string]gruppenLesung{}
 	n.gebHinweise, n.gebAntworten = map[string]gebHinweis{}, map[string]gebAntwort{}
+	n.herkunft, n.herkunftAntworten = map[string]herkunftVorschlag{}, map[string]herkunftAntwort{}
+	n.paare, n.paareWeg = map[string]paarVorschlag{}, map[string]time.Time{}
 	n.bauen()
 	return n
 }

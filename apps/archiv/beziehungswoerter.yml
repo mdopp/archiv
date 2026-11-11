@@ -252,3 +252,17 @@ namensmuster:
       en: [neighbour, neighbor]
       es: [vecino, vecina]
       fr: [voisin, voisine]
+
+# Couples from „wir“ messages (archiv#44): „mein Mann Tom“ (a mein word,
+# a partner word, then a name) says the writer's partner is Tom; a
+# message with a wir word that ends signed by two („Wir kommen gern!
+# Anna und Ben“, an und word of namensmuster, „&“ or „+“ between them),
+# one of them the writer, says the other is the writer's partner, from
+# two such messages on. The name must be exactly one known person (by
+# first name; among several, the one the writer has a tie or a family
+# name with). Everything stays a suggestion until the person taps; these
+# words never send a message to the model.
+paare:
+  mein: [mein, meine, meinem, meiner, meinen, my, mi, mon, ma, moja, mój, moj, benim]
+  partner: [Mann, Frau, Ehemann, Ehefrau, Partner, Partnerin, Lebensgefährte, Lebensgefährtin, Verlobter, Verlobte, husband, wife, fiance, fiancee, esposo, esposa, marido, mari, femme, épouse, żona, mąż, eşim, kocam, karım]
+  wir: [wir, uns, unser, unsere, unseren, unserem, unserer, we, us, our, nosotros, nosotras, nuestro, nuestra, nous, notre, nos, nas, nasz, nasza, biz, bizim]

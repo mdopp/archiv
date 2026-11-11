@@ -100,6 +100,7 @@ type merkmale struct {
 	family   string
 	geb      time.Time
 	strassen []string
+	firma    string
 }
 
 // Frage is „Wie steht X zu Y?“; Ich: Y is the person. Vorschlag is the
@@ -159,6 +160,7 @@ func (n *Netz) merkmaleBauen() {
 			m.geb = d
 		}
 		m.strassen = append(m.strassen, k.Strassen...)
+		m.firma = cmp.Or(m.firma, k.Firma)
 		n.merkmale[id] = m
 	}
 }
