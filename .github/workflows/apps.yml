@@ -104,7 +104,7 @@ jobs:
           tags: ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}:latest,ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}:${{ github.sha }}
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: sign the image; Laib proposes a new digest of ours only with this signature (Laib ADR 0034)
-        run: cosign sign --yes ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}@${{ steps.build.outputs.digest }}
+        run: cosign sign --yes --new-bundle-format=false --use-signing-config=false ghcr.io/${{ github.repository_owner }}/${{ matrix.app }}@${{ steps.build.outputs.digest }}
   templates:
     runs-on: ubuntu-24.04
     steps:
