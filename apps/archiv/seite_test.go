@@ -802,7 +802,18 @@ func TestTheStartIsTheWorkplace(t *testing.T) {
 	}
 
 	body := wt.rufe("GET", "/tresor", navigiert, nil).Body.String()
-	if strings.Count(body, `href="/nachrichten"`) != 1 || !strings.Contains(body, "Alle Nachrichten (msgvault)</a>") {
+	if strings.Count(body, `href="/nachrichten"`) != 1 || !strings.Contains(body, "Alle Nachrichten</a>") || strings.Contains(body, "msgvault") {
 		t.Fatalf("the workplace has no one link to msgvault:\n%s", body)
+	}
+	// the work first (owner 2026-11-11): when it closes and who can read it while open is said once,
+	// in one quiet line after the tabs and the sources, not above them on every tab
+	arbeit, quellen, zu := strings.Index(body, "class=unterseiten"), strings.Index(body, "id=quellen-zeile"), strings.Index(body, `<p class="ruhig klein" id=schliesst data-live>Schließt sich um `)
+	if arbeit < 0 || quellen < arbeit || zu < quellen || strings.Count(body, saysAdminLiest) != 1 || !strings.Contains(body[zu:], saysAdminLiest) {
+		t.Fatalf("the closing line is not once, after the work (%d, %d, %d):\n%s", arbeit, quellen, zu, body)
+	}
+	// hidden stays hidden: the account name for the password manager is no field to fill in
+	wt.tt.Abschliessen(context.Background(), "test")
+	if zu := wt.rufe("GET", "/tresor", navigiert, nil).Body.String(); !strings.Contains(zu, `<input name=konto autocomplete=username value="Archiv anna" hidden>`) || !strings.Contains(zu, "[hidden]{display:none!important}") {
+		t.Fatalf("the closed page shows the hidden account field:\n%s", zu)
 	}
 }

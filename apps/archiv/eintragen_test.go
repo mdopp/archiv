@@ -111,8 +111,8 @@ func TestEinTipp(t *testing.T) {
 	page := wt.rufe("GET", "/tresor", anna, nil).Body.String()
 	for _, want := range []string{`<h1>Dein Archiv</h1>`, `action="/tresor/abschliessen"`, `action="/tresor/suche"`, `aria-current=page>Fragen <span class=anzahl>4</span>`,
 		`href="/tresor?tab=nahe"`, `href="/tresor?tab=stammbaum"`, `class="frage sofort"`, "Kim Berg ist für dich …", `name=art value=fremd class="chip"`,
-		"kennen sich nicht", "<summary>mehr …</summary>", `name=art value=expartner`, "kommt nur auf dein Handy",
-		"Später", "noch 4 zum Nachbessern", `<a class=quellen id=quellen-zeile data-live href="/tresor/quellen">`} {
+		"kenne ich nicht", "<summary>mehr …</summary>", `name=art value=expartner`, "kommt nur auf dein Handy",
+		"Später", "noch 4 Fragen", `<a class=quellen id=quellen-zeile data-live href="/tresor/quellen">`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}
@@ -167,7 +167,7 @@ func TestEinTipp(t *testing.T) {
 
 	// kennen sich nicht, keine Beziehung: nothing to Homes; the portion is done, calmly, and nothing counts on
 	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-fritz"}, "y": {"p-kim"}, "art": {"fremd"}, "zurueck": {"/tresor"}}))
-	if !strings.Contains(page, "✓ Fritz Kurz und Kim Berg kennen sich nicht · gemerkt") || !strings.Contains(page, "die letzte zum Nachbessern") {
+	if !strings.Contains(page, "✓ Fritz Kurz und Kim Berg kennen sich nicht · gemerkt") || !strings.Contains(page, "die letzte Frage") {
 		t.Fatalf("fremd:\n%s", page)
 	}
 	_, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-ben"}, "y": {"p-kim"}, "art": {"keine"}, "zurueck": {"/tresor"}}))
@@ -179,7 +179,7 @@ func TestEinTipp(t *testing.T) {
 	// weitere Fragen: one beyond the portion, with a way out instead of a count; the answer goes on there
 	page = wt.rufe("GET", "/tresor?tab=fragen&mehr=1", anna, nil).Body.String()
 	if !strings.Contains(page, "Kim Berg ist für dich …") || !strings.Contains(page, `<input type=hidden name=mehr value=1>`) || !strings.Contains(page, ">Genug für jetzt</a>") ||
-		strings.Contains(page, "class=anzahl") || strings.Contains(page, "zum Nachbessern</span>") {
+		strings.Contains(page, "class=anzahl") || strings.Contains(page, "Fragen</span>") || strings.Contains(page, "die letzte Frage</span>") {
 		t.Fatalf("weitere Fragen:\n%s", page)
 	}
 	ziel, page = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"kind"}, "mehr": {"1"}, "zurueck": {"/tresor"}}))
@@ -220,7 +220,7 @@ func TestBesuch(t *testing.T) {
 			t.Fatalf("the same visit:\n%s", page)
 		}
 	}
-	if page := wt.rufe("GET", "/tresor", draussen, nil).Body.String(); !strings.Contains(page, "<span class=anzahl>4</span>") || !strings.Contains(page, "noch 4 zum Nachbessern") {
+	if page := wt.rufe("GET", "/tresor", draussen, nil).Body.String(); !strings.Contains(page, "<span class=anzahl>4</span>") || !strings.Contains(page, "noch 4 Fragen") {
 		t.Fatalf("a new visit:\n%s", page)
 	}
 	u := &Umfeld{Now: func() time.Time { return *ut.jetzt }}
@@ -253,7 +253,7 @@ func TestEinTippOhneHomes(t *testing.T) {
 	umfeld := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
 	nachtrag := strings.Index(umfeld, "2 Antworten noch nicht eingetragen ·</span><button name=tu value=alle-eintragen")
 	falte := strings.Index(umfeld, "<details id=antworten class=karte><summary>Deine Antworten (2)</summary>")
-	if nachtrag < 0 || falte < 0 || nachtrag > falte || strings.Contains(umfeld, "<details id=antworten class=karte open") || !strings.Contains(umfeld, "2 Fragen zum Nachbessern") {
+	if nachtrag < 0 || falte < 0 || nachtrag > falte || strings.Contains(umfeld, "<details id=antworten class=karte open") || !strings.Contains(umfeld, "2 offene Fragen") {
 		t.Fatalf("Deine Antworten folded, the retry one line outside (owner 2026-11-11):\n%s", umfeld)
 	}
 	if strings.Contains(umfeld, "value=eintragen") || strings.Count(umfeld, "noch nicht eingetragen") != 3 { // the line and the two answers' state inside the fold

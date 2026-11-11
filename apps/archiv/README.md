@@ -107,13 +107,20 @@ page says so).
   case, count the same, „Jürgen“ finds „Juergen Burger“ — then msgvault's
   own full-text page, in the other spelling too), then **Fragen** (one
   question at a time, „Ist das dieselbe Person?“ below), **Steht nahe**,
-  and **Stammbaum** (step 7 below). The sources are one line
+  **Stammbaum** (step 7 below) and **Gruppen**; the four tabs wrap
+  rather than scroll, so none is off the screen. The work comes first
+  (owner 2026-11-11): when the vault closes by itself and that the box's
+  admin can read it while open is one quiet line at the end of the page.
+  „Zu wem?“ goes on with the tapped name; nobody by that name keeps the
+  name in the field and leads on (the messages, back to the person).
+  `ARCHIV_SCHAU=127.0.0.1:8671 go test -run 'TestSchau$' .` serves the
+  fixture archive for looking at the pages in a browser. The sources are one line
   („✓ aktuell“, what runs, or what needs the person); their details and
   setup are `/tresor/quellen`, open or closed. Closed and new, the page
   opens or makes the vault in the same look.
 - The start: a browser opening `/` (a top-level navigation, no query)
   goes to `/tresor`, open or closed (owner 2026-11-11). The workplace's
-  one link to msgvault, „Alle Nachrichten (msgvault)“, is `/nachrichten`,
+  one link to msgvault, „Alle Nachrichten“, is `/nachrichten`,
   which msgvault gets as `/`; the way back is the browser's.
 - Every other path, while open: msgvault's own web UI and API (it lives at
   the root: absolute asset paths, no frames; its shell answers every path
@@ -767,7 +774,7 @@ inside the open vault; closed, there is no net, not even in memory.
   Bekannte/r, sonstige verwandt, and „Kennen sich nicht“ (the tie leaves
   the net); „Keine Beziehung“ is never asked again, „Später“ comes last.
 - **A portion per visit**: the tab shows at most ten („Fragen 10“, on
-  the card „noch 10 zum Nachbessern“), less what was answered since the
+  the card „noch 10 Fragen“), less what was answered since the
   visit began; never the backlog. A visit begins when the person comes
   to the page from outside (a link, a bookmark: the browser's
   `Sec-Fetch-Site` is not `same-origin`) and with the first page after
@@ -776,7 +783,7 @@ inside the open vault; closed, there is no net, not even in memory.
   nachgebessert für jetzt.“ and a quiet „weitere Fragen“ (`?mehr=1`, one
   at a time, „Genug für jetzt“ to stop).
 - On the main page one at a time: both faces (initials), „X ist für Y
-  …“, four kinds as chips (the suggestion marked), „kennen sich nicht“,
+  …“, four kinds as chips (the suggestion marked), „kennen sich nicht“ („kenne ich nicht“ when it asks about the person),
   „mehr …“ for the rest, why it is suggested, and where the answer goes
   („kommt ins Adressbuch der Familie“, „kommt nur auf dein Handy“, or
   „bleibt in deinem Archiv“ with the reason: a person only on photos

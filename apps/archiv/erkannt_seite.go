@@ -229,7 +229,7 @@ func gruppenZeile(z GruppenZeile, eigene []string) string {
 	case z.Vorschlag != "":
 		stand = "Vorschlag: " + kategorieWorte[z.Vorschlag]
 	}
-	fmt.Fprintf(&b, `<li id="g-%s"><details><summary>%s</summary><span class=k>%s · %s</span>`, esc(z.ID), esc(z.Titel), esc(stand), esc(anzahl(z.Mitglieder, "Mitglied", "Mitglieder")+" aus deinen Telefonbüchern"))
+	fmt.Fprintf(&b, `<li id="g-%s"><details><summary>%s<span class=k>%s</span></summary><span class=k>%s</span>`, esc(z.ID), esc(z.Titel), esc(stand), esc(anzahl(z.Mitglieder, "Mitglied", "Mitglieder")+" aus deinen Telefonbüchern"))
 	formular := func() {
 		fmt.Fprintf(&b, `<form method=post action="%s" class=sofort><input type=hidden name=gruppe value="%s"><input type=hidden name=liste value=1><input type=hidden name=zurueck value="%s">`, antwortPfad, esc(z.ID), gruppenTabPfad)
 	}

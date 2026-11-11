@@ -39,7 +39,7 @@ import (
 
 const (
 	freundTage     = 5  // photo days from which a tie without a sign of family suggests Freund/in
-	fragenJeBesuch = 10 // the questions of one visit's portion, „10 zum Nachbessern“
+	fragenJeBesuch = 10 // the questions of one visit's portion, „noch 10 Fragen“
 )
 
 // The answers that are no kind; Fremd: the two do not know each other,

@@ -604,15 +604,11 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		switch {
 		case st.Bereit:
 			b.WriteString(sucheForm(""))
-			b.WriteString(`<p class=weiter-in><a href="` + msgvaultEingang + `">Alle Nachrichten (msgvault)</a></p>`)
+			b.WriteString(`<p class=weiter-in><a href="` + msgvaultEingang + `">Alle Nachrichten</a></p>`)
 		case st.Fehler != "":
 			fmt.Fprintf(&b, `<div class=achtung role=alert><p>%s</p></div>`, esc(st.Fehler))
 		default:
 			b.WriteString(`<p class=ruhig><span class=laeuft></span>Dein Archiv startet … Das dauert meist unter einer Minute; dann erscheint hier die Suche.</p>`)
-		}
-		if !st.ZuUm.IsZero() {
-			fmt.Fprintf(&b, `<p class="ruhig klein">Es schließt sich von selbst nach %s ohne Nutzung, also um %s, wenn bis dahin nichts geschieht. %s</p>`,
-				dauerText(w.Tresor.Leerlauf), st.ZuUm.Local().Format("15:04"), saysAdminLiest)
 		}
 		b.WriteString(`</div>`)
 		w.laeuftJetzt(&b)
@@ -623,18 +619,14 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		b.WriteString(`</div>`)
 		w.arbeitsplatz(&b, r, st.Bereit)
 		w.quellenZeile(&b, true)
+		// what the page must say about the open vault, after the work (owner 2026-11-11: the work first)
+		b.WriteString(`<p class="ruhig klein" id=schliesst data-live>`)
+		if !st.ZuUm.IsZero() {
+			fmt.Fprintf(&b, `Schließt sich um %s von selbst, wenn du bis dahin nichts tust. `, st.ZuUm.Local().Format("15:04"))
+		}
+		b.WriteString(saysAdminLiest + `</p>`)
 	}
 	seite(rw, code, "Archiv", b.String(), "")
-}
-
-func dauerText(d time.Duration) string {
-	if d >= time.Hour && d%time.Hour == 0 {
-		if d == time.Hour {
-			return "einer Stunde"
-		}
-		return fmt.Sprintf("%d Stunden", d/time.Hour)
-	}
-	return fmt.Sprintf("%d Minuten", d/time.Minute)
 }
 
 // eingangText says what waits in the inbox, in one paragraph.
@@ -1022,7 +1014,7 @@ function hat(name,w){return klar(name).indexOf(klar(w))>=0||flach(name).indexOf(
 function feld(i){if(!i||!i.matches||!i.matches('input[data-namen]'))return null;if(i.hasAttribute('list')){i.dataset.liste=i.getAttribute('list');i.removeAttribute('list')}return i}
 function zeilen(i){var u=i.vorschlaege;if(u&&u.isConnected)return u;u=document.createElement('ul');u.className='vorschlaege';u.hidden=true;(i.closest('label')||i).after(u);i.vorschlaege=u;
 u.addEventListener('mousedown',function(e){e.preventDefault()});
-u.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;i.value=b.textContent;u.hidden=true;i.focus()});return u}
+u.addEventListener('click',function(e){var b=e.target.closest('button');if(!b)return;i.value=b.textContent;u.hidden=true;var f=i.form;if(f&&f.hasAttribute('data-weiter')){if(f.requestSubmit)f.requestSubmit();else f.submit();return}i.focus()});return u}
 function zeigen(i){var u=zeilen(i),d=document.getElementById(i.dataset.liste||'namen'),q=i.value,ws=q.split(/\s+/).filter(function(w){return klar(w)||flach(w)}),vorn=[],sonst=[];
 u.textContent='';if(!d||!ws.length){u.hidden=true;return}
 [].forEach.call(d.options,function(o){var n=o.value;if(!n||n===q||!ws.every(function(w){return hat(n,w)}))return;(n.split(/\s+/).some(function(t){return klar(t).indexOf(klar(ws[0]))===0})?vorn:sonst).push(n)});
@@ -1040,6 +1032,7 @@ fetch(f.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-orig
 var m=new DOMParser().parseFromString(x.t,'text/html').querySelector('main');if(!m)throw 0;document.querySelector('main').replaceWith(document.importNode(m,true));
 if(x.r.redirected){var u=new URL(x.r.url);u.searchParams.delete('getan');u.searchParams.delete('m');history.replaceState(null,'',u.pathname+u.search)}
 }).catch(function(){f.dataset.ohne=1;if(f.requestSubmit)f.requestSubmit(s);else f.submit()})});
+document.addEventListener('DOMContentLoaded',function(){var z=location.hash.length>1&&document.getElementById(location.hash.slice(1)),d=z&&z.querySelector('details');if(d)d.open=true});
 document.addEventListener('DOMContentLoaded',function(){var b=document.querySelector('.baum'),d=b&&b.querySelector('[data-du]');if(!d)return;var r=d.getBoundingClientRect(),c=b.getBoundingClientRect();b.scrollLeft+=r.left-c.left-(c.width-r.width)/2});
 document.addEventListener('DOMContentLoaded',function(){
 if(!window.PublicKeyCredential||!window.fetch)return;
@@ -1089,7 +1082,7 @@ const css = `
 --accent:#f97316;--accent-soft:rgba(249,115,22,.14);--ok:#10b981;--ok-soft:rgba(16,185,129,.12);--warn:#f59e0b;--warn-soft:rgba(245,158,11,.12);--danger:#ef5350;--danger-soft:rgba(239,83,80,.12);--track:rgba(255,255,255,.15)}
 @media (prefers-color-scheme:light){:root{color-scheme:light;--bg:#f1f5f9;--panel:#ffffff;--card:#ffffff;--edge:rgba(15,23,42,.12);--line:rgba(15,23,42,.08);--ink:#0f172a;--muted:#64748b;--faint:#94a3b8;
 --accent:#ea580c;--accent-soft:rgba(234,88,12,.10);--ok:#059669;--ok-soft:rgba(5,150,105,.10);--warn:#b45309;--warn-soft:rgba(180,83,9,.10);--danger:#dc2626;--danger-soft:rgba(220,38,38,.08);--track:rgba(15,23,42,.12)}}
-*{box-sizing:border-box}html{background:var(--bg)}
+*{box-sizing:border-box}[hidden]{display:none!important}html{background:var(--bg)}
 body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
 main{max-width:40rem;margin:0 auto;padding:0 max(16px,env(safe-area-inset-right)) calc(32px + env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left));overflow-wrap:anywhere}
 .oben{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:18px 0 6px;min-height:44px}.oben form{margin:0}
@@ -1105,7 +1098,7 @@ input,select{display:block;width:100%;max-width:100%;font:inherit;color:var(--in
 input[type=checkbox]{display:inline;width:auto;min-height:0;margin:.3rem 0 0}
 form{margin:12px 0}.feld label{display:block;margin:10px 0;font-size:.95rem}.haken{display:flex!important;gap:.5rem;align-items:flex-start}
 form[role=search]{display:flex;gap:8px;margin:10px 0 0}form[role=search] input{flex:1;min-width:0;margin:0;border-radius:999px;padding:0 16px}
-.unterseiten{display:flex;gap:8px;margin:18px 0 0;overflow-x:auto}.unterseiten a{display:inline-flex;align-items:center;gap:6px;min-height:44px;padding:0 16px;border-radius:999px;background:var(--card);color:var(--ink);text-decoration:none;font-size:.9rem;white-space:nowrap}
+.unterseiten{display:flex;flex-wrap:wrap;gap:6px;margin:18px 0 0}.unterseiten a{display:inline-flex;align-items:center;gap:4px;min-height:44px;padding:0 11px;border-radius:999px;background:var(--card);color:var(--ink);text-decoration:none;font-size:.9rem;white-space:nowrap}
 .unterseiten a[aria-current]{color:var(--accent);background:var(--accent-soft);font-weight:600}
 .anzahl{display:inline-block;min-width:1.5em;padding:0 .4em;border-radius:999px;background:var(--accent);color:var(--bg);font-size:.72rem;font-weight:700;line-height:1.5em;text-align:center}
 .karte{margin:18px 0 0}.karte ul{list-style:none;margin:0;padding:0;background:var(--card);border-radius:14px}
@@ -1138,7 +1131,7 @@ p.laeuft{font-weight:600}span.laeuft{flex:none;width:14px;height:14px;margin-top
 progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-color:var(--accent)}
 .zugang{font-size:.95rem}.fehlt{color:var(--danger);font-weight:600}
 .postfach{border-top:1px solid var(--line);padding:.3rem 0}.postfach:first-of-type{border-top:0}.aufraeumen{margin:.4rem 0;padding:.2rem 12px;background:var(--panel);border-radius:10px}.aufraeumen p{margin:.4rem 0}
-details{margin:6px 0}summary{cursor:pointer;color:var(--accent);font-weight:600;min-height:44px;display:flex;align-items:center}
+details{margin:6px 0}summary{cursor:pointer;color:var(--accent);font-weight:600;min-height:44px;display:flex;align-items:center}.karte li summary{flex-direction:column;align-items:flex-start;justify-content:center}.karte li summary .k{font-weight:400}
 ol{padding-left:1.2rem}li{margin:.3rem 0}form.zeile{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:.3rem 0}
 .vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0}
 .baum{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;margin:16px 0 0;background:var(--card);border-radius:14px}.baum svg{display:block}
