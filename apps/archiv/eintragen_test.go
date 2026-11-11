@@ -335,8 +335,9 @@ func TestArbeitsplatz(t *testing.T) {
 	if strings.Contains(nahe, `class="frage sofort"`) {
 		t.Fatal("a question on Steht nahe")
 	}
-	if baum := wt.rufe("GET", "/tresor?tab=stammbaum", anna, nil).Body.String(); !strings.Contains(baum, esc(saysStammbaumSpaeter)) {
-		t.Fatal("the Stammbaum's place")
+	if baum := wt.rufe("GET", "/tresor?tab=stammbaum", anna, nil).Body.String(); !strings.Contains(baum, `<div class=baum id=stammbaum><svg`) ||
+		!strings.Contains(baum, `href="/tresor/kante?a=p-anna&amp;b=p-ben" aria-label="Du und Ben Berg: Partner/in"`) {
+		t.Fatalf("the Stammbaum:\n%s", baum)
 	}
 	quellen := wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
 	for _, want := range []string{"<h1>Quellen</h1>", `href="/tresor">‹ Dein Archiv</a>`, "Signal-Passphrase (30", "Postfach eintragen", "SMS und Anrufe", "64-stelligen Schlüssel", "Kontakte und Kalender", "Immich-Schlüssel", "Passkeys"} {

@@ -59,19 +59,20 @@ const (
 )
 
 var meldungen = map[string]string{
-	"angelegt":    "Dein Tresor ist angelegt und offen. Hinterlege jetzt unten deine Signal-Passphrase und deine Nummer.",
-	"offen":       "Das Archiv ist offen.",
-	"zu":          "Das Archiv ist abgeschlossen.",
-	"signal":      "Gespeichert. Wartende Signal-Sicherungen liest das Archiv gleich ein.",
-	"imap":        "Gespeichert. Das Archiv holt deine Mails jetzt ab, danach jede Stunde.",
-	"whatsapp":    "Gespeichert. Das Archiv liest deine WhatsApp-Sicherung gleich ein.",
-	"passkey-weg": "Der Passkey ist entfernt; er öffnet das Archiv nicht mehr.",
-	"person-ja":   "Gemerkt: Das ist dieselbe Person.",
-	"person-nein": "Gemerkt: Das sind verschiedene Personen. Das Archiv fragt nicht wieder.",
-	"zusammen":    "Die beiden sind jetzt eine Person.",
-	"abgleich":    "Das Archiv gleicht deine Kontakte und Kalender jetzt ab.",
-	"umfeld":      saysUmfeldGespeichert,
-	"zurueck":     "Rückgängig gemacht. Die Frage kommt wieder.",
+	"angelegt":      "Dein Tresor ist angelegt und offen. Hinterlege jetzt unten deine Signal-Passphrase und deine Nummer.",
+	"offen":         "Das Archiv ist offen.",
+	"zu":            "Das Archiv ist abgeschlossen.",
+	"signal":        "Gespeichert. Wartende Signal-Sicherungen liest das Archiv gleich ein.",
+	"imap":          "Gespeichert. Das Archiv holt deine Mails jetzt ab, danach jede Stunde.",
+	"whatsapp":      "Gespeichert. Das Archiv liest deine WhatsApp-Sicherung gleich ein.",
+	"passkey-weg":   "Der Passkey ist entfernt; er öffnet das Archiv nicht mehr.",
+	"person-ja":     "Gemerkt: Das ist dieselbe Person.",
+	"person-nein":   "Gemerkt: Das sind verschiedene Personen. Das Archiv fragt nicht wieder.",
+	"zusammen":      "Die beiden sind jetzt eine Person.",
+	"abgleich":      "Das Archiv gleicht deine Kontakte und Kalender jetzt ab.",
+	"umfeld":        saysUmfeldGespeichert,
+	"zurueck":       "Rückgängig gemacht. Die Frage kommt wieder.",
+	"kante-zurueck": saysKanteZurueck,
 }
 
 // Web is the whole HTTP side.
@@ -267,6 +268,8 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/umfeld/schluessel", w.umfeldSchluessel)
 	mux.HandleFunc("POST /tresor/umfeld/verbergen", w.umfeldVerbergen)
 	mux.HandleFunc("POST /tresor/umfeld/antwort", w.umfeldAntwort)
+	mux.HandleFunc("GET /tresor/kante", w.kanteGet)
+	mux.HandleFunc("GET /tresor/kante/bild", w.kanteBild)
 	return mux
 }
 
@@ -1017,7 +1020,8 @@ func seite(rw http.ResponseWriter, code int, titel, body, extra string) {
 // is live: it listens on /tresor/live and, on a change, fetches itself and
 // swaps only the blocks marked data-live, by id — scroll position, an open
 // <details> and a half-typed field stay as they are. A block the person is
-// typing in waits for the next change. The page in front of msgvault
+// typing in waits for the next change. The Stammbaum's box scrolls „Du“
+// into the middle. The page in front of msgvault
 // while it starts (data-bis-bereit) asks /tresor/stand and goes on once
 // msgvault answers.
 const skript = `<script>
@@ -1028,6 +1032,7 @@ fetch(f.action,{method:'POST',body:new URLSearchParams(d),credentials:'same-orig
 var m=new DOMParser().parseFromString(x.t,'text/html').querySelector('main');if(!m)throw 0;document.querySelector('main').replaceWith(document.importNode(m,true));
 if(x.r.redirected){var u=new URL(x.r.url);u.searchParams.delete('getan');u.searchParams.delete('m');history.replaceState(null,'',u.pathname+u.search)}
 }).catch(function(){f.dataset.ohne=1;if(f.requestSubmit)f.requestSubmit(s);else f.submit()})});
+document.addEventListener('DOMContentLoaded',function(){var b=document.querySelector('.baum'),d=b&&b.querySelector('[data-du]');if(!d)return;var r=d.getBoundingClientRect(),c=b.getBoundingClientRect();b.scrollLeft+=r.left-c.left-(c.width-r.width)/2});
 document.addEventListener('DOMContentLoaded',function(){
 if(!window.PublicKeyCredential||!window.fetch)return;
 ['passkey-neu','mit-passkey','oder-passwort'].forEach(function(i){var e=document.getElementById(i);if(e)e.hidden=false});
@@ -1126,6 +1131,17 @@ progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-colo
 details{margin:6px 0}summary{cursor:pointer;color:var(--accent);font-weight:600;min-height:44px;display:flex;align-items:center}
 ol{padding-left:1.2rem}li{margin:.3rem 0}form.zeile{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:.3rem 0}
 .vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0}
+.baum{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;margin:16px 0 0;background:var(--card);border-radius:14px}.baum svg{display:block}
+.baum rect{fill:var(--panel);stroke:var(--edge);stroke-width:1.5}.baum a.du rect{stroke:var(--accent);stroke-width:2.5}.baum text{fill:var(--ink);font-size:12px;font-weight:600;text-anchor:middle}.baum text.k{fill:var(--muted);font-weight:400;font-size:11px}
+.baum .linie{fill:none;stroke:var(--muted);stroke-width:2}.baum .linie.vermutet{stroke-dasharray:6 5}.baum .linie.expartner{opacity:.5}.baum .treffer{fill:none;stroke:transparent;stroke-width:22;pointer-events:stroke}
+.baum a:hover .linie,.baum a:focus .linie{stroke:var(--accent)}.baum a:hover rect,.baum a:focus rect{stroke:var(--accent)}
+.paar{display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0}.paar a{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:44px;color:var(--ink);text-decoration:none;font-size:.9rem;font-weight:600;text-align:center}
+.chip.gewaehlt{background:var(--accent);border-color:var(--accent);color:#fff}
+.fototage{display:grid;gap:10px;background:var(--card);border-radius:14px;padding:10px 14px}.fototag .k{display:block;font-size:.8rem}.bilder{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.bilder img{display:block;width:88px;height:88px;object-fit:cover;border-radius:8px;background:var(--panel)}
+ul.gespraeche a{display:block;min-height:44px;color:inherit;text-decoration:none}ul.gespraeche b{display:block;font-weight:600}
+li.zwei{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}li.zwei>a:first-child{flex:1 1 10rem;min-height:44px}a.warum{display:flex;align-items:center;gap:10px;flex:1 1 100%;min-height:44px;padding-left:48px;color:inherit;text-decoration:none}a.warum .k{flex:1;min-width:0}
+a.warum-klein{display:inline-flex;align-items:center;min-height:44px;font-size:.85rem}
 .netzbild{display:block;width:100%;max-width:400px;height:auto;margin:1rem auto 0}.netzbild line{stroke:var(--muted);stroke-linecap:round}.netzbild line.zw{stroke:var(--line);stroke-width:.6}
 .netzbild circle{fill:var(--bg);stroke:var(--accent);stroke-width:1.5}.netzbild .mitte circle{fill:var(--accent)}.netzbild text{fill:var(--ink);font-size:10px;text-anchor:middle}.netzbild a:focus circle,.netzbild a:hover circle{fill:var(--accent)}
 ol.nahe,ul.nahe{padding-left:1.4rem}.nahe li{margin:.7rem 0}details.karte>summary{padding:0 14px}details.karte ul{list-style:none;margin:0;padding:0}.nachtrag{margin:10px 0}.nahe a.zeile{display:block;min-height:44px;padding:4px 0;text-decoration:none}.nahe a.zeile .k{display:block}.aktionen{display:flex;flex-wrap:wrap;gap:24px;margin:12px 0 4px}.aktionen form{margin:0}.nahe form.knoepfe{margin:.2rem 0 0}.nahe button{min-height:36px;padding:0 12px;font-size:.85rem}

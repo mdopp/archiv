@@ -12,16 +12,16 @@ import (
 
 // The open archive as a workplace (owner 2026-11-10: „eine Seite, auf der
 // gearbeitet wird“, in Homes' patterns): the search on top, then Fragen
-// (one at a time, fragen_seite.go), Steht nahe, and the place of the
-// Stammbaum, which comes later. The sources are one line — „✓ aktuell“ or
+// (one at a time, fragen_seite.go), Steht nahe, and the Stammbaum
+// (stammbaum.go). The sources are one line — „✓ aktuell“ or
 // what needs the person — and their details and setup are a page of their
 // own (/tresor/quellen), open or closed.
 
 const (
-	saysStammbaumSpaeter = "Der Stammbaum kommt in einem späteren Schritt. Er wächst aus deinen Antworten unter „Fragen“."
-	saysUmfeldNochNicht  = "Fragen stellt dein Archiv, sobald es aus deinen Fotos weiß, wer wem nahe steht."
-	saysKeineFragen      = "Gerade gibt es keine offenen Fragen. Neue kommen, wenn das Archiv dein Umfeld neu rechnet."
-	saysNachgebessert    = "Alles nachgebessert für jetzt."
+	saysStammbaumLeer   = "Noch kein Stammbaum: Er wächst aus deinen Antworten unter „Fragen“ und aus den Beziehungen in den Telefonbüchern."
+	saysUmfeldNochNicht = "Fragen stellt dein Archiv, sobald es aus deinen Fotos weiß, wer wem nahe steht."
+	saysKeineFragen     = "Gerade gibt es keine offenen Fragen. Neue kommen, wenn das Archiv dein Umfeld neu rechnet."
+	saysNachgebessert   = "Alles nachgebessert für jetzt."
 )
 
 // tabs are the workplace's parts, in their order: path value, word.
@@ -50,10 +50,10 @@ func (w *Web) arbeitsplatz(b *strings.Builder, r *http.Request, bereit bool) {
 	}
 	b.WriteString(`</nav>`)
 	switch {
-	case tab == "stammbaum":
-		fmt.Fprintf(b, `<p class=ruhig><span class="punkt grau"></span>%s</p>`, esc(saysStammbaumSpaeter))
 	case n == nil:
 		w.umfeldFehlt(b)
+	case tab == "stammbaum":
+		stammbaumTab(b, n)
 	case tab == "nahe":
 		naheListe(b, n)
 	case len(fs) > 0:
@@ -105,8 +105,9 @@ func (w *Web) umfeldFehlt(b *strings.Builder) {
 }
 
 // naheListe is „Steht nahe“: the closest to the person, each a row with
-// its face, its reasons and a bar of the tie's strength; a tap puts it in
-// the middle of the Umfeld page.
+// its face and name, a tap puts it in the middle of the Umfeld page (its
+// detail); its reasons and a bar of the tie's strength, a tap opens the
+// edge page („Was verbindet die beiden?“).
 func naheListe(b *strings.Builder, n *Netz) {
 	mitte := n.Mitte()
 	vs := n.Nahe(mitte, 12)
@@ -114,14 +115,15 @@ func naheListe(b *strings.Builder, n *Netz) {
 		b.WriteString(`<p class=ruhig><span class="punkt grau"></span>Noch keine Verbindungen: Ein Paar zählt, sobald es an zwei Tagen zusammen auf deinen Fotos ist oder die Telefonbücher etwas über die beiden sagen.</p>`)
 		return
 	}
-	titel := "Steht dir nahe"
+	titel, wer := "Steht dir nahe", "dich"
 	if k, _ := n.Person(mitte); mitte != n.Ich() {
-		titel = "Steht " + k.Name + " nahe"
+		titel, wer = "Steht "+k.Name+" nahe", k.Name
 	}
 	fmt.Fprintf(b, `<section class=karte><h2>%s</h2><ul class=leute>`, esc(titel))
 	for _, v := range vs {
-		fmt.Fprintf(b, `<li><a href="%s">%s<span class=wer>%s<span class=k>%s</span></span><span class=balken><b style="width:%.0f%%"></b></span></a></li>`,
-			esc(umfeldMitte(v.Mit.ID)), gesicht(v.Mit.Name), esc(n.Anzeige(v.Mit)), esc(n.Gruende(mitte, v.Kante)), 100*v.Kante.Staerke/vs[0].Kante.Staerke)
+		fmt.Fprintf(b, `<li class=zwei><a href="%s">%s<span class=wer>%s</span></a><a class=warum href="%s" aria-label="%s"><span class=k>%s</span><span class=balken><b style="width:%.0f%%"></b></span></a></li>`,
+			esc(umfeldMitte(v.Mit.ID)), gesicht(v.Mit.Name), esc(n.Anzeige(v.Mit)), esc(kanteAdresse(mitte, v.Mit.ID)), esc("Was verbindet "+wer+" und "+v.Mit.Name+"?"),
+			esc(n.Gruende(mitte, v.Kante)), 100*v.Kante.Staerke/vs[0].Kante.Staerke)
 	}
 	b.WriteString(`</ul></section><p class=weiter-in><a href="/tresor/umfeld">Bild, alle und Ausgeblendete</a><span class=k>Tipp auf eine Person: wer ihr nahe steht.</span></p>`)
 }

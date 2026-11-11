@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -111,8 +112,11 @@ func (w *Web) frageKarte(n *Netz, f Frage, rest int, mehr bool) string {
 		}
 	}
 	b.WriteString(chip(artKeine, "keine Beziehung", "") + `</div></details></div>`)
+	warum := fmt.Sprintf(` <a href="%s">Warum?</a>`, esc(kanteAdresse(f.X.ID, f.Y.ID)))
 	if f.Weil != "" {
-		fmt.Fprintf(&b, `<p class=k>%s</p>`, esc("Vorschlag, weil "+f.Weil+"."))
+		fmt.Fprintf(&b, `<p class=k>%s%s</p>`, esc("Vorschlag, weil "+f.Weil+"."), warum)
+	} else {
+		fmt.Fprintf(&b, `<p class=k>%s</p>`, strings.TrimSpace(warum))
 	}
 	punkt, satz := w.wohinSatz(n.Uebernahme(f.X.ID, f.Y.ID, ""))
 	fmt.Fprintf(&b, `<p class=wohin><span class="punkt %s"></span>%s</p>`, punkt, esc(satz))
@@ -272,17 +276,30 @@ func gruppenListe(b *strings.Builder, n *Netz, zurueck string) {
 }
 
 // zurueckNach is where an answer's form goes back to: the main page's
-// Fragen or the Umfeld page, never elsewhere.
+// Fragen, the Umfeld page or an edge page (its pair only), never elsewhere.
 func zurueckNach(z string) string {
+	if rest, ok := strings.CutPrefix(z, kantePfad+"?"); ok {
+		if q, err := url.ParseQuery(rest); err == nil && q.Get("a") != "" && q.Get("b") != "" {
+			return kanteAdresse(q.Get("a"), q.Get("b"))
+		}
+	}
 	if strings.HasPrefix(z, "/tresor/umfeld") {
 		return "/tresor/umfeld"
 	}
 	return "/tresor"
 }
 
+// mitAnfrage is pfad with v added to its query.
 func mitAnfrage(pfad string, v url.Values) string {
 	if pfad == "/tresor" {
 		v.Set("tab", "fragen")
+	}
+	if p, rest, ok := strings.Cut(pfad, "?"); ok {
+		q, _ := url.ParseQuery(rest)
+		for k, vs := range v {
+			q[k] = vs
+		}
+		return p + "?" + q.Encode()
 	}
 	return pfad + "?" + v.Encode()
 }
@@ -334,6 +351,14 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 			w.antwortFehler(rw, r, zurueck, err)
 			return
 		}
+		if strings.HasPrefix(zurueck, kantePfad) { // what the edge page replaced is back: Homes writes it again
+			w.eintragen(r.Context(), innen, key)
+			for _, d := range w.Umfeld.Netz().Gefolgerte(key) {
+				w.eintragen(r.Context(), innen, d.Key)
+			}
+			http.Redirect(rw, r, weiter(url.Values{"m": {"kante-zurueck"}}), http.StatusSeeOther)
+			return
+		}
 		http.Redirect(rw, r, weiter(url.Values{"m": {"zurueck"}}), http.StatusSeeOther)
 		return
 	case "alle-eintragen": // the line outside „Deine Antworten“: every answer Homes has not taken
@@ -362,6 +387,10 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x, y := r.PostFormValue("x"), r.PostFormValue("y")
+	if strings.HasPrefix(zurueck, kantePfad) {
+		w.kanteFestlegen(rw, r, innen, zurueck, x, y, art)
+		return
+	}
 	if g, da := w.Umfeld.Netz().Gegebenes(paarKey(x, y)); da && g.Eingetragen != nil && art != artSpaeter { // a conflict answered anew: the old line leaves Homes first
 		if err := w.homesSchreiben(r.Context(), g.Eingetragen.Zeile, true); err != nil {
 			log.Printf("archiv: Umfeld: eine alte Antwort nicht aus Homes: %v", err)
@@ -386,6 +415,36 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		w.eintragen(r.Context(), innen, d.Key)
 	}
 	http.Redirect(rw, r, weiter(url.Values{"getan": {key}}), http.StatusSeeOther)
+}
+
+// kanteFestlegen is a chip of the edge page: what Homes wrote of the
+// pair and of what followed from it leaves Homes first, then the new kind
+// is kept (Festlegen, asked or not) and written with what follows from
+// it; back to the edge page with its toast.
+func (w *Web) kanteFestlegen(rw http.ResponseWriter, r *http.Request, innen Innen, zurueck, x, y, art string) {
+	if art == artSpaeter {
+		http.Redirect(rw, r, zurueck, http.StatusSeeOther)
+		return
+	}
+	key := paarKey(x, y)
+	if g, da := w.Umfeld.Netz().Gegebenes(key); da && g.X.ID == x && g.Art == art || da && g.Y.ID == x && cmp.Or(gegen[g.Art], g.Art) == art {
+		http.Redirect(rw, r, zurueck, http.StatusSeeOther) // already so: nothing to write, nothing to undo
+		return
+	}
+	if err := w.ausHomes(r.Context(), innen, key); err != nil {
+		log.Printf("archiv: Umfeld: eine alte Antwort nicht aus Homes: %v", err)
+		w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtEin)
+		return
+	}
+	if _, err := w.Umfeld.Festlegen(innen, x, y, art); err != nil {
+		w.antwortFehler(rw, r, zurueck, err)
+		return
+	}
+	w.eintragen(r.Context(), innen, key)
+	for _, d := range w.Umfeld.Netz().Gefolgerte(key) {
+		w.eintragen(r.Context(), innen, d.Key)
+	}
+	http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"getan": {key}}), http.StatusSeeOther)
 }
 
 // eintragen has Homes write the answer key, if it goes anywhere and is not
@@ -429,6 +488,11 @@ func (w *Web) ausHomes(ctx context.Context, innen Innen, key string) error {
 
 // zurueckFehler shows the page the form came from with fehler.
 func (w *Web) zurueckFehler(rw http.ResponseWriter, r *http.Request, zurueck string, code int, fehler string) {
+	if rest, ok := strings.CutPrefix(zurueck, kantePfad+"?"); ok {
+		q, _ := url.ParseQuery(rest)
+		w.kanteSeite(rw, r, code, q.Get("a"), q.Get("b"), "", fehler)
+		return
+	}
 	if zurueck == "/tresor/umfeld" {
 		w.umfeldSeite(rw, r, code, "", "", fehler)
 		return

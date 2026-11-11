@@ -24,7 +24,7 @@ import (
 // fakeImmich answers as Immich 3.3.5 does the calls the archive makes:
 // api-keys/me (the key's permissions), users/me (its e-mail, needs
 // user.read), search/metadata (the photos with exif and people, paged by
-// nextPage). Anything else, or another key, is refused.
+// nextPage), a photo's thumbnail (asset.view). Anything else, or another key, is refused.
 type fakeImmich struct {
 	*httptest.Server
 	mu       sync.Mutex
@@ -110,6 +110,17 @@ func (f *fakeImmich) serve(w http.ResponseWriter, r *http.Request) {
 			next = strconv.Itoa(q.Page + 1)
 		}
 		json.NewEncoder(w).Encode(map[string]any{"assets": map[string]any{"total": len(items), "count": len(items), "items": items, "nextPage": next}})
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/assets/") && strings.HasSuffix(r.URL.Path, "/thumbnail"):
+		if !darf("asset.view") {
+			return
+		}
+		id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/assets/"), "/thumbnail")
+		if r.URL.Query().Get("size") != "thumbnail" || !slices.ContainsFunc(f.fotos, func(p fakeFoto) bool { return p.ID == id }) {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		io.WriteString(w, "JPEG "+id)
 	default:
 		http.Error(w, "not in this fake", http.StatusNotFound)
 	}

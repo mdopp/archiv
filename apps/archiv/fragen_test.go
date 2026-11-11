@@ -143,6 +143,8 @@ func TestVorschlag(t *testing.T) {
 		{merkmale{strassen: []string{"gartenweg|66111"}}, merkmale{strassen: []string{"gartenweg|66111"}}, Kante{}, "", "nachbar gleiche Straße, anderes Haus"},
 		{merkmale{family: "berg"}, merkmale{family: "wolf"}, Kante{Tage: 6}, "", "freund 6 Tage zusammen auf deinen Fotos, kein Zeichen von Familie"},
 		{merkmale{family: "berg"}, merkmale{family: "berg"}, Kante{Tage: 6}, "", " "},
+		{merkmale{family: "wilke", geb: geb(1961)}, merkmale{family: "wilke", geb: geb(1963)}, Kante{Tage: 8}, "", "partner gleicher Nachname, 8 Tage zusammen auf deinen Fotos, 2 Jahre Altersunterschied"},
+		{merkmale{family: "wilke", geb: geb(1961)}, merkmale{family: "wilke", geb: geb(1990)}, Kante{Tage: 8}, "", "eltern gleicher Nachname, 8 Tage zusammen auf deinen Fotos, 29 Jahre Altersunterschied"},
 		{merkmale{family: nachname("", "Oma Hilde")}, merkmale{family: "wolf"}, Kante{Tage: 6}, "", " "}, // Hilde is no family name
 	} {
 		x := "x"
@@ -399,5 +401,43 @@ func TestFolgernKette(t *testing.T) {
 	n.Beantworten("h/silke", "h/hedwig", "freund") // she stays with what she said
 	if got := fragenVon(n.Fragen()); !slices.Equal(got, []string{"Silke>Lena=eltern"}) {
 		t.Fatalf("a conflict answered is not asked again: %q", got)
+	}
+}
+
+// „Sabine fehlt als Partnerin“ (owner 2026-11-11): Klaus Wilke is the
+// father of Carola, the person's wife; Sabine Wilke is on eight photo days
+// with him and two years apart. One family name, often together, both in
+// the family circle: asked among the first, Partner/in pre-chosen —
+// before the many relatives of the person's name the circle asks about
+// without a tie. Without birthdays it is asked as early, with no kind
+// guessed.
+func TestWilkeFruehGefragt(t *testing.T) {
+	for _, mitGeb := range []bool{true, false} {
+		st := netzTabelle{Namen: map[string]string{}, Ich: "h/uwe"}
+		for _, k := range [][3]string{{"uwe", "Uwe Dopp", "1960-01-01"}, {"carola", "Carola Dopp", "1988-01-01"}, {"klaus", "Klaus Wilke", "1961-03-01"}, {"sabine", "Sabine Wilke", "1963-05-01"},
+			{"d1", "Anton Dopp"}, {"d2", "Berta Dopp"}, {"d3", "Clemens Dopp"}, {"d4", "Doris Dopp"}, {"d5", "Emil Dopp"}, {"d6", "Frieda Dopp"}, {"d7", "Gustav Dopp"}, {"d8", "Hilde Dopp"}} {
+			c := netzKontakt{Key: "h/" + k[0], Name: k[1]}
+			if mitGeb {
+				c.Geb = k[2]
+			}
+			st.Kontakte = append(st.Kontakte, c)
+		}
+		am := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+		n := neuesNetz(st, nil, map[string]antwort{
+			paarKey("h/carola", "h/uwe"):   {X: "h/carola", Art: "partner", Am: am},
+			paarKey("h/klaus", "h/carola"): {X: "h/klaus", Art: "eltern", Am: am},
+		}, time.UTC, func() time.Time { return time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC) })
+		band(n, "h/klaus", "h/sabine", 8)
+		fs := n.Fragen()
+		i := slices.IndexFunc(fs, func(f Frage) bool { return paarKey(f.X.ID, f.Y.ID) == paarKey("h/klaus", "h/sabine") })
+		if i < 0 || i > 2 {
+			t.Fatalf("geb %t: Sabine and Klaus at %d of %v", mitGeb, i, fragenVon(fs))
+		}
+		if want := map[bool]string{true: "partner", false: ""}[mitGeb]; fs[i].Vorschlag != want {
+			t.Fatalf("geb %t: suggested %q (%s)", mitGeb, fs[i].Vorschlag, fs[i].Weil)
+		}
+		if jetzt, _ := n.Portion(time.Date(2026, 11, 11, 9, 0, 0, 0, time.UTC)); !slices.ContainsFunc(jetzt, func(f Frage) bool { return f.key() == fs[i].key() }) {
+			t.Fatalf("geb %t: not in the visit's portion: %v", mitGeb, fragenVon(jetzt))
+		}
 	}
 }

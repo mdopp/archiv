@@ -106,7 +106,7 @@ page says so).
   case, count the same, „Jürgen“ finds „Juergen Burger“ — then msgvault's
   own full-text page, in the other spelling too), then **Fragen** (one
   question at a time, „Ist das dieselbe Person?“ below), **Steht nahe**,
-  and **Stammbaum** (its place; a later step). The sources are one line
+  and **Stammbaum** (step 7 below). The sources are one line
   („✓ aktuell“, what runs, or what needs the person); their details and
   setup are `/tresor/quellen`, open or closed. Closed and new, the page
   opens or makes the vault in the same look.
@@ -806,7 +806,71 @@ aktive Gruppen vom Benutzer kategorisiert werden“).
 - Names compare with umlauts spelled out (`klar`): „Jürgen Groß“ is
   „Juergen Gross“, case and accents aside.
 
-Not yet: the pair page, the family tree.
+**Step 4:** the edge page, „Was verbindet die beiden?“ (`kante.go`,
+`kante_seite.go`; owner 2026-11-11: „von einer Kante schnell auf die
+Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
+
+- `/tresor/kante?a=…&b=…`, one page per pair, one tap from a „Steht
+  nahe“ row (its reasons and bar; the face and name still open the
+  person), a person's detail (each row's „Was verbindet die beiden?“), a
+  question card („Warum?“) and every line of the Stammbaum.
+- On top both faces and the relation as the question card's chips, the
+  current kind pressed (an answer, one that followed from an answer, or a
+  phone book's), „keine Beziehung“ and „kennen sich nicht“ beside them. A
+  pair that is an open question has its suggestion marked and its reason
+  said, so one tap confirms. A tap sets the kind whether or not the pair
+  is asked (`Festlegen`): what Homes wrote of the pair (and of what
+  followed from it) is taken back first, the new kind is kept and written
+  with what follows from it by definition, and the vault keeps what it
+  replaced (`vorher` in `antworten.json`), so the toast's Rückgängig
+  brings that back, into Homes too. The same kind again writes nothing.
+- **Fotos**: the shared photo days, newest first (30 days, 4 photos a
+  day), as lazy 88 px thumbnails. A thumbnail comes through the archive
+  (`/tresor/kante/bild?id=`, only for a photo of the net's table), read
+  from Immich (`GET /api/assets/{id}/thumbnail?size=thumbnail`,
+  `asset.view`) with the person's key from the vault for that one answer,
+  never kept on the box (the browser may cache it privately for an hour).
+  A tap opens the photo in Immich (`IMMICH_PUBLIC_URL/photos/<id>`);
+  without that address the thumbnail is all.
+- **Nachrichten**: the cues the model read in messages between the two
+  first („Hallo Mama“, a tap opens the message in msgvault's view,
+  `/messages/<id>`), then the group chats and mail threads both are in,
+  each with its title and last line, read live from msgvault (one
+  read-only statement over `messages`, newest per conversation, ids
+  digits only; nothing kept). msgvault closed or busy: the conversations
+  without their last line, into msgvault's search.
+  `archiv umfeld-kante -sql <id…>` prints the statement,
+  `archiv umfeld-kante < antwort.json` reads an answer without its text
+  (`integration.sh` runs both against the real msgvault).
+- **Warum**: the photo days, chats, mails, groups, what the phone books
+  say, the same family name.
+- **„+ Beziehung“** (owner 2026-11-11, „Sabine fehlt als Partnerin“): on
+  the edge page, a person's detail and under the tree; a name (the
+  browser suggests the net's names, the archive compares umlauts and case
+  alike, the person's own other cards are her) leads to the edge page of
+  the two, where one tap sets the kind; several of that name are offered.
+
+**Step 7:** the Stammbaum (`stammbaum.go`), the workplace's third tab.
+
+- The family circle's Eltern/Kind, Partner/Ex-Partner and Geschwister
+  lines: answered, followed from an answer or a phone book's (solid),
+  derived and not confirmed (dashed). Generations are rows, partners side
+  by side (one with several in the middle), a child under its parents,
+  parents moved over their children; no birthday is needed.
+- One server-side SVG, no library, no script needed: it scrolls sideways
+  inside its box, never the page (the page's script only scrolls „Du“
+  into view). Boxes are 96×48 px links to the person's detail; every line
+  is a link to its edge page with a 22 px invisible hit stroke. The lines
+  are also a folded list.
+- Messy data: the generations follow the confirmed lines first (a 0-1
+  breadth-first walk where a derived line costs one); a line that does
+  not fit — a cycle, someone two generations at once — is not drawn but
+  listed under „Passt nicht in den Stammbaum“, its edge page saying why
+  (`&pruefen=1`). A step-family gets a line from each parent.
+- Asked early (owner 2026-11-11): two of the family circle with one
+  family name on at least five photo days together are asked with the
+  person's own questions; with both birthdays the age gap suggests the
+  kind (a small gap between adults Partner/in), without them none.
 
 ## Status for laib
 
@@ -858,7 +922,7 @@ passphrase, a refused mail login) stay yellow and say what to enter.
 | status | `status: file: ${DATA_DIR}/archiv/<person>/laib-status.json` |
 | stop | `TimeoutStopSec` ≥ 90: closing stops msgvault (≤ 30 s) and unmounts |
 | Radicale (contacts, calendars) | `RADICALE_URL=http://host.containers.internal:5232` (Radicale's root, no path), `RADICALE_USER=archiv-<person>`, and that account's password as a file: `Secret=<the instance's ARCHIV_RADICALE_PASSWORD>,type=mount,target=radicale-password` (read from `RADICALE_PASSWORD_FILE`, default `/run/secrets/radicale-password`; never an environment variable). Without `RADICALE_URL` and `RADICALE_USER` the page says the box has not set it up. Optional: `KONTAKTE_TAKT` (s, default 10800), `KONTAKTE_RELAIS_PORT` (default 18443, inside the container only). |
-| Immich (Umfeld) | `IMMICH_URL=http://host.containers.internal:2283` (Immich's root; `uses: [immich]`). The key is the person's own, entered on the page, never the template's. Optional: `UMFELD_TAKT` (s, default 3600). |
+| Immich (Umfeld) | `IMMICH_URL=http://host.containers.internal:2283` (Immich's root; `uses: [immich]`). The key is the person's own, entered on the page, never the template's. Optional: `UMFELD_TAKT` (s, default 3600); `IMMICH_PUBLIC_URL` (Immich as the browser reaches it, `https://fotos.<domain>`), where the edge page's photos open. |
 | the box's model (Umfeld, step 5) | `MODEL_URL`, `MODEL_LEASE`, `MODEL_KEY` (laib's builtins as a pod reaches them: `http://host.containers.internal:11435/v1`, `…/api/model-lease`, the model key) and `MODEL_NAME` (the household preset, used when the lease names none). Without `MODEL_URL` no message goes anywhere; names, titles and groups still give their hints. |
 | Homes (answers) | `ARCHIV_HOMES_INTERN=http://host.containers.internal:8650` (Homes' own port on the box, where an answer is written; laib's template sets it). The packet is signed with `ARCHIV_HOMES_SECRET`; without either, answers stay in the vault and the card says so. |
 | Radicale account and rights | an LLDAP account `archiv-<person>` per instance (seeded like `kalender`, its password the instance's generated secret), and in `templates/radicale/pre-start`'s rights, **right after `[root]`** (before every `user: .+`/`(.+)` section): `[archiv-home]` user `archiv-(.+)`, collection `{0}`, permissions `R`; `[archiv-lesen]` user `archiv-(.+)`, collection `{0}/(handy-kontakte\|google-(?!kontakte(/\|$))[^/]+\|privat-[^/]+)(/.*)?`, permissions `r`; `[archiv-sonst-nichts]` user `archiv-.+`, collection `.*`, permissions empty. `integration.sh` runs these rights in a real Radicale. For Umfeld (archiv#27) the account also reads `homes/haushalt-kontakte` (read only; the laib template change and its ADR 0029 amendment bring that right); until then the archive gets 403 there and the page says the household book is missing. |

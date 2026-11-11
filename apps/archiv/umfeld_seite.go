@@ -245,6 +245,9 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 		if ok && mitte != ich {
 			b.WriteString(umfeldAktionen(mitte))
 		}
+		if ok {
+			b.WriteString(beziehungDazu(n, k, true))
+		}
 	default:
 		titel := "Steht dir nahe"
 		if mitte != ich {
@@ -261,6 +264,7 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 		}
 		b.WriteString(umfeldBild(n, k, vs))
 		b.WriteString(umfeldListe(n, k, vs))
+		b.WriteString(beziehungDazu(n, k, false))
 		if len(vs) == zeigen && !mehr {
 			fmt.Fprintf(b, `<p><a href="%s">Mehr zeigen</a></p>`, esc("/tresor/umfeld?"+url.Values{"mitte": {mitte}, "mehr": {"1"}}.Encode()))
 		}
@@ -289,8 +293,8 @@ func umfeldListe(n *Netz, mitte Knoten, vs []Verbindung) string {
 	var b strings.Builder
 	b.WriteString(`<ol class=nahe>`)
 	for _, v := range vs {
-		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a></li>`, esc(umfeldMitte(v.Mit.ID)), esc(n.Anzeige(v.Mit)),
-			esc(n.Gruende(mitte.ID, v.Kante)))
+		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a><a class=warum-klein href="%s">Was verbindet die beiden?</a></li>`, esc(umfeldMitte(v.Mit.ID)), esc(n.Anzeige(v.Mit)),
+			esc(n.Gruende(mitte.ID, v.Kante)), esc(kanteAdresse(mitte.ID, v.Mit.ID)))
 	}
 	b.WriteString(`</ol>`)
 	return b.String()

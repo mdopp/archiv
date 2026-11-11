@@ -297,6 +297,18 @@ echo "$hallo"
 [ "$(grep -c . <<<"$hallo")" -ge 2 ] || { cat "$D/hallo-antwort.json"; fail "the statement found no message with „hallo“"; }
 grep -q "von=1" <<<"$hallo" || { cat "$D/hallo-antwort.json"; fail "no sender read for a message"; }
 
+echo "Umfeld (archiv#27 step 4): the edge page's statement for the last lines, against the real msgvault's views"
+# the conversations the round's statement found above, by msgvault's own ids
+ids=$(jq -r '.columns as $c | ($c | index("gespraech")) as $i | .rows[][$i]' "$D/gespraeche-antwort.json" | sort -u | tr '\n' ' ')
+[ -n "$ids" ] || fail "no conversation ids to ask the last lines of"
+# shellcheck disable=SC2086
+docker exec archiv archiv umfeld-kante -sql $ids >"$D/kante.json"
+code=$(curl -s -o "$D/kante-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/kante.json" "$U/api/v1/query")
+[ "$code" = 200 ] || { cat "$D/kante-antwort.json"; fail "msgvault refuses the last lines' statement: $code"; }
+kante=$(docker exec -i archiv archiv umfeld-kante <"$D/kante-antwort.json") || fail "the last lines' answer does not read: $kante"
+echo "$kante"
+grep -q "nachricht=true" <<<"$kante" || { cat "$D/kante-antwort.json"; fail "no conversation's last message read"; }
+
 docker stop -t 90 archiv >/dev/null
 docker logs archiv >"$D/log" 2>&1
 grep -q "abgeschlossen (Container hält an)" "$D/log" || fail "stopping the container did not close the vault"

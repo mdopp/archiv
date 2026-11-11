@@ -61,11 +61,14 @@ type UmfeldStand struct {
 
 // Umfeld runs the rounds and holds the net while the vault is open.
 type Umfeld struct {
-	URL        string       // IMMICH_URL; "" not set up
-	Radicale   *Radicale    // for the household book; nil: not set up
-	Msgvault   *MsgvaultAPI // the group chats and mail threads (gespraeche.go); nil: not read
-	Modell     *Modell      // the box's model, for the relation hints (hinweise.go); nil: none
-	Schluessel Schluessel   // the person's own number (outside), to find their card
+	URL string // IMMICH_URL; "" not set up
+	// Oeffentlich is IMMICH_PUBLIC_URL, Immich as the person's browser
+	// reaches it: the edge page's photos open there; "" no link.
+	Oeffentlich string
+	Radicale    *Radicale    // for the household book; nil: not set up
+	Msgvault    *MsgvaultAPI // the group chats and mail threads (gespraeche.go); nil: not read
+	Modell      *Modell      // the box's model, for the relation hints (hinweise.go); nil: none
+	Schluessel  Schluessel   // the person's own number (outside), to find their card
 	// Takt is UMFELD_TAKT. A round is not Tresor.Arbeit: hourly rounds
 	// would keep the vault from ever closing by idleness (LEERLAUF, 2 h);
 	// a round cut short by the closing ends with its context.
@@ -572,4 +575,19 @@ func (u *Umfeld) Ausordnen(innen Innen, id string) error {
 		return err
 	}
 	return jsonImTresor(innen.umfeldGruppen(), alle)
+}
+
+// Festlegen keeps the relation of x and y the edge page set, asked or not (kante.go).
+func (u *Umfeld) Festlegen(innen Innen, x, y, art string) (Frage, error) {
+	u.halt.Lock()
+	defer u.halt.Unlock()
+	n := u.Netz()
+	if n == nil {
+		return Frage{}, errUmfeldZu
+	}
+	f, alle, err := n.Festlegen(x, y, art)
+	if err != nil {
+		return f, err
+	}
+	return f, jsonImTresor(innen.umfeldAntworten(), alle)
 }
