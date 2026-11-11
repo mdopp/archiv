@@ -1,0 +1,29 @@
+# The pins of what builds our images move here, by pull request, weekly and
+# grouped: actions by commit, base images by digest (laib ADR 0034, laib#1165).
+# scripts/pins.sh fails CI on a tag or an image without its digest.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directories:
+      - "/"
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+  - package-ecosystem: docker
+    directories:
+      - "/apps/archiv"
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns: ["*"]
+    ignore:
+      # a new major (node 22 → 24) is a change of its own, not a weekly bump
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: build
