@@ -237,6 +237,7 @@ func (u *Umfeld) netzBauen(innen Innen, tab netzTabelle) *Netz {
 	n.herkunftSetzen(herkunftLaden(innen), herkunftAntwortenLaden(innen))
 	n.paareSetzen(paareLaden(innen), paareWegLaden(innen))
 	n.sozialSetzen(sozialLaden(innen))
+	n.angelegtSetzen(angelegtLaden(innen))
 	return n
 }
 
@@ -589,6 +590,25 @@ func (u *Umfeld) Ausordnen(innen Innen, id string) error {
 		return err
 	}
 	return jsonImTresor(innen.umfeldGruppen(), alle)
+}
+
+// Angelegt keeps in the open vault what f did to the persons made by hand
+// and to the answers (angelegt.go).
+func (u *Umfeld) Angelegt(innen Innen, f func(n *Netz) (map[string]antwort, map[string]handPerson, error)) error {
+	u.halt.Lock()
+	defer u.halt.Unlock()
+	n := u.Netz()
+	if n == nil {
+		return errUmfeldZu
+	}
+	alle, ps, err := f(n)
+	if err != nil {
+		return err
+	}
+	if err := jsonImTresor(innen.umfeldAntworten(), alle); err != nil {
+		return err
+	}
+	return jsonImTresor(innen.umfeldAngelegt(), ps)
 }
 
 // Festlegen keeps the relation of x and y the edge page set, asked or not (kante.go).

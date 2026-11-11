@@ -237,7 +237,7 @@ func TestBeziehungDazu(t *testing.T) {
 	// nobody by that name is no dead end (owner 2026-11-11): the typed name stays in the field, and the
 	// page leads on to the name in the messages and back to the person
 	page := wt.rufe("GET", kantePfad+"?a=p-ben&wer=Zacharias", anna, nil).Body.String()
-	for _, want := range []string{esc(saysKanteNiemand), `<input name=wer list=namen data-namen autocomplete=off required placeholder="Name" value="Zacharias">`,
+	for _, want := range []string{esc(saysAnlegenNiemand), esc("Zacharias anlegen"), `<input name=wer list=namen data-namen autocomplete=off required placeholder="Name" value="Zacharias">`,
 		`<a href="` + esc(msgvaultSuche("Zacharias")) + `">In den Nachrichten nach „Zacharias“ suchen</a>`, `<a href="/tresor/umfeld?mitte=p-ben">Zurück zu Ben Berg</a>`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("none: %q missing:\n%s", want, page)

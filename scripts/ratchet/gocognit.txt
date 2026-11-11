@@ -6,11 +6,11 @@
 55 apps/archiv/abgleich.go: main.(*Abgleich).kontakte
 93 apps/archiv/aufraeumen.go: main.(*Aufraeumer).pruefen
 51 apps/archiv/fragen.go: main.(*Netz).offen
-45 apps/archiv/fragen_seite.go: main.(*Web).umfeldAntwort
+38 apps/archiv/fragen_seite.go: main.(*Web).umfeldAntwort
 33 apps/archiv/geburtstage.go: main.(*Netz).geburtstagHinweise
 101 apps/archiv/mail.go: main.(*Mailholer).holen
 31 apps/archiv/mail_seite.go: main.(*Web).imap
-33 apps/archiv/mail_seite.go: main.(*Web).mailKarte
+32 apps/archiv/mail_seite.go: main.(*Web).mailKarte
 36 apps/archiv/main.go: main.main
 54 apps/archiv/paket.go: main.PaketLesen
 50 apps/archiv/paket.go: main.mmsLesen

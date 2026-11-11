@@ -120,7 +120,7 @@ func TestHerkunftAusMails(t *testing.T) {
 	b, _ := os.ReadFile(ut.innen.umfeldHerkunft())
 	os.WriteFile(innen.umfeldHerkunft(), b, 0o600)
 	ut2.u.laden(innen)
-	if page := wt.rufe("GET", "/tresor", anna, nil).Body.String(); !strings.Contains(page, "Erkannt: 3 Vorschläge") {
+	if page := wt.rufe("GET", "/tresor", anna, nil).Body.String(); !strings.Contains(page, ">3 Vorschläge ansehen<") {
 		t.Fatalf("the line:\n%s", page)
 	}
 	page := wt.rufe("GET", erkanntPfad, anna, nil).Body.String()

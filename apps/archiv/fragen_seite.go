@@ -220,7 +220,7 @@ func (w *Web) standSatz(g Gegeben) string {
 // after ten seconds (the stylesheet), the answer stays undoable under
 // „Deine Antworten“. One Rückgängig takes back the answer and its chain.
 func (w *Web) toast(n *Netz, key, zurueck string) string {
-	text := ""
+	text, neu := "", ""
 	if id, gruppe := strings.CutPrefix(key, "gruppe:"); gruppe {
 		e, ok := n.Eingeordnetes(id)
 		if !ok {
@@ -236,12 +236,18 @@ func (w *Web) toast(n *Netz, key, zurueck string) string {
 		if a, ok := n.Anlage(g.X.ID, g.Y.ID); ok && anlageBestaetigt(a, g) {
 			text = angelegtSatz(a) + " · " + w.standSatz(g)
 		}
+		if p, ok := n.Angelegt(g.X.ID); ok && p.Am.Equal(g.Am) { // the tap that made her: Rückgängig takes her back too
+			text, neu = angelegtNeuSatz(g), `<input type=hidden name=neu value="`+esc(g.X.ID)+`">`
+		}
 		for _, d := range n.Gefolgerte(key) {
 			text += " · daraus: weil " + d.Weil + ", ist " + d.X.Name + " " + kurzWort(d.Art) + " von " + duOder(d.Y, d.Ich)
 		}
+		if neu != "" {
+			text += "."
+		}
 	}
-	return fmt.Sprintf(`<div class=toast role=status><span>✓ %s</span><form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s"><button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button></form></div>`,
-		esc(text), antwortPfad, esc(key), esc(zurueck))
+	return fmt.Sprintf(`<div class=toast role=status><span>✓ %s</span><form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s">%s<button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button></form></div>`,
+		esc(text), antwortPfad, esc(key), esc(zurueck), neu)
 }
 
 // anlageBestaetigt: the answer g is the kind the card's name said of the made person.
@@ -297,16 +303,25 @@ func gruppenListe(b *strings.Builder, n *Netz, zurueck string) {
 }
 
 // zurueckNach is where an answer's form goes back to: the main page's
-// Fragen, the Umfeld page or an edge page (its pair only, and where its
-// Fertig leads), never elsewhere.
+// Fragen or another of its tabs, the Umfeld page (with its person in the
+// middle) or an edge page (its pair only, and where its Fertig leads),
+// never elsewhere.
 func zurueckNach(z string) string {
 	if rest, ok := strings.CutPrefix(z, kantePfad+"?"); ok {
 		if q, err := url.ParseQuery(rest); err == nil && q.Get("a") != "" && q.Get("b") != "" {
 			return kanteVon(q.Get("a"), q.Get("b"), q.Get("aus"))
 		}
 	}
-	if strings.HasPrefix(z, "/tresor/umfeld") {
+	u, err := url.Parse(z)
+	switch {
+	case err != nil:
+		return "/tresor"
+	case u.Path == "/tresor/umfeld" && u.Query().Get("mitte") != "":
+		return umfeldMitte(u.Query().Get("mitte"))
+	case strings.HasPrefix(z, "/tresor/umfeld"):
 		return "/tresor/umfeld"
+	case u.Path == "/tresor" && slices.ContainsFunc(tabs[1:], func(t [2]string) bool { return t[0] == u.Query().Get("tab") }):
+		return "/tresor?tab=" + u.Query().Get("tab")
 	}
 	if z == erkanntPfad || z == gruppenTabPfad {
 		return z
@@ -373,24 +388,9 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 	}
 	switch r.PostFormValue("tu") {
 	case "vergessen":
-		if err := w.ausHomes(r.Context(), innen, key); err != nil {
-			log.Printf("archiv: Umfeld: Rückgängig nicht an Homes: %v", err)
-			w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtZurueck)
-			return
+		if m, ok := w.vergessen(rw, r, innen, zurueck, key); ok {
+			http.Redirect(rw, r, weiter(url.Values{"m": {m}}), http.StatusSeeOther)
 		}
-		if err := w.Umfeld.Vergessen(innen, key); err != nil {
-			w.antwortFehler(rw, r, zurueck, err)
-			return
-		}
-		if strings.HasPrefix(zurueck, kantePfad) { // what the edge page replaced is back: Homes writes it again
-			w.eintragen(r.Context(), innen, key)
-			for _, d := range w.Umfeld.Netz().Gefolgerte(key) {
-				w.eintragen(r.Context(), innen, d.Key)
-			}
-			http.Redirect(rw, r, weiter(url.Values{"m": {"kante-zurueck"}}), http.StatusSeeOther)
-			return
-		}
-		http.Redirect(rw, r, weiter(url.Values{"m": {"zurueck"}}), http.StatusSeeOther)
 		return
 	case "alle-eintragen": // the line outside „Deine Antworten“: every answer Homes has not taken
 		for _, g := range w.Umfeld.Netz().Gegebene() {
@@ -446,6 +446,37 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		w.eintragen(r.Context(), innen, d.Key)
 	}
 	http.Redirect(rw, r, weiter(url.Values{"getan": {key}}), http.StatusSeeOther)
+}
+
+// vergessen is Rückgängig of the answer key: out of Homes, out of the
+// vault; the person its tap made (neu) goes with it; what the edge page
+// replaced is back and Homes writes it again. It answers the sentence to
+// go back with, or false when it already answered the error.
+func (w *Web) vergessen(rw http.ResponseWriter, r *http.Request, innen Innen, zurueck, key string) (string, bool) {
+	if err := w.ausHomes(r.Context(), innen, key); err != nil {
+		log.Printf("archiv: Umfeld: Rückgängig nicht an Homes: %v", err)
+		w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtZurueck)
+		return "", false
+	}
+	if err := w.Umfeld.Vergessen(innen, key); err != nil {
+		w.antwortFehler(rw, r, zurueck, err)
+		return "", false
+	}
+	if id := r.PostFormValue("neu"); istAngelegt(id) {
+		if err := w.Umfeld.Angelegt(innen, func(n *Netz) (map[string]antwort, map[string]handPerson, error) { return n.AngelegtWeg(id, true) }); err != nil {
+			w.antwortFehler(rw, r, zurueck, err)
+			return "", false
+		}
+		return "kante-zurueck", true
+	}
+	if !strings.HasPrefix(zurueck, kantePfad) {
+		return "zurueck", true
+	}
+	w.eintragen(r.Context(), innen, key)
+	for _, d := range w.Umfeld.Netz().Gefolgerte(key) {
+		w.eintragen(r.Context(), innen, d.Key)
+	}
+	return "kante-zurueck", true
 }
 
 // kanteFestlegen is a chip of the edge page: what Homes wrote of the
@@ -524,8 +555,9 @@ func (w *Web) zurueckFehler(rw http.ResponseWriter, r *http.Request, zurueck str
 		w.kanteSeite(rw, r, code, q.Get("a"), q.Get("b"), "", fehler)
 		return
 	}
-	if zurueck == "/tresor/umfeld" {
-		w.umfeldSeite(rw, r, code, "", "", fehler)
+	if rest, ok := strings.CutPrefix(zurueck, "/tresor/umfeld"); ok {
+		q, _ := url.ParseQuery(strings.TrimPrefix(rest, "?"))
+		w.umfeldSeite(rw, r, code, q.Get("mitte"), "", fehler)
 		return
 	}
 	w.antwort(rw, r, code, "", fehler)

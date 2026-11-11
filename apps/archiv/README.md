@@ -111,12 +111,16 @@ page says so).
   rather than scroll, so none is off the screen. The work comes first
   (owner 2026-11-11): when the vault closes by itself and that the box's
   admin can read it while open is one quiet line at the end of the page.
-  „Zu wem?“ goes on with the tapped name; nobody by that name keeps the
-  name in the field and leads on (the messages, back to the person).
+  „Zu wem?“ goes on with the tapped name; nobody by that name offers
+  „<Name> anlegen“ first (a person by hand, below), keeps the name in the
+  field and leads on (the messages, back to the person).
   `ARCHIV_SCHAU=127.0.0.1:8671 go test -run 'TestSchau$' .` serves the
   fixture archive for looking at the pages in a browser. The sources are one line
   („✓ aktuell“, what runs, or what needs the person); their details and
-  setup are `/tresor/quellen`, open or closed. Closed and new, the page
+  setup are `/tresor/quellen`, open or closed: one folded line per source
+  with its state („Passphrase fehlt“, „zuletzt am 10.11.2026: 1.234
+  Nachrichten“), a tap opens its card and form (owner 2026-11-11); after
+  a failed save that card stays open with the error in it. Closed and new, the page
   opens or makes the vault in the same look.
 - The start: a browser opening `/` (a top-level navigation, no query)
   goes to `/tresor`, open or closed (owner 2026-11-11). The workplace's
@@ -1065,9 +1069,24 @@ suggestion until the person taps (owner 2026-11-11).
   in a form of its own. A tap sets the category at any time, asked or
   not; an own word is a reason like „Skat (Gruppe „Skatrunde“)“, and
   suggests no kind. The toast's Rückgängig gives back what it replaced.
-- **What was recognised**: one line under Fragen, „Erkannt: 120 von 480
-  Nachrichten gelesen · 7 Vorschläge · 5 von 12 Gruppen eingeordnet“
-  (each part only when there is something), a link to `/tresor/erkannt`:
+- **A person by hand** (`angelegt.go`, owner 2026-11-11): a name at
+  „Zu wem?“ (or the tree's) that matches nobody offers „Wilma anlegen“
+  with „Wilma ist für dich …“ and the kinds as chips; one tap makes her —
+  only in the vault (`umfeld/angelegt.json`), never a card in an address
+  book — and the relation, back to the page „+ Beziehung“ was on with
+  „✓ Wilma angelegt, Kind von dir.“ and Rückgängig, which takes back
+  both. Her line goes to Homes as any answer does (by name, on the phone
+  card of the other end). Her page renames her (Homes' lines go again
+  under the new name) or deletes her with her relations (two taps). When
+  a phone-book person of the same name (umlauts alike) appears, Erkannt
+  and her page ask once „Ist Wilma aus deinem Telefonbuch dieselbe
+  Person?“: Ja moves her relations to that person (an answer that one
+  already has stays), Nein keeps both and is not asked again. Never
+  merged without that yes.
+- **What was recognised**: under Fragen, „7 Vorschläge ansehen“ (a link
+  to `/tresor/erkannt`), „5 Gruppen einordnen“ (only the unsorted ones,
+  a link to the Gruppen tab) and, quietly, „120 von 480 Nachrichten
+  gelesen“; each only when there is something. `/tresor/erkannt`:
   the relations a card's name or the model suggests (pairs not answered
   and not in a phone book; „Stimmt“ sets it and comes back to the list
   with the toast and its Rückgängig; „Ansehen“ opens the edge page). A

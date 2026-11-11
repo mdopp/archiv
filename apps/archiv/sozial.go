@@ -467,13 +467,20 @@ func (u *Umfeld) SozialNeu(innen Innen) {
 
 // sozialKarte is the sources' card for Facebook and LinkedIn: how the
 // exports come, that mail cannot bring them, and what the vault holds.
-func (w *Web) sozialKarte(b *strings.Builder, offen bool) {
-	b.WriteString(`<section class=quelle id=karte-sozial data-live><h3>Facebook und LinkedIn</h3>`)
-	if innen, auf := w.Tresor.Innen(); offen && auf {
-		je := map[string]int{}
+func (w *Web) sozialKarte(b *strings.Builder, offen bool, qa quelleAuf) {
+	innen, auf := w.Tresor.Innen()
+	je := map[string]int{}
+	if offen && auf {
 		for _, e := range sozialLaden(innen) {
 			je[e.Quelle]++
 		}
+	}
+	zeile := w.letzteZeile("sozial", "Eintrag", "Einträge")
+	if len(je) > 0 && zeile != "meldet einen Fehler" {
+		zeile = anzahl(je["facebook"], "Freund", "Freunde") + ", " + anzahl(je["linkedin"], "Kontakt", "Kontakte")
+	}
+	quelleKopf(b, qa, "sozial", "Facebook und LinkedIn", zeile)
+	if offen && auf {
 		if len(je) == 0 {
 			b.WriteString(`<p class=k>Noch nichts im Archiv.</p>`)
 		} else {
@@ -486,5 +493,5 @@ func (w *Web) sozialKarte(b *strings.Builder, offen bool) {
 	w.fehlerVon(b, "sozial")
 	b.WriteString(`<p class=k>So kommen sie her: Bei Facebook „Deine Informationen herunterladen“ (Format JSON, mindestens „Freunde“), bei LinkedIn „Kopie deiner Daten anfordern“ (mit „Kontakte“). Die Datei auf dem Handy teilen → „Ins Archiv“ (Homes-App). Die App verschlüsselt sie schon auf dem Handy für dein Archiv.</p>`)
 	b.WriteString(`<p class=k>Eine E-Mail-Weiterleitung geht hier nicht: Facebook und LinkedIn schicken nur einen Link, der ihre Anmeldung braucht, nie die Daten selbst.</p>`)
-	b.WriteString(`<p class=k>Die Namen helfen bei „+ Beziehung“ und als Grund bei „Steht nahe“. Sie bleiben in deinem Archiv: kein Kontakt wird angelegt, kein Adressbuch geändert.</p></section>`)
+	b.WriteString(`<p class=k>Die Namen helfen bei „+ Beziehung“ und als Grund bei „Steht nahe“. Sie bleiben in deinem Archiv: kein Kontakt wird angelegt, kein Adressbuch geändert.</p>` + quelleEnde)
 }

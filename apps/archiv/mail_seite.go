@@ -255,13 +255,13 @@ func alterText(monate int) string {
 	return anzahl(monate, "Monat", "Monate")
 }
 
-func (w *Web) mailKarte(b *strings.Builder, offen bool) {
-	b.WriteString(`<section class=quelle id=karte-mail data-live><h3>E-Mail</h3>`)
-	w.imAchiv(b, "mail", "Mail", "Mails")
+func (w *Web) mailKarte(b *strings.Builder, offen bool, qa quelleAuf) {
 	konten, err := imapKonten(w.Schluessel)
 	if err != nil {
 		log.Printf("archiv: IMAP-Zugang unlesbar: %v", err)
 	}
+	quelleKopf(b, qa, "mail", "E-Mail", fehltZeile(w.letzteZeile("mail", "Mail", "Mails"), len(konten) == 0, "kein Postfach eingetragen"))
+	w.imAchiv(b, "mail", "Mail", "Mails")
 	_, f, _ := w.Protokoll.Kopie()
 	fehler := func(konto string, einziges bool) {
 		if f != nil && f.Quelle == "mail" && (f.Datei == konto || f.Datei == "" && einziges) {
@@ -327,11 +327,16 @@ func (w *Web) mailKarte(b *strings.Builder, offen bool) {
 		b.WriteString(`</div>`)
 	}
 	if !offen {
-		b.WriteString(`</section>`)
+		b.WriteString(quelleEnde)
 		return
 	}
+	mailNeu(b, len(konten), qa.gescheitert("mail"))
+}
+
+// mailNeu is the form for a mailbox: open when there is none, or its save failed.
+func mailNeu(b *strings.Builder, konten int, fehler bool) {
 	summary, host := "Postfach eintragen", "imap.gmail.com"
-	if len(konten) > 0 {
+	if konten > 0 {
 		summary, host = "Weiteres Postfach hinzufügen", ""
 	}
 	fmt.Fprintf(b, `<details id=d-mail%s><summary>%s</summary>
@@ -342,7 +347,7 @@ func (w *Web) mailKarte(b *strings.Builder, offen bool) {
 <label>Port (leer lassen: 993)<input name=port inputmode=numeric autocomplete=off></label>
 <label>Benutzername, meist deine Mail-Adresse<input name=benutzer type=email autocomplete=off placeholder="z. B. name@gmail.com"></label>
 <label>App-Passwort<input name=passwort type=password autocomplete=new-password></label>
-%s</form><p class=hinweis>%s</p></details></section>`, offenWenn(len(konten) == 0), summary, esc(host), knopf("Speichern", "Speichere …", ""), saysMailPreis)
+%s</form><p class=hinweis>%s</p></details>`+quelleEnde, offenWenn(konten == 0 || fehler), summary, esc(host), knopf("Speichern", "Speichere …", ""), saysMailPreis)
 }
 
 func portText(p int) string {

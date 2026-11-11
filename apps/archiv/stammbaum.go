@@ -425,7 +425,7 @@ func stammbaumTab(b *strings.Builder, n *Netz) {
 		}
 		b.WriteString(`</ul></section>`)
 	}
-	fmt.Fprintf(b, `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary><form method=get action="%s" class=feld><label>Wer?%s</label><label>Zu wem?%s</label><button>Weiter</button></form>%s</details>`,
+	fmt.Fprintf(b, `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary><form method=get action="%s" class=feld><input type=hidden name=zurueck value="/tresor?tab=stammbaum"><label>Wer?%s</label><label>Zu wem?%s</label><button>Weiter</button></form>%s</details>`,
 		kantePfad, namenFeld("von", "Du"), namenFeld("wer", ""), namenListe(n))
 }
 

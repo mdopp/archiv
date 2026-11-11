@@ -28,27 +28,29 @@ const (
 	saysHerkunftBleibt = "Bestätigte Wohnorte und Arbeitgeber bleiben in deinem Archiv; ins Adressbuch kommen sie noch nicht."
 )
 
-// erkanntZeile is the workplace's one line of what was recognised, a
-// link to the suggestions; nothing when there is nothing to say.
+// erkanntZeile is the workplace's lines of what was recognised, each
+// what to do: „2 Vorschläge ansehen“, „2 Gruppen einordnen“ (only the
+// unsorted ones), how far the model read under them; nothing when there
+// is nothing to say.
 func (w *Web) erkanntZeile(b *strings.Builder, n *Netz) {
 	e := n.Erkannt(w.Umfeld.Stand(), w.Umfeld.modellDa())
-	var teile []string
+	var zeilen []string
+	if v := e.Vorschlaege(); v > 0 {
+		zeilen = append(zeilen, fmt.Sprintf(`<a href="%s">%s ansehen</a>`, erkanntPfad, esc(anzahl(v, "Vorschlag", "Vorschläge"))))
+	}
+	if offen := e.GruppenAlle - e.GruppenEingeordnet; offen > 0 {
+		zeilen = append(zeilen, fmt.Sprintf(`<a href="%s">%s einordnen</a>`, gruppenTabPfad, esc(anzahl(offen, "Gruppe", "Gruppen"))))
+	}
 	switch {
 	case e.Modell && e.Gezaehlt && e.Offen > 0:
-		teile = append(teile, fmt.Sprintf("%s von %s Nachrichten gelesen", tausender(e.Gelesen), tausender(e.Gelesen+e.Offen)))
+		zeilen = append(zeilen, fmt.Sprintf(`<span class=k>%s von %s Nachrichten gelesen</span>`, tausender(e.Gelesen), tausender(e.Gelesen+e.Offen)))
 	case e.Modell && e.Gelesen > 0:
-		teile = append(teile, anzahlT(e.Gelesen, "Nachricht", "Nachrichten")+" gelesen")
+		zeilen = append(zeilen, `<span class=k>`+esc(anzahlT(e.Gelesen, "Nachricht", "Nachrichten"))+` gelesen</span>`)
 	}
-	if v := e.Vorschlaege(); v > 0 {
-		teile = append(teile, anzahl(v, "Vorschlag", "Vorschläge"))
-	}
-	if e.GruppenAlle > 0 {
-		teile = append(teile, fmt.Sprintf("%d von %s eingeordnet", e.GruppenEingeordnet, anzahl(e.GruppenAlle, "Gruppe", "Gruppen")))
-	}
-	if len(teile) == 0 {
+	if len(zeilen) == 0 {
 		return
 	}
-	fmt.Fprintf(b, `<p class=weiter-in id=erkannt-zeile data-live><a href="%s">Erkannt: %s</a></p>`, erkanntPfad, esc(strings.Join(teile, " · ")))
+	fmt.Fprintf(b, `<div id=erkannt-zeile data-live><p class=weiter-in>%s</p></div>`, strings.Join(zeilen, `</p><p class=weiter-in>`))
 }
 
 // bezugSatz is a suggested relation as a question: „Kim ist Mutter/Vater von dir?“
@@ -83,9 +85,10 @@ func (w *Web) erkanntSeite(rw http.ResponseWriter, r *http.Request, code int, me
 		fmt.Fprintf(&b, `<p class=k>Das Modell deiner Box hat %s mit Beziehungswörtern gelesen.</p>`, esc(anzahlT(e.Gelesen, "Nachricht", "Nachrichten")))
 	}
 	bs, gs, gebs, hs := n.ErkannteBeziehungen(), GruppenVorschlaege(n.Gruppenliste()), n.GeburtstagVorschlaege(), n.HerkunftVorschlaege()
-	if len(bs)+len(gs)+len(gebs)+len(hs) == 0 {
+	if len(bs)+len(gs)+len(gebs)+len(hs)+e.Dieselben == 0 {
 		fmt.Fprintf(&b, `<div class=gut><span class=punkt></span><p>%s</p></div>`, esc(saysErkanntLeer))
 	}
+	dieselbeAbschnitt(&b, n, "", erkanntPfad)
 	bezugAbschnitt(&b, n, bs)
 	if len(gs) > 0 {
 		fmt.Fprintf(&b, `<section class=karte><h2>Gruppen (%d)</h2><ul>`, len(gs))

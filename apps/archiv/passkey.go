@@ -257,15 +257,15 @@ func (w *Web) passkeyWeg(rw http.ResponseWriter, r *http.Request) {
 }
 
 // passkeyKarte lists the passkeys while open.
-func (w *Web) passkeyKarte(b *strings.Builder) {
+func (w *Web) passkeyKarte(b *strings.Builder, qa quelleAuf) {
 	l := w.Passkeys.Liste()
-	b.WriteString(`<section class=quelle id=karte-passkeys data-live><h3>Passkeys für dieses Archiv</h3>`)
+	quelleKopf(b, qa, "passkeys", "Passkeys für dieses Archiv", map[bool]string{true: "noch keiner", false: anzahl(len(l), "Passkey", "Passkeys")}[len(l) == 0])
 	if len(l) == 0 {
-		b.WriteString(`<p class=k>Noch keiner. Beim nächsten Öffnen mit dem Archiv-Passwort kannst du „Künftig mit Passkey öffnen“ ankreuzen.</p></section>`)
+		b.WriteString(`<p class=k>Noch keiner. Beim nächsten Öffnen mit dem Archiv-Passwort kannst du „Künftig mit Passkey öffnen“ ankreuzen.</p>` + quelleEnde)
 		return
 	}
 	for _, e := range l {
 		fmt.Fprintf(b, `<form method=post action="/tresor/passkey/weg" class=zeile><input type=hidden name=id value="%s"><span>%s</span>%s</form>`, esc(e.ID), esc(e.Name), knopf("Entfernen", "Entferne …", "k"))
 	}
-	b.WriteString(`<p class=k>Das Archiv-Passwort bleibt der Weg hinein, wenn das Handy weg ist.</p></section>`)
+	b.WriteString(`<p class=k>Das Archiv-Passwort bleibt der Weg hinein, wenn das Handy weg ist.</p>` + quelleEnde)
 }

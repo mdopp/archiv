@@ -175,6 +175,8 @@ type Netz struct {
 	selbst map[string]bool
 	// musterBaender are what the cards' names say („Mama von Lena“, namensmuster.go)
 	musterBaender []namensBand
+	// angelegt are the persons made by hand, by id (angelegt.go)
+	angelegt map[string]handPerson
 }
 
 // neuesNetz builds the net of st with the hidden ones and the answers.
@@ -247,6 +249,7 @@ func (n *Netz) bauen() {
 	}
 	n.musterBauen()
 	n.sozialBauen()
+	n.angelegtBauen()
 	n.ich = n.von[n.st.Ich]
 	n.selbstBauen()
 	alle := map[[2]string]*Kante{}

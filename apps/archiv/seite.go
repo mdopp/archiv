@@ -88,6 +88,8 @@ var meldungen = map[string]string{
 	"paar-nein":     "Gemerkt: kein Paar. Das Archiv schlägt es nicht wieder vor.",
 	"zurueck":       "Rückgängig gemacht. Die Frage kommt wieder.",
 	"kante-zurueck": saysKanteZurueck,
+	"umbenannt":     "Umbenannt.",
+	"person-weg":    "Gelöscht, mit allen Beziehungen, die du angegeben hast.",
 }
 
 // Web is the whole HTTP side.
@@ -317,6 +319,7 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/umfeld/schluessel", w.umfeldSchluessel)
 	mux.HandleFunc("POST /tresor/umfeld/verbergen", w.umfeldVerbergen)
 	mux.HandleFunc("POST /tresor/umfeld/antwort", w.umfeldAntwort)
+	mux.HandleFunc("POST "+personPfad, w.personPost)
 	mux.HandleFunc("GET "+erkanntPfad, w.erkanntGet)
 	mux.HandleFunc("POST "+erkanntPfad+"/geburtstag", w.erkanntGeburtstag)
 	mux.HandleFunc("POST "+erkanntPfad+"/herkunft", w.erkanntHerkunft)
@@ -374,14 +377,15 @@ func (w *Web) packt() string {
 	return ""
 }
 
-// quellenFormulare are the forms on the sources' page; the others are the main page's.
-var quellenFormulare = map[string]bool{"/tresor/signal": true, "/tresor/imap": true, "/tresor/whatsapp": true, "/tresor/abgleich": true,
-	"/tresor/imap/weg": true, "/tresor/mail/aufraeumen": true, "/tresor/mail/loeschen": true,
-	"/tresor/umfeld/schluessel": true, "/tresor/passkey/weg": true}
+// quellenFormulare are the forms on the sources' page, each with its
+// card (open again after a failed save); the others are the main page's.
+var quellenFormulare = map[string]string{"/tresor/signal": "signal", "/tresor/imap": "mail", "/tresor/whatsapp": "whatsapp", "/tresor/abgleich": "kontakte",
+	"/tresor/imap/weg": "mail", "/tresor/mail/aufraeumen": "mail", "/tresor/mail/loeschen": "mail",
+	"/tresor/umfeld/schluessel": "umfeld", "/tresor/passkey/weg": "passkeys"}
 
 // antwort ends a form: back to the page it came from, with the sentence.
 func (w *Web) antwort(rw http.ResponseWriter, r *http.Request, code int, meldung, fehler string) {
-	if quellenFormulare[r.URL.Path] {
+	if quellenFormulare[r.URL.Path] != "" {
 		w.quellenSeite(rw, r, code, meldung, fehler)
 		return
 	}
@@ -770,13 +774,7 @@ func (w *Web) imAchiv(b *strings.Builder, quelle, eins, mehr string) {
 	fmt.Fprintf(b, `<p>Zuletzt ins Archiv übernommen: %s, am %s.</p>`, esc(anzahl(n, eins, mehr)), datum(e.Am))
 }
 
-func (w *Web) signalKarte(b *strings.Builder, offen bool) {
-	b.WriteString(`<section class=quelle id=karte-signal data-live><h3>Signal</h3>`)
-	w.imAchiv(b, "signal", "Nachricht", "Nachrichten")
-	if n := wartende(w.Eingang)["signal"].Wartend; n > 0 {
-		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung wartet", "Sicherungen warten")))
-	}
-	w.fehlerVon(b, "signal")
+func (w *Web) signalKarte(b *strings.Builder, offen bool, qa quelleAuf) {
 	sch := w.Schluessel
 	innen, auf := w.Tresor.Innen()
 	pt, pOK := time.Time{}, false
@@ -784,6 +782,22 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 		pt, pOK = signalHinterlegt(innen)
 	}
 	_, tOK := sch.Hinterlegt(SchluesselTelefon)
+	zeile := w.letzteZeile("signal", "Nachricht", "Nachrichten")
+	switch {
+	case zeile == "meldet einen Fehler":
+	case offen && auf && !pOK && !tOK:
+		zeile = "noch nicht eingerichtet"
+	case offen && auf && !pOK:
+		zeile = "Passphrase fehlt"
+	case !tOK:
+		zeile = "Nummer fehlt"
+	}
+	quelleKopf(b, qa, "signal", "Signal", zeile)
+	w.imAchiv(b, "signal", "Nachricht", "Nachrichten")
+	if n := wartende(w.Eingang)["signal"].Wartend; n > 0 {
+		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung wartet", "Sicherungen warten")))
+	}
+	w.fehlerVon(b, "signal")
 	zugang := []string{}
 	switch {
 	case !offen || !auf:
@@ -801,7 +815,7 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 	}
 	fmt.Fprintf(b, `<p class=zugang>%s</p>`, strings.Join(zugang, " · "))
 	if !offen || !auf {
-		fmt.Fprintf(b, `<p class=k>%s</p></section>`, saysSignalZu)
+		fmt.Fprintf(b, `<p class=k>%s</p>`+quelleEnde, saysSignalZu)
 		return
 	}
 	komplett := pOK && tOK
@@ -814,11 +828,12 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool) {
 <form method=post action="/tresor/signal" class=feld>
 <label>Signal-Passphrase (30 Ziffern, aus Signal → Einstellungen → Chats → Chat-Sicherungen)<input name=passphrase inputmode=numeric autocomplete=off spellcheck=false></label>
 <label>Deine Handynummer<input name=telefon type=tel autocomplete=tel placeholder="z. B. +49 151 2345678"></label>
-%s</form><p class=hinweis>%s</p></details></section>`, offenWenn(!komplett), summary, knopf(map[bool]string{true: "Ersetzen", false: "Speichern"}[komplett], "Speichere …", ""), saysSignalHinweis)
+%s</form><p class=hinweis>%s</p></details>`+quelleEnde, offenWenn(true), summary, knopf(map[bool]string{true: "Ersetzen", false: "Speichern"}[komplett], "Speichere …", ""), saysSignalHinweis)
 }
 
-func (w *Web) smsKarte(b *strings.Builder) {
-	b.WriteString(`<section class=quelle id=karte-sms data-live><h3>SMS und Anrufe</h3>`)
+func (w *Web) smsKarte(b *strings.Builder, qa quelleAuf) {
+	_, nummer := w.Schluessel.Hinterlegt(SchluesselTelefon)
+	quelleKopf(b, qa, "sms", "SMS und Anrufe", fehltZeile(w.letzteZeile("sms", "Nachricht", "Nachrichten"), !nummer, "Nummer fehlt"))
 	ein, _, _ := w.Protokoll.Kopie()
 	if e, ok := ein["sms"]; ok {
 		fmt.Fprintf(b, `<p>Zuletzt ins Archiv übernommen: %s und %s, am %s.</p>`, esc(anzahl(e.Zahlen.SMS+e.Zahlen.MMS, "Nachricht", "Nachrichten")), esc(anzahl(e.Zahlen.Anrufe, "Anruf", "Anrufe")), datum(e.Am))
@@ -829,24 +844,45 @@ func (w *Web) smsKarte(b *strings.Builder) {
 		fmt.Fprintf(b, `<p>%s im Eingang, verschlüsselt. Beim Öffnen kommen sie ins Archiv.</p>`, esc(anzahl(n, "Datei wartet", "Dateien warten")))
 	}
 	w.fehlerVon(b, "sms")
-	if _, ok := w.Schluessel.Hinterlegt(SchluesselTelefon); !ok {
+	if !nummer {
 		b.WriteString(`<p class=zugang><span class=fehlt>Deine Nummer fehlt</span> (bei Signal eintragen): ohne sie weiß das Archiv nicht, welche SMS du geschrieben hast.</p>`)
 	}
-	b.WriteString(`<p class=k>Kommen aus der Homes-App: Mehr → Nachrichten sichern → „SMS und Anrufliste übertragen“. Die App verschlüsselt sie schon auf dem Handy für dein Archiv; auf der Box kann sie niemand lesen, solange es zu ist.</p></section>`)
+	b.WriteString(`<p class=k>Kommen aus der Homes-App: Mehr → Nachrichten sichern → „SMS und Anrufliste übertragen“. Die App verschlüsselt sie schon auf dem Handy für dein Archiv; auf der Box kann sie niemand lesen, solange es zu ist.</p>` + quelleEnde)
 }
 
 // kontakteKarte: the address book and the calendars. Their numbers live
 // in the vault: while closed the card only says what happens.
-func (w *Web) kontakteKarte(b *strings.Builder, offen bool) {
-	b.WriteString(`<section class=quelle id=karte-kontakte data-live><h3>Kontakte und Kalender</h3>`)
+// kontakteZeile is the contacts' state line.
+func (w *Web) kontakteZeile(offen bool) string {
+	a := w.Abgleich
+	switch {
+	case !a.Eingerichtet():
+		return "nicht eingerichtet"
+	case !offen:
+		return "liest nur, wenn dein Archiv offen ist"
+	}
+	st := a.Stand()
+	switch {
+	case st.Fehler != "" || st.Kontakte.Fehler != "" || st.KalenderFehler != "":
+		return "Abgleich gestört"
+	case st.Laeuft:
+		return "gleicht gerade ab …"
+	case !st.Kontakte.Am.IsZero():
+		return anzahl(st.Kontakte.Karten, "Kontakt", "Kontakte") + ", zuletzt abgeglichen um " + uhrzeit(st.Kontakte.Am)
+	}
+	return "noch nicht abgeglichen"
+}
+
+func (w *Web) kontakteKarte(b *strings.Builder, offen bool, qa quelleAuf) {
+	quelleKopf(b, qa, "kontakte", "Kontakte und Kalender", w.kontakteZeile(offen))
 	b.WriteString(`<p class=k>Die Homes-App spiegelt die Kontakte deines Handys jeden Tag in dein Adressbuch „Handy-Kontakte“ auf der Box (Mehr → Nachrichten sichern → „Kontakte übertragen“); deine Google-Kalender und deine eigenen Kalender liegen dort auch. Ist dein Archiv offen, liest es beides alle paar Stunden. Es ändert dort nichts.</p>`)
 	a := w.Abgleich
 	switch {
 	case !a.Eingerichtet():
-		fmt.Fprintf(b, `<p class=zugang><span class=fehlt>%s</span></p></section>`, esc(saysRadicaleFehlt))
+		fmt.Fprintf(b, `<p class=zugang><span class=fehlt>%s</span></p>`+quelleEnde, esc(saysRadicaleFehlt))
 		return
 	case !offen:
-		b.WriteString(`<p class=k>Was im Archiv ist, siehst du, wenn es offen ist: Die Termine liegen im Tresor.</p></section>`)
+		b.WriteString(`<p class=k>Was im Archiv ist, siehst du, wenn es offen ist: Die Termine liegen im Tresor.</p>` + quelleEnde)
 		return
 	}
 	st := a.Stand()
@@ -920,25 +956,27 @@ func (w *Web) kontakteKarte(b *strings.Builder, offen bool) {
 	if !st.Laeuft {
 		fmt.Fprintf(b, `<form method=post action="/tresor/abgleich">%s</form>`, knopf("Jetzt abgleichen", "Gleicht ab …", "k"))
 	}
-	b.WriteString(`</section>`)
+	b.WriteString(quelleEnde)
 }
 
-func (w *Web) whatsappKarte(b *strings.Builder) {
-	b.WriteString(`<section class=quelle id=karte-whatsapp data-live><h3>WhatsApp</h3>`)
+func (w *Web) whatsappKarte(b *strings.Builder, qa quelleAuf) {
+	innen, auf := w.Tresor.Innen()
+	hat, am := false, time.Time{}
+	if fi, err := os.Stat(innen.WhatsAppSchluessel()); auf && err == nil {
+		hat, am = true, fi.ModTime()
+	}
+	quelleKopf(b, qa, "whatsapp", "WhatsApp", fehltZeile(w.letzteZeile("whatsapp", "neue Nachricht", "neue Nachrichten"), auf && !hat, "Schlüssel fehlt"))
 	w.imAchiv(b, "whatsapp", "neue Nachricht", "neue Nachrichten")
 	if n := wartende(w.Eingang)["whatsapp"].Wartend; n > 0 {
 		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung liegt", "Sicherungen liegen")))
 	}
 	w.fehlerVon(b, "whatsapp")
-	innen, auf := w.Tresor.Innen()
 	if !auf {
-		b.WriteString(`<p class=k>Den Schlüssel trägst du bei offenem Archiv ein. Er liegt im Tresor; deshalb liest das Archiv WhatsApp nur, wenn es offen ist.</p></section>`)
+		b.WriteString(`<p class=k>Den Schlüssel trägst du bei offenem Archiv ein. Er liegt im Tresor; deshalb liest das Archiv WhatsApp nur, wenn es offen ist.</p>` + quelleEnde)
 		return
 	}
-	fi, err := os.Stat(innen.WhatsAppSchluessel())
-	hat := err == nil
 	if hat {
-		fmt.Fprintf(b, `<p class=zugang>Schlüssel hinterlegt am %s</p>`, datum(fi.ModTime()))
+		fmt.Fprintf(b, `<p class=zugang>Schlüssel hinterlegt am %s</p>`, datum(am))
 	} else {
 		b.WriteString(`<p class=zugang><span class=fehlt>Schlüssel fehlt</span></p>`)
 	}
@@ -958,7 +996,7 @@ func (w *Web) whatsappKarte(b *strings.Builder) {
 <li>WhatsApp → Einstellungen → Chats → Chat-Backup → Ende-zu-Ende-verschlüsseltes Backup → <b>Deaktivieren</b> (mit deinem Passkey bestätigen).</li>
 <li>Gleich danach wieder <b>Aktivieren</b> und „Stattdessen 64-stelligen Schlüssel verwenden“ wählen. Dazwischen liegt dein Backup unverschlüsselt bei Google, also direkt nacheinander.</li>
 <li>Den Schlüssel in Vaultwarden ablegen und hier eintragen.</li>
-<li>„Jetzt sichern“ tippen, in WhatsApp und danach in der Homes-App.</li></ol></details></section>`, offenWenn(!hat), summary, knopf(knopfText, "Speichere …", ""))
+<li>„Jetzt sichern“ tippen, in WhatsApp und danach in der Homes-App.</li></ol></details>`+quelleEnde, offenWenn(true), summary, knopf(knopfText, "Speichere …", ""))
 }
 
 func offenWenn(b bool) string {
@@ -1131,7 +1169,7 @@ p.laeuft{font-weight:600}span.laeuft{flex:none;width:14px;height:14px;margin-top
 progress{display:block;width:100%;height:.6rem;margin:.35rem 0 .2rem;accent-color:var(--accent)}
 .zugang{font-size:.95rem}.fehlt{color:var(--danger);font-weight:600}
 .postfach{border-top:1px solid var(--line);padding:.3rem 0}.postfach:first-of-type{border-top:0}.aufraeumen{margin:.4rem 0;padding:.2rem 12px;background:var(--panel);border-radius:10px}.aufraeumen p{margin:.4rem 0}
-details{margin:6px 0}summary{cursor:pointer;color:var(--accent);font-weight:600;min-height:44px;display:flex;align-items:center}.karte li summary{flex-direction:column;align-items:flex-start;justify-content:center}.karte li summary .k{font-weight:400}
+details{margin:6px 0}summary{cursor:pointer;color:var(--accent);font-weight:600;min-height:44px;display:flex;align-items:center}.karte li summary{flex-direction:column;align-items:flex-start;justify-content:center}.karte li summary .k{font-weight:400}section.quelle>details>summary{flex-direction:column;align-items:flex-start;justify-content:center;color:var(--ink);padding:6px 0}section.quelle>details>summary h3{margin:0}section.quelle>details>summary .k{font-weight:400}
 ol{padding-left:1.2rem}li{margin:.3rem 0}form.zeile{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin:.3rem 0}
 .vorschlag{border-top:1px solid var(--line);padding:.4rem 0}.vorschlag p{margin:.3rem 0}.knoepfe{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0}
 .baum{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;margin:16px 0 0;background:var(--card);border-radius:14px}.baum svg{display:block}

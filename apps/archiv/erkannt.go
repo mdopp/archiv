@@ -29,11 +29,12 @@ type Erkannt struct {
 	GruppenVorschlaege       int
 	GruppenEingeordnet       int
 	GruppenAlle              int
+	Dieselben                int // persons made by hand a phone-book person may be (angelegt.go)
 }
 
 // Vorschlaege are all the open suggestions.
 func (e Erkannt) Vorschlaege() int {
-	return e.Beziehungen + e.Geburtstage + e.GruppenVorschlaege + e.Herkunft
+	return e.Beziehungen + e.Geburtstage + e.GruppenVorschlaege + e.Herkunft + e.Dieselben
 }
 
 // ErkannterBezug is a suggested relation: X is Art of Y, Weil why, Quelle
@@ -106,7 +107,7 @@ func (n *Netz) Erkannt(st UmfeldStand, modell bool) Erkannt {
 	}
 	zs := n.Gruppenliste()
 	e := Erkannt{Modell: modell, Beziehungen: len(n.ErkannteBeziehungen()), Geburtstage: len(n.GeburtstagVorschlaege()), Herkunft: len(n.HerkunftVorschlaege()),
-		GruppenVorschlaege: len(GruppenVorschlaege(zs)), GruppenAlle: len(zs), Gezaehlt: st.ModellGezaehlt, Offen: st.ModellOffen}
+		GruppenVorschlaege: len(GruppenVorschlaege(zs)), GruppenAlle: len(zs), Dieselben: len(n.GleichePersonen()), Gezaehlt: st.ModellGezaehlt, Offen: st.ModellOffen}
 	for _, z := range zs {
 		if z.Kategorie != "" {
 			e.GruppenEingeordnet++
