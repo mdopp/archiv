@@ -5,11 +5,11 @@
 
 # msgvault (kenn-io/msgvault, MIT): our fork's image, msgvault 0.22.0 plus
 # `import-signal` (Signal Android backups decrypted by signalbackup-tools),
-# built from github.com/mdopp/msgvault tag signal-import-0.22.0-2 (with upstream review fixes). Upstream PR:
+# built from github.com/mdopp/msgvault tag signal-import-0.22.0-3 (with upstream review fixes; the attachment pack after an ingest is queued, not inline: mdopp/msgvault#1). Upstream PR:
 # kenn-io/msgvault#1722; return to the upstream image once a release has it.
 # Pinned by digest. Its binary is built on Debian bookworm with CGO (SQLite,
 # DuckDB) and needs glibc, libstdc++ and libpcre2 at run time.
-FROM ghcr.io/mdopp/msgvault:0.22.0-signal.2@sha256:d1708807cd0034f50f76ec3986c4d276321f5b7f31e96db409805e6c42fee055 AS msgvault
+FROM ghcr.io/mdopp/msgvault:0.22.0-signal.3@sha256:f18ff571f2e0f9fe7ad39a39f1ee4b996af3384625b93f259a260f92270ae73b AS msgvault
 
 # signalbackup-tools (bepaald, GPLv3) has no Linux release binary: built
 # from the tag, checked against its commit.
