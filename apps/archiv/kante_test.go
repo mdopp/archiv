@@ -277,3 +277,30 @@ func TestFinden(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+// Every name field is namenFeld: marked for the script's rows, still with
+// the datalist for a browser without script, and the datalist once per
+// page (owner 2026-11-11: „Ha“ in „Zu wem?“ showed nothing on Android).
+func TestNamenFelder(t *testing.T) {
+	wt, _, _, _, _ := kanteBox(t)
+	for _, adresse := range []string{"/tresor?tab=stammbaum", "/tresor/umfeld?mitte=p-ben", kantePfad + "?a=p-ben&wer=Zacharias", kanteAdresse("p-anna", "p-ben")} {
+		page := wt.rufe("GET", adresse, anna, nil).Body.String()
+		if n := strings.Count(page, `<datalist id=namen>`); n != 1 {
+			t.Fatalf("%s: %d datalists named namen", adresse, n)
+		}
+		if want := namenListe(wt.w.Umfeld.Netz()); len(wt.w.Umfeld.Netz().Namen()) < 5 || !strings.Contains(page, want) {
+			t.Fatalf("%s: the datalist is not the net's names %s:\n%s", adresse, want, page)
+		}
+		if !strings.Contains(page, `<input name=wer list=namen data-namen autocomplete=off required placeholder="Name">`) || strings.Count(page, "list=namen") != strings.Count(page, "data-namen ") {
+			t.Fatalf("%s: a name field without namenFeld:\n%s", adresse, page)
+		}
+	}
+	if f := namenFeld("von", `Du"`); f != `<input name=von list=namen data-namen autocomplete=off required placeholder="Name" value="Du&#34;">` {
+		t.Fatal(f)
+	}
+	for _, want := range []string{"input[data-namen]", "removeAttribute('list')", ".slice(0,6)", "replace(/ä/g,'ae')", "b.textContent=n"} {
+		if !strings.Contains(skript, want) {
+			t.Fatalf("the script has no %q", want)
+		}
+	}
+}
