@@ -95,6 +95,7 @@ func main() {
 	}
 	tresor.Vorbereiten = ab.Vorbereiten
 	um := &Umfeld{URL: immichURL(), Oeffentlich: immichOeffentlich(os.Getenv), Radicale: rad, Msgvault: api, Modell: modellAus(os.Getenv), Schluessel: schluessel, Takt: sekunden("UMFELD_TAKT", time.Hour)}
+	pb.SozialNeu = um.SozialNeu
 	if os.Getenv("IMMICH_URL") != "" && um.URL == "" {
 		log.Printf("archiv: IMMICH_URL %q ist keine http(s)-Adresse: Umfeld aus", os.Getenv("IMMICH_URL"))
 	}

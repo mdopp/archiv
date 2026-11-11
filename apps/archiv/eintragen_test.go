@@ -340,7 +340,7 @@ func TestArbeitsplatz(t *testing.T) {
 		t.Fatalf("the Stammbaum:\n%s", baum)
 	}
 	quellen := wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
-	for _, want := range []string{"<h1>Quellen</h1>", `href="/tresor">‹ Dein Archiv</a>`, "Signal-Passphrase (30", "Postfach eintragen", "SMS und Anrufe", "64-stelligen Schlüssel", "Kontakte und Kalender", "Immich-Schlüssel", "Passkeys"} {
+	for _, want := range []string{"<h1>Quellen</h1>", `href="/tresor">‹ Dein Archiv</a>`, "Signal-Passphrase (30", "Postfach eintragen", "SMS und Anrufe", "64-stelligen Schlüssel", "Kontakte und Kalender", "Immich-Schlüssel", "Passkeys", "Facebook und LinkedIn", "Eine E-Mail-Weiterleitung geht hier nicht", "Ins Archiv"} {
 		if !strings.Contains(quellen, want) {
 			t.Fatalf("Quellen lacks %q", want)
 		}

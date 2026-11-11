@@ -72,6 +72,7 @@ type Postbote struct {
 	Arbeit     func() func() // Tresor.Arbeit: no idle close while one is delivered
 	Geaendert  func()
 	Now        func() time.Time
+	SozialNeu  func(Innen) // a social export went into the vault: the net takes it (sozial.go)
 
 	mu           sync.Mutex
 	laeuft       string
@@ -155,7 +156,11 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 	if p.Eingang != nil {
 		signal, _ = p.Eingang.Stabil("signal")
 	}
-	if len(pakete) == 0 && len(sms) == 0 && len(signal) == 0 && !p.whatsappWartet(innen) {
+	var sozial []Datei
+	if p.Eingang != nil {
+		sozial, _ = p.Eingang.Stabil("sozial")
+	}
+	if len(pakete) == 0 && len(sms) == 0 && len(signal) == 0 && len(sozial) == 0 && !p.whatsappWartet(innen) {
 		return
 	}
 	tel, _ := p.Schluessel.Lesen(SchluesselTelefon) // a mail packet needs none; a Signal packet waits for it
@@ -163,7 +168,7 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 	if ctx.Err() == nil {
 		p.signal(ctx, innen, signal, string(tel))
 	}
-	if len(pakete) == 0 && len(sms) == 0 {
+	if len(pakete) == 0 && len(sms) == 0 && len(sozial) == 0 {
 		return
 	}
 	id, err := identitaetLesen(innen.Identitaet())
@@ -190,6 +195,14 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 			continue
 		}
 		if err := p.SMSZustellen(ctx, innen, id, d, string(tel)); err != nil && ctx.Err() == nil && !errors.Is(err, errOhneNummer) {
+			p.zuruecklegen(d.Pfad)
+		}
+	}
+	for _, d := range sozial {
+		if ctx.Err() != nil {
+			return
+		}
+		if !p.wartet(d.Pfad) && p.sozialZustellen(ctx, innen, id, d) != nil && ctx.Err() == nil {
 			p.zuruecklegen(d.Pfad)
 		}
 	}

@@ -22,9 +22,9 @@ import (
 // Quellen are the inbox folders, in the order the page shows them. The
 // archive's own letzte/ (the newest backups, for a new phone) lies beside
 // them and is never read as an inbox.
-var Quellen = []string{"signal", "sms", "whatsapp", "discord"}
+var Quellen = []string{"signal", "sms", "whatsapp", "discord", "sozial"}
 
-var quellenName = map[string]string{"signal": "Signal", "sms": "SMS", "whatsapp": "WhatsApp", "discord": "Discord"}
+var quellenName = map[string]string{"signal": "Signal", "sms": "SMS", "whatsapp": "WhatsApp", "discord": "Discord", "sozial": "Facebook/LinkedIn"}
 
 // istSicherung says whether a file (its name in the source's folder) is
 // a backup of that source: the files the status counts and, for Signal,
@@ -40,6 +40,8 @@ func istSicherung(quelle, rel string) bool {
 		return strings.HasSuffix(strings.ToLower(name), ".zip")
 	case "sms": // SMS Backup & Restore XML (messages or calls), age-encrypted on the phone by the Homes app
 		return strings.HasSuffix(name, ".xml.age")
+	case "sozial": // a Facebook or LinkedIn export, age-encrypted on the phone by the Homes app (sozial.go)
+		return strings.HasSuffix(name, ".age")
 	}
 	return false
 }

@@ -22,6 +22,7 @@ type Zahlen struct {
 	Mails    int `json:"mails,omitempty"`
 	WhatsApp int `json:"whatsapp,omitempty"`
 	Signal   int `json:"signal,omitempty"` // new messages from msgvault's import-signal
+	Sozial   int `json:"sozial,omitempty"` // friends or connections in a social export (sozial.go)
 }
 
 func (z Zahlen) Nachrichten() int { return z.SMS + z.MMS + z.Mails + z.WhatsApp + z.Signal }
