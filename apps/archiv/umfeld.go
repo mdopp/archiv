@@ -238,6 +238,7 @@ func (u *Umfeld) netzBauen(innen Innen, tab netzTabelle) *Netz {
 	n.paareSetzen(paareLaden(innen), paareWegLaden(innen))
 	n.sozialSetzen(sozialLaden(innen))
 	n.angelegtSetzen(angelegtLaden(innen))
+	n.baumWeg = baumWegLaden(innen)
 	return n
 }
 

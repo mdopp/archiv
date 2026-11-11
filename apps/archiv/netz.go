@@ -167,8 +167,10 @@ type Netz struct {
 	herkunftAntworten map[string]herkunftAntwort
 	paare             map[string]paarVorschlag
 	paareWeg          map[string]time.Time
-	gelesen           map[string]gelesen
-	hinweise          map[string]paarHinweis
+	// baumWeg: „weiß nicht“ about where a relative stands, by pair (stammbaum_weitere.go)
+	baumWeg  map[string]time.Time
+	gelesen  map[string]gelesen
+	hinweise map[string]paarHinweis
 	// sozial are the friends and connections of the social exports,
 	// sozialGrund their reasons by node (sozial.go, sozialBauen).
 	sozial      []sozialEintrag
@@ -200,7 +202,7 @@ func neuesNetz(st netzTabelle, verborgen map[string]string, antworten map[string
 	n.gruppen, n.gelesen, n.hinweise, n.gruppenModell = map[string]gruppenAntwort{}, map[string]gelesen{}, map[string]paarHinweis{}, map[string]gruppenLesung{}
 	n.gebHinweise, n.gebAntworten = map[string]gebHinweis{}, map[string]gebAntwort{}
 	n.herkunft, n.herkunftAntworten = map[string]herkunftVorschlag{}, map[string]herkunftAntwort{}
-	n.paare, n.paareWeg = map[string]paarVorschlag{}, map[string]time.Time{}
+	n.paare, n.paareWeg, n.baumWeg = map[string]paarVorschlag{}, map[string]time.Time{}, map[string]time.Time{}
 	n.bauen()
 	return n
 }

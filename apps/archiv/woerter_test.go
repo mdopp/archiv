@@ -113,6 +113,12 @@ func TestWoerterImNamen(t *testing.T) {
 			t.Errorf("%q: %q %v", c.name, wort, arten)
 		}
 	}
+	// the common German kin words (owner 2026-11-11, „Tante Hedwig“): each on a contact is a suggestion
+	for _, w := range []string{"Tante", "Onkel", "Großmutter", "Großvater", "Enkel", "Cousin", "Cousine", "Nichte", "Neffe", "Schwager", "Schwägerin", "Schwiegermutter", "Schwiegervater"} {
+		if wort, arten := woerter.imNamen(w + " Hedwig"); wort != w || len(arten) == 0 || !slices.Contains(familienArten, arten[0]) {
+			t.Errorf("%q: %q %v", w+" Hedwig", wort, arten)
+		}
+	}
 	if nachname("", "Oma Hilde") != "" || nachname("", "Anne Berg") != "berg" {
 		t.Fatal("a relation word is no family name; a given name is not one")
 	}

@@ -56,6 +56,14 @@ var relWie = map[string]string{
 	"geschwister": "geschwister", "bruder": "geschwister", "schwester": "geschwister", "sibling": "geschwister", "brother": "geschwister", "sister": "geschwister",
 	"onkeltante": "onkel", "onkel": "onkel", "tante": "onkel", "uncle": "onkel", "aunt": "onkel",
 	"neffenichte": "neffe", "neffe": "neffe", "nichte": "neffe", "nephew": "neffe", "niece": "neffe",
+	// read only by the Stammbaum (stammbaum_weitere.go): the rules above take the four kinds
+	"grosseltern": "grosseltern", "grossmutter": "grosseltern", "grossvater": "grosseltern", "oma": "grosseltern", "opa": "grosseltern",
+	"grandmother": "grosseltern", "grandfather": "grosseltern", "grandparent": "grosseltern",
+	"enkel": "enkel", "enkelin": "enkel", "enkelkind": "enkel", "grandchild": "enkel", "grandson": "enkel", "granddaughter": "enkel",
+	"cousin": "cousin", "cousine": "cousin", "kusine": "cousin", "vetter": "cousin", "cousins": "cousin",
+	"schwager": "schwager", "schwaegerin": "schwager", "brotherinlaw": "schwager", "sisterinlaw": "schwager",
+	"schwiegermutter": "schwiegereltern", "schwiegervater": "schwiegereltern", "schwiegereltern": "schwiegereltern", "motherinlaw": "schwiegereltern", "fatherinlaw": "schwiegereltern",
+	"schwiegersohn": "schwiegerkind", "schwiegertochter": "schwiegerkind", "soninlaw": "schwiegerkind", "daughterinlaw": "schwiegerkind",
 }
 
 // bekannt is one known relation: X is Rel of Y.

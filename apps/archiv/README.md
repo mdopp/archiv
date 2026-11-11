@@ -724,7 +724,8 @@ inside the open vault; closed, there is no net, not even in memory.
   birthday and streets, the ties, the household's cards as last read),
   `verborgen.json` (who is hidden), `antworten.json` (step 2),
   `gruppen.json` and `hinweise.json` (step 5), `gruppen-modell.json`,
-  `geburtstag-hinweise.json` and `geburtstage.json` (step 8). Every round reads everything
+  `geburtstag-hinweise.json` and `geburtstage.json` (step 8),
+  `baum-weissnicht.json` (step 7). Every round reads everything
   again and rebuilds (a merge or a rename in Immich cannot drift); Immich
   out of reach keeps the last photos.
 - **When**: at the opening, then every `UMFELD_TAKT` seconds (default an
@@ -1045,6 +1046,21 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
   not fit — a cycle, someone two generations at once — is not drawn but
   listed under „Passt nicht in den Stammbaum“, its edge page saying why
   (`&pruefen=1`). A step-family gets a line from each parent.
+- Relatives a step away (owner 2026-11-11: „Wenn Hedwig meine Tante
+  ist, wird das nicht im Stammbaum angezeigt.“; `stammbaum_weitere.go`):
+  Großeltern, Onkel/Tante, Cousin/e, Neffe/Nichte, Enkel/in,
+  Schwiegereltern, Schwiegerkind, Schwager/Schwägerin and Sonstige
+  verwandt, answered or in a phone book, are in the tree at their
+  generation. Where the drawn lines give the path (an aunt is a sibling
+  of a parent), she stands there by that line; where not, on a side row
+  right of her row („Tanten und Onkel“), and „Noch ohne Platz im
+  Stammbaum“ asks once, one tap: „Hedwig ist Schwester oder Bruder von …“
+  with the ones in between (the parents) and „weiß nicht“. A tap sets
+  that pair as the edge page does (Homes writes it, Rückgängig undoes
+  it), and the tree derives the rest; „weiß nicht“ keeps her on the side
+  row, not asked again (`baum-weissnicht.json`). Without anyone in
+  between it says what is missing; Sonstige verwandt opens the edge page
+  to say how. Nothing is dropped.
 - Asked early (owner 2026-11-11): two of the family circle with one
   family name on at least five photo days together are asked with the
   person's own questions; with both birthdays the age gap suggests the

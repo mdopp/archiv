@@ -29,6 +29,9 @@ func TestSchau(t *testing.T) {
 	if viele, _ := strconv.Atoi(os.Getenv("ARCHIV_SCHAU_LEUTE")); viele > 0 {
 		schauLeute(t, ut, innen, viele)
 	}
+	if os.Getenv("ARCHIV_SCHAU_FAMILIE") != "" {
+		schauFamilie(t, ut, innen)
+	}
 	dauer, _ := time.ParseDuration(os.Getenv("ARCHIV_SCHAU_DAUER"))
 	if dauer == 0 {
 		dauer = 10 * time.Minute
@@ -74,6 +77,32 @@ func schauLeute(t *testing.T, ut *umfeldTest, innen Innen, viele int) {
 		}
 	}
 	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+		t.Fatal(err)
+	}
+	ut.u.laden(innen)
+}
+
+// schauFamilie gives anna parents (Rosi and Karl), an aunt whose side is
+// not known (Hedwig), a grandmother (Erna), a cousin (Lukas) and a
+// relative (Otto), each answered and on one photo day with her: the tree
+// with the relatives a step away.
+func schauFamilie(t *testing.T, ut *umfeldTest, innen Innen) {
+	tab, err := tabelleLaden(innen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	am := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	as := antwortenLaden(innen)
+	for i, p := range [][3]string{{"p-rosi", "Rosi Berg", "eltern"}, {"p-karl", "Karl Berg", "eltern"}, {"p-hedwig", "Hedwig Sommer", "onkel"},
+		{"p-erna", "Erna Lang", "grosseltern"}, {"p-lukas", "Lukas Sommer", "cousin"}, {"p-otto", "Otto Lang", "verwandt"}} {
+		tab.Namen[p[0]] = p[1]
+		tab.Fotos = append(tab.Fotos, netzFoto{ID: fmt.Sprintf("f%d", i), T: time.Date(2021, 6, 1+i, 12, 0, 0, 0, time.UTC), Wer: []string{"p-anna", p[0]}})
+		as[paarKey(p[0], "p-anna")] = antwort{X: p[0], Art: p[2], Am: am}
+	}
+	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+		t.Fatal(err)
+	}
+	if err := jsonImTresor(innen.umfeldAntworten(), as); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)
