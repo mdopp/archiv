@@ -1,0 +1,4 @@
+# scripts/ratchet.py deadcode: the number is how often
+# written by `scripts/ratchet.py --update`; lowered in the PR that fixes one, raised only with --accept
+# total 1
+1 dead apps/archiv/briefkasten.go: Briefkasten.geaendert

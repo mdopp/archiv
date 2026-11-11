@@ -1,0 +1,4 @@
+# scripts/ratchet.py dupl: file pairs, the number is the cloned fragments of 75 tokens or more
+# written by `scripts/ratchet.py --update`; lowered in the PR that fixes one, raised only with --accept
+# total 1
+1 apps/archiv/umfeld.go ~ apps/archiv/umfeld.go
