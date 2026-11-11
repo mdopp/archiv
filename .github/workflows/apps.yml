@@ -140,3 +140,5 @@ jobs:
           go-version-file: apps/archiv/go.mod
       - run: python3 -m unittest scripts/test_ratchet.py
       - run: python3 scripts/ratchet.py
+        env:
+          GOTOOLCHAIN: auto # setup-go v7 sets local; the pinned tools need a newer Go than go.mod's
