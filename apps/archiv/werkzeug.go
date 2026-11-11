@@ -106,7 +106,7 @@ func mailWerkzeug(args []string) int {
 		return 1
 	}
 	h := &Mailholer{Post: filepath.Join(*data, "briefkasten"), Gesehen: &Gesehen{Dir: filepath.Join(*data, "gesehen")}}
-	g, err := h.holen(context.Background(), pf, empf, *konto)
+	g, err := h.holen(context.Background(), pf, empf, kontoLauf{ID: kontoErstes, Konto: *konto})
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
@@ -141,7 +141,7 @@ func (p *lokalesPostfach) Ordner() ([]PostOrdner, error) {
 	return []PostOrdner{{Name: "INBOX", Trenner: "/"}}, nil
 }
 func (p *lokalesPostfach) Waehlen(string) (uint32, error) { return 1, nil }
-func (p *lokalesPostfach) NeueUIDs(nach uint32) ([]uint32, error) {
+func (p *lokalesPostfach) NeueUIDs(nach uint32, _ string) ([]uint32, error) {
 	var out []uint32
 	for i := range p.dateien {
 		if u := uint32(i + 1); u > nach {

@@ -239,7 +239,7 @@ func (w *Web) quellenProbleme(offen bool) (p []string) {
 			p = append(p, "Fotos: Umfeld gestört")
 		}
 	}
-	if _, mail := w.Schluessel.Hinterlegt(SchluesselIMAP); len(ein) == 0 && !mail && len(p) == 0 {
+	if konten, _ := imapKonten(w.Schluessel); len(ein) == 0 && len(konten) == 0 && len(p) == 0 {
 		p = append(p, "noch nichts eingerichtet")
 	}
 	return p

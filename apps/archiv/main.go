@@ -82,7 +82,7 @@ func main() {
 	bk := &Briefkasten{Eingang: eingang, Letzte: filepath.Join(eingangDir, "letzte"), Post: filepath.Join(data, "briefkasten"),
 		Empfaenger: empfaenger, Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Protokoll: prot, Takt: takt}
 	mh := &Mailholer{Post: bk.Post, Empfaenger: empfaenger, Gesehen: bk.Gesehen, Schluessel: schluessel, Protokoll: prot,
-		Takt: sekunden("MAIL_TAKT", time.Hour)}
+		Takt: sekunden("MAIL_TAKT", time.Hour), Dokumente: DokumentenpostfachAus(person, os.Getenv)}
 	pb := &Postbote{Post: bk.Post, Eingang: eingang, Letzte: bk.Letzte, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
 		SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"), Takt: takt, Arbeit: tresor.Arbeit}
 	rad, radErr := RadicaleAusUmgebung(person)
@@ -90,6 +90,7 @@ func main() {
 		log.Printf("archiv: Kontakte und Kalender aus: %v", radErr)
 	}
 	api := &MsgvaultAPI{Port: port, Key: tresor.APIKey}
+	aufr := &Aufraeumer{Schluessel: schluessel, Beleg: api, Takt: sekunden("AUFRAEUMEN_TAKT", time.Hour)}
 	ab := &Abgleich{Radicale: rad, Konfig: radErr, API: api, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
 		Takt: sekunden("KONTAKTE_TAKT", 3*time.Hour), Arbeit: tresor.Arbeit}
 	if rad != nil {
@@ -104,7 +105,7 @@ func main() {
 	}
 	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HomesSecret: homesSecret(os.Getenv), HomesIntern: homesIntern(os.Getenv),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
-		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}, Umfeld: um}
+		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}, Umfeld: um, Aufraeumer: aufr}
 
 	status := func() {
 		st := tresor.Stand()
@@ -117,13 +118,17 @@ func main() {
 		web.Puls.Senden()
 	}
 	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert, ab.Geaendert, um.Geaendert = status, status, status, status, status, status, status
+	aufr.Geaendert = status
 	tresor.Lauf = func(ctx context.Context, innen Innen) { // the import, the Abgleich and the Umfeld, side by side, all ending with the vault
 		fertig, umfeldFertig := make(chan struct{}), make(chan struct{})
 		go func() { defer close(fertig); ab.Lauf(ctx, innen) }()
 		go func() { defer close(umfeldFertig); um.Lauf(ctx, innen) }()
+		aufrFertig := make(chan struct{}) // old mail at the provider: only while open, it needs msgvault's proof
+		go func() { defer close(aufrFertig); aufr.Lauf(ctx, innen) }()
 		pb.Lauf(ctx, innen)
 		<-fertig
 		<-umfeldFertig
+		<-aufrFertig
 	}
 	tresor.Erkennen()
 	if _, _, zu := prot.Kopie(); zu == nil && tresor.Stand().Zustand == Verschlossen {
