@@ -185,3 +185,117 @@ func TestStammbaumBestaetigen(t *testing.T) {
 		t.Fatal("pruefen says nothing")
 	}
 }
+
+// An aunt whose side is known (owner 2026-11-11, „Wenn Hedwig meine Tante
+// ist, wird das nicht im Stammbaum angezeigt.“): Yvonne, Uwe's aunt and
+// his mother Hedwig's sister, stands in Hedwig's row, by the sibling
+// line; nothing to ask, no side row.
+func TestStammbaumTanteBekannt(t *testing.T) {
+	am := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	sb := baumNetz(map[string]antwort{
+		paarKey("h/yvonne", "h/uwe"):    {X: "h/yvonne", Art: "onkel", Am: am},
+		paarKey("h/yvonne", "h/hedwig"): {X: "h/yvonne", Art: "geschwister", Am: am},
+	}).Stammbaum()
+	p := baumPos(sb)
+	if p["h/yvonne"].ID == "" || p["h/yvonne"].Gen != p["h/hedwig"].Gen || !baumHat(sb, "h/hedwig", "h/yvonne", "geschwister", true) {
+		t.Fatalf("Yvonne: %+v %+v", p["h/yvonne"], sb.Linien)
+	}
+	if len(sb.Fragen) != 0 || len(sb.Seiten) != 0 || len(sb.Brueche) != 0 || len(sb.Weitere) != 1 {
+		t.Fatalf("asked %+v, side %+v, breaks %+v", sb.Fragen, sb.Seiten, sb.Brueche)
+	}
+}
+
+// An aunt whose side is not known stands in the parents' row on a side
+// row „Tanten und Onkel“, asked once: „Zora ist Schwester oder Bruder von
+// …“ with the parents; a grandmother the same, a row higher; the answer
+// places her and nothing is asked any more.
+func TestStammbaumTanteUnbekannt(t *testing.T) {
+	am := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	mehr := map[string]antwort{
+		paarKey("h/zora", "h/uwe"):  {X: "h/zora", Art: "onkel", Am: am},
+		paarKey("h/xaver", "h/uwe"): {X: "h/uwe", Art: "enkel", Am: am}, // said from Uwe's side: he is Xaver's grandchild
+	}
+	sb := baumNetz(mehr).Stammbaum()
+	p := baumPos(sb)
+	if p["h/zora"].Gen != p["h/hedwig"].Gen || p["h/xaver"].Gen != p["h/hedwig"].Gen-1 || p["h/zora"].X <= p["h/hedwig"].X {
+		t.Fatalf("places: %+v", sb.Personen)
+	}
+	want := []BaumFrage{{X: "h/xaver", Y: "h/uwe", Art: "grosseltern", Wahl: []baumWahl{{"h/hedwig", "eltern"}}},
+		{X: "h/zora", Y: "h/uwe", Art: "onkel", Wahl: []baumWahl{{"h/hedwig", "geschwister"}}}}
+	if !slices.EqualFunc(sb.Fragen, want, func(a, b BaumFrage) bool {
+		return a.X == b.X && a.Y == b.Y && a.Art == b.Art && slices.Equal(a.Wahl, b.Wahl)
+	}) {
+		t.Fatalf("questions: %+v", sb.Fragen)
+	}
+	if !slices.ContainsFunc(sb.Seiten, func(s baumSeite) bool { return s.Text == "Tanten und Onkel" }) || !slices.ContainsFunc(sb.Seiten, func(s baumSeite) bool { return s.Text == "Großeltern" }) {
+		t.Fatalf("side rows: %+v", sb.Seiten)
+	}
+	var b strings.Builder
+	stammbaumTab(&b, baumNetz(mehr))
+	for _, s := range []string{"<h2>Noch ohne Platz im Stammbaum</h2>", "Zora ist Schwester oder Bruder von …", `<input type=hidden name=festlegen value=1>`,
+		`<button name=art value=geschwister class="chip" data-laeuft="Hedwig …">Hedwig</button>`, "weiß nicht", `class="k seite">Tanten und Onkel</text>`, "Xaver ist Mutter oder Vater von …"} {
+		if !strings.Contains(b.String(), s) {
+			t.Fatalf("%q missing:\n%s", s, b.String())
+		}
+	}
+	mehr[paarKey("h/zora", "h/hedwig")] = antwort{X: "h/zora", Art: "geschwister", Am: am}
+	mehr[paarKey("h/xaver", "h/hedwig")] = antwort{X: "h/xaver", Art: "eltern", Am: am}
+	sb = baumNetz(mehr).Stammbaum()
+	if p := baumPos(sb); len(sb.Fragen) != 0 || len(sb.Seiten) != 0 || p["h/zora"].Gen != p["h/hedwig"].Gen || !baumHat(sb, "h/xaver", "h/hedwig", "eltern", true) {
+		t.Fatalf("placed: %+v %+v", sb.Fragen, sb.Personen)
+	}
+}
+
+// Nothing dropped: a relative of each kind a step away is in the tree,
+// at its generation, with the question that would place it, or what is
+// missing for one, or (Sonstige verwandt) the edge page to say how.
+func TestStammbaumNichtsFaellt(t *testing.T) {
+	am := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
+	for _, art := range baumWeitere {
+		sb := baumNetz(map[string]antwort{paarKey("h/max", "h/uwe"): {X: "h/max", Art: art, Am: am}}).Stammbaum()
+		p := baumPos(sb)
+		if p["h/max"].ID == "" || p["h/uwe"].Gen-p["h/max"].Gen != baumStufe[art] {
+			t.Fatalf("%s: Max %+v, Uwe %+v", art, p["h/max"], p["h/uwe"])
+		}
+		i := slices.IndexFunc(sb.Fragen, func(f BaumFrage) bool { return f.X == "h/max" })
+		if i < 0 || len(sb.Fragen[i].Wahl) == 0 && sb.Fragen[i].Fehlt == "" && art != "verwandt" {
+			t.Fatalf("%s: not asked: %+v", art, sb.Fragen)
+		}
+		var b strings.Builder
+		stammbaumTab(&b, baumNetz(map[string]antwort{paarKey("h/max", "h/uwe"): {X: "h/max", Art: art, Am: am}}))
+		if !strings.Contains(b.String(), "<b>Max</b> <span class=k>"+kurzWort(art)+" von dir</span>") {
+			t.Fatalf("%s: no card:\n%s", art, b.String())
+		}
+	}
+}
+
+// The whole way on the page: Hedwig, anna's aunt, with her parents Rosi
+// and Karl: one tap on Rosi places her (and Homes is asked to write the
+// sibling line); then her son Lukas, anna's cousin, is asked as her
+// child; „weiß nicht“ for Erna keeps her on the side row, not asked
+// again, also after the vault is read anew.
+func TestStammbaumEinordnen(t *testing.T) {
+	wt, ut, _, innen, _ := kanteBox(t)
+	schauFamilie(t, ut, innen)
+	baum := wt.rufe("GET", "/tresor?tab=stammbaum", anna, nil).Body.String()
+	for _, s := range []string{"Hedwig Sommer ist Schwester oder Bruder von …", ">Rosi Berg</button>", ">Karl Berg</button>", "Erna Lang ist Mutter oder Vater von …",
+		"Lukas Sommer ist Kind von …", ">Hedwig Sommer</button>", "Wie genau ist Otto Lang verwandt?", `aria-label="Otto Lang"><rect`} {
+		if !strings.Contains(baum, s) {
+			t.Fatalf("%q missing:\n%s", s, baum)
+		}
+	}
+	ziel, baum := wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-hedwig"}, "y": {"p-rosi"}, "art": {"geschwister"}, "festlegen": {"1"}, "zurueck": {"/tresor?tab=stammbaum"}}))
+	if !strings.Contains(ziel, "tab=stammbaum") || strings.Contains(baum, "Hedwig Sommer ist Schwester") || !strings.Contains(baum, `aria-label="Hedwig Sommer und Rosi Berg: Geschwister"`) {
+		t.Fatalf("Hedwig not placed (%s):\n%s", ziel, baum)
+	}
+	wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-lukas"}, "y": {"p-hedwig"}, "art": {"kind"}, "festlegen": {"1"}, "zurueck": {"/tresor?tab=stammbaum"}}))
+	_, baum = wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"paar": {paarKey("p-erna", "p-anna")}, "tu": {"weissnicht"}, "zurueck": {"/tresor?tab=stammbaum"}}))
+	if strings.Contains(baum, "Lukas Sommer ist Kind") || !strings.Contains(baum, `aria-label="Hedwig Sommer und Lukas Sommer: Mutter/Vater und Kind"`) ||
+		strings.Contains(baum, "Erna Lang ist Mutter oder Vater") || !strings.Contains(baum, "Wo genau, weißt du nicht.") || !strings.Contains(baum, `aria-label="Erna Lang"><rect`) {
+		t.Fatalf("after the taps:\n%s", baum)
+	}
+	ut.u.laden(innen)
+	if baum = wt.rufe("GET", "/tresor?tab=stammbaum", anna, nil).Body.String(); !strings.Contains(baum, "Wo genau, weißt du nicht.") {
+		t.Fatal("„weiß nicht“ is not kept")
+	}
+}

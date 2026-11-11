@@ -1175,6 +1175,7 @@ ol{padding-left:1.2rem}li{margin:.3rem 0}form.zeile{display:flex;justify-content
 .baum{max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;margin:16px 0 0;background:var(--card);border-radius:14px}.baum svg{display:block}
 .baum rect{fill:var(--panel);stroke:var(--edge);stroke-width:1.5}.baum a.du rect{stroke:var(--accent);stroke-width:2.5}.baum text{fill:var(--ink);font-size:12px;font-weight:600;text-anchor:middle}.baum text.k{fill:var(--muted);font-weight:400;font-size:11px}
 .baum .linie{fill:none;stroke:var(--muted);stroke-width:2}.baum .linie.vermutet{stroke-dasharray:6 5}.baum .linie.expartner{opacity:.5}.baum .treffer{fill:none;stroke:transparent;stroke-width:22;pointer-events:stroke}
+.baum text.seite{text-anchor:start;font-size:11px}.einordnen{padding:10px 0;border-top:1px solid var(--edge)}.einordnen:first-of-type{border-top:0}.einordnen p{margin:4px 0}.einordnen form{display:contents}
 .baum a:hover .linie,.baum a:focus .linie{stroke:var(--accent)}.baum a:hover rect,.baum a:focus rect{stroke:var(--accent)}
 .paar{display:flex;align-items:center;justify-content:center;gap:12px;margin:12px 0 0}.paar a{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:44px;color:var(--ink);text-decoration:none;font-size:.9rem;font-weight:600;text-align:center}
 .chip.gewaehlt{background:var(--accent);border-color:var(--accent);color:#fff}

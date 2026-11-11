@@ -68,6 +68,18 @@ type Stammbaum struct {
 	Brueche       []baumLinie
 	Breite, Hoehe float64
 	ich           string
+	// Weitere: the lines a step away that fit (stammbaum_weitere.go),
+	// drawn as a place; Fragen those whose place no drawn line gives;
+	// Seiten the side rows' labels.
+	Weitere []baumLinie
+	Fragen  []BaumFrage
+	Seiten  []baumSeite
+}
+
+// baumSeite is a side row's label and where it stands.
+type baumSeite struct {
+	X, Y float64
+	Text string
 }
 
 // baumLinien are the family lines of the circle, each pair once: the
@@ -83,17 +95,17 @@ func (n *Netz) baumLinien() (out []baumLinie) {
 			y = n.ich
 		}
 		key := paarKey(x, y)
-		if gesehen[key] || x == y || !slices.Contains(baumArten, art) || !n.fragbar(x) || !n.fragbar(y) {
+		if gesehen[key] || x == y || !slices.Contains(baumArten, art) && !(fest && slices.Contains(baumWeitere, art)) || !n.fragbar(x) || !n.fragbar(y) {
 			return
 		}
 		if len(kreis) > 0 && !kreis[x] && !kreis[y] {
 			return
 		}
 		gesehen[key] = true
-		switch art {
-		case "kind":
-			x, y, art = y, x, "eltern"
-		case "partner", "expartner", "geschwister":
+		switch stufe := baumStufe[art]; {
+		case stufe < 0:
+			x, y, art = y, x, gegen[art]
+		case stufe == 0:
 			x, y = min(x, y), max(x, y)
 		}
 		out = append(out, baumLinie{A: x, B: y, Art: art, Fest: fest})
@@ -133,6 +145,7 @@ func (n *Netz) Stammbaum() Stammbaum {
 	}
 	n.mu.Lock()
 	linien := n.baumLinien()
+	weg := maps.Clone(n.baumWeg)
 	knoten := map[string]Knoten{}
 	for _, l := range linien {
 		knoten[l.A], knoten[l.B] = n.knoten[l.A], n.knoten[l.B]
@@ -145,7 +158,9 @@ func (n *Netz) Stammbaum() Stammbaum {
 		}
 	}
 	n.mu.Unlock()
-	return baumLegen(linien, knoten, geb, ich)
+	sb := baumLegen(linien, knoten, geb, ich)
+	sb.Fragen = baumFragen(sb.Weitere, sb.Linien, ich, weg)
+	return sb
 }
 
 // baumLegen places the boxes and splits the lines into drawn and broken.
@@ -156,16 +171,16 @@ func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]stri
 	}
 	gen, komp := baumGenerationen(linien, knoten, ich)
 	for _, l := range linien {
-		soll := 0
-		if l.Art == "eltern" {
-			soll = 1
-		}
-		if gen[l.B]-gen[l.A] != soll {
+		switch {
+		case gen[l.B]-gen[l.A] != baumStufe[l.Art]:
 			sb.Brueche = append(sb.Brueche, l)
-		} else {
+		case slices.Contains(baumWeitere, l.Art):
+			sb.Weitere = append(sb.Weitere, l)
+		default:
 			sb.Linien = append(sb.Linien, l)
 		}
 	}
+	seite := baumSeitlich(sb)
 	eltern, partner, geschw := map[string][]string{}, map[string][]string{}, map[string][]string{}
 	for _, l := range sb.Linien {
 		switch l.Art {
@@ -186,13 +201,7 @@ func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]stri
 		for _, id := range ids {
 			unten = min(unten, gen[id])
 		}
-		reihen := map[int][]string{}
-		hoch := 0
-		for _, id := range ids {
-			gen[id] -= unten
-			reihen[gen[id]] = append(reihen[gen[id]], id)
-			hoch = max(hoch, gen[id])
-		}
+		reihen, seitlich, hoch := baumZeilen(ids, gen, unten, seite)
 		rechts := start
 		geordnet := map[int][]string{}
 		for g := 0; g <= hoch; g++ {
@@ -214,12 +223,16 @@ func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]stri
 			}
 		}
 		baumZentrieren(geordnet, hoch, x, eltern)
+		rechts = max(rechts, sb.seitenLegen(seitlich, seite, x, geordnet, start))
 		start = rechts + baumSpalte*1.5
 	}
 	for id, k := range knoten {
 		sb.Personen = append(sb.Personen, baumPerson{Knoten: k, Gen: gen[id], X: baumRand + x[id], Y: baumRand + baumKlammer + float64(gen[id])*baumZeile})
 		sb.Breite = max(sb.Breite, baumRand+x[id]+baumBreite+baumRand)
 		sb.Hoehe = max(sb.Hoehe, baumRand+baumKlammer+float64(gen[id])*baumZeile+baumHoehe+baumRand+10)
+	}
+	for _, s := range sb.Seiten {
+		sb.Breite = max(sb.Breite, baumRand+s.X+float64(len([]rune(s.Text)))*6.5+baumRand)
 	}
 	slices.SortFunc(sb.Personen, func(a, b baumPerson) int { return cmp.Or(cmp.Compare(a.Gen, b.Gen), cmp.Compare(a.X, b.X)) })
 	return sb
@@ -258,6 +271,65 @@ func baumZentrieren(reihen map[int][]string, hoch int, x map[string]float64, elt
 			}
 		}
 	}
+}
+
+// baumZeilen moves a component's generations to start at 0 (unten its
+// lowest) and splits its people into the tree's rows and the side rows.
+func baumZeilen(ids []string, gen map[string]int, unten int, seite map[string]string) (reihen, seitlich map[int][]string, hoch int) {
+	reihen, seitlich = map[int][]string{}, map[int][]string{}
+	for _, id := range ids {
+		gen[id] -= unten
+		if seite[id] != "" {
+			seitlich[gen[id]] = append(seitlich[gen[id]], id)
+		} else {
+			reihen[gen[id]] = append(reihen[gen[id]], id)
+		}
+		hoch = max(hoch, gen[id])
+	}
+	return reihen, seitlich, hoch
+}
+
+// baumSeitlich are the people no drawn line holds, only a line a step
+// away, with that line's kind: they stand on a side row.
+func baumSeitlich(sb Stammbaum) map[string]string {
+	drin := map[string]bool{}
+	for _, l := range sb.Linien {
+		drin[l.A], drin[l.B] = true, true
+	}
+	seite := map[string]string{}
+	for _, l := range sb.Weitere {
+		for _, id := range []string{l.A, l.B} {
+			if !drin[id] && seite[id] == "" && (id != sb.ich) {
+				seite[id] = l.Art
+			}
+		}
+	}
+	if len(drin) == 0 { // nothing drawn: the person is the tree, the others beside her
+		delete(seite, sb.ich)
+	}
+	return seite
+}
+
+// seitenLegen puts each side row right of its row in the tree (a half
+// column apart; at start when the row is empty), its label above its
+// first box, and answers the right end.
+func (sb *Stammbaum) seitenLegen(reihen map[int][]string, seite map[string]string, x map[string]float64, geordnet map[int][]string, start float64) float64 {
+	ende := start
+	for _, g := range slices.Sorted(maps.Keys(reihen)) {
+		ids := slices.Sorted(slices.Values(reihen[g]))
+		links := start
+		if r := geordnet[g]; len(r) > 0 {
+			links = x[r[len(r)-1]] + baumSpalte*1.5
+		}
+		var arten []string
+		for i, id := range ids {
+			x[id] = links + float64(i)*baumSpalte
+			ende = max(ende, x[id])
+			arten = append(arten, seite[id])
+		}
+		sb.Seiten = append(sb.Seiten, baumSeite{X: baumRand + links, Y: baumRand + baumKlammer + float64(g)*baumZeile - 6, Text: seitenWort(arten)})
+	}
+	return ende
 }
 
 // baumMengen are the ids by component.
@@ -301,22 +373,20 @@ func baumGenerationen(linien []baumLinie, knoten map[string]Knoten, ich string) 
 			schlange = schlange[1:]
 			for _, i := range nach[u] {
 				l := linien[i]
-				v, d := l.B, 0
-				if l.Art == "eltern" {
-					d = 1
-				}
+				v, d := l.B, baumStufe[l.Art]
 				if u == l.B {
 					v, d = l.A, -d
 				}
 				kosten := weit[u]
-				if !l.Fest {
+				fest := l.Fest && !slices.Contains(baumWeitere, l.Art)
+				if !fest {
 					kosten++
 				}
 				if w, da := weit[v]; da && w <= kosten {
 					continue
 				}
 				gen[v], komp[v], weit[v] = gen[u]+d, k, kosten
-				if l.Fest {
+				if fest {
 					schlange = append([]string{v}, schlange...)
 				} else {
 					schlange = append(schlange, v)
@@ -418,6 +488,7 @@ func stammbaumTab(b *strings.Builder, n *Netz) {
 		b.WriteString(`<p class=k>Tipp auf eine Person: ihre Verbindungen. Tipp auf eine Linie: was die beiden verbindet, und dort nachbessern. Gestrichelt ist abgeleitet und noch nicht bestätigt.</p>`)
 		sb.liste(b, n)
 	}
+	baumFragenTab(b, n, sb.Fragen)
 	if len(sb.Brueche) > 0 {
 		b.WriteString(`<section class=karte><h2>Passt nicht in den Stammbaum</h2><ul class=nahe>`)
 		for _, l := range sb.Brueche {
@@ -438,8 +509,8 @@ func baumPaar(n *Netz, l baumLinie) string {
 
 // liste is every drawn line as a link, folded.
 func (sb Stammbaum) liste(b *strings.Builder, n *Netz) {
-	fmt.Fprintf(b, `<details class=karte id=baum-liste><summary>Alle Linien als Liste (%d)</summary><ul>`, len(sb.Linien))
-	for _, l := range sb.Linien {
+	fmt.Fprintf(b, `<details class=karte id=baum-liste><summary>Alle Linien als Liste (%d)</summary><ul>`, len(sb.Linien)+len(sb.Weitere))
+	for _, l := range append(slices.Clone(sb.Linien), sb.Weitere...) {
 		wie := baumWort(l)
 		if l.Art == "eltern" {
 			a, _ := n.Person(l.A)
@@ -505,6 +576,9 @@ func (sb Stammbaum) svg(n *Netz) string {
 			titel += " (abgeleitet, noch nicht bestätigt)"
 		}
 		fmt.Fprintf(&b, `<a href="%s" aria-label="%s"><path class=treffer d="%s"/><path class="%s" d="%s"/></a>`, esc(kanteAdresse(l.A, l.B)), esc(titel), d, klasse, d)
+	}
+	for _, s := range sb.Seiten {
+		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" class="k seite">%s</text>`, s.X, s.Y, esc(s.Text))
 	}
 	for _, p := range sb.Personen {
 		vor, nach := baumName(n.Anzeige(p.Knoten))
