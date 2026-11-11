@@ -649,9 +649,12 @@ inside the open vault; closed, there is no net, not even in memory.
   `/run/tresor/umfeld/antworten.json` (0600): a kind becomes the pair's
   relation in the net in place of the phone books' („Kind (von dir
   angegeben)“), and what Homes wrote of it (`eingetragen`: where, the line,
-  when). „Deine Antworten“ (`/tresor/umfeld`) lists them, with what the
-  phone books already say, what became of each, „Eintragen“ for one Homes
-  did not take, and „Vergessen“ (the same as Rückgängig).
+  when). „Deine Antworten (N)“ (`/tresor/umfeld`) is folded by default
+  (owner 2026-11-11; `<details>`, no script), the newest first when open,
+  each with what became of it and „Vergessen“ (the same as Rückgängig).
+  Answers Homes did not take are one line outside the fold, only when
+  there are any: „2 Antworten noch nicht eingetragen · erneut versuchen“,
+  which retries all of them.
 - **One tap** (`fragen_seite.go`, `uebernahme.go`; owner 2026-11-10:
   the tap in the person's own open archive is their consent): a chip is a
   form post — no script needed; the page's script sends it in the
