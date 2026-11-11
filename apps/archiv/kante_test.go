@@ -288,6 +288,9 @@ func TestNamenFelder(t *testing.T) {
 		if n := strings.Count(page, `<datalist id=namen>`); n != 1 {
 			t.Fatalf("%s: %d datalists named namen", adresse, n)
 		}
+		if want := namenListe(wt.w.Umfeld.Netz()); len(wt.w.Umfeld.Netz().Namen()) < 5 || !strings.Contains(page, want) {
+			t.Fatalf("%s: the datalist is not the net's names %s:\n%s", adresse, want, page)
+		}
 		if !strings.Contains(page, `<input name=wer list=namen data-namen autocomplete=off required placeholder="Name">`) || strings.Count(page, "list=namen") != strings.Count(page, "data-namen ") {
 			t.Fatalf("%s: a name field without namenFeld:\n%s", adresse, page)
 		}
