@@ -38,7 +38,11 @@ type woerterbuch struct {
 	// by vergleich with their kinds, and its von, ueber, ex and und words
 	musterArten         map[string][]string
 	von, ueber, ex, und map[string]bool
-	formen              []string // every word as text may spell it, lower case, for msgvault's filter
+	// the couples' words (paare.go): paare.mein, paare.partner, paare.wir;
+	// paarFormen their lower-case forms for msgvault's filter
+	mein, partner, wir map[string]bool
+	paarFormen         [3][]string
+	formen             []string // every word as text may spell it, lower case, for msgvault's filter
 }
 
 // woerter is beziehungswoerter.yml; a broken file stops the archive at its
@@ -84,12 +88,18 @@ func woerterLesen(b []byte) (*woerterbuch, error) {
 			Und   []string         `yaml:"und"`
 			Worte []map[string]any `yaml:"worte"`
 		} `yaml:"namensmuster"`
+		Paare struct {
+			Mein    []string `yaml:"mein"`
+			Partner []string `yaml:"partner"`
+			Wir     []string `yaml:"wir"`
+		} `yaml:"paare"`
 	}
 	if err := yaml.Unmarshal(b, &f); err != nil {
 		return nil, err
 	}
 	w := &woerterbuch{arten: map[string][]string{}, gruppen: map[string]string{}, rang: map[string]int{}, nichtName: map[string]bool{},
-		musterArten: map[string][]string{}, von: map[string]bool{}, ueber: map[string]bool{}, ex: map[string]bool{}, und: map[string]bool{}}
+		musterArten: map[string][]string{}, von: map[string]bool{}, ueber: map[string]bool{}, ex: map[string]bool{}, und: map[string]bool{},
+		mein: map[string]bool{}, partner: map[string]bool{}, wir: map[string]bool{}}
 	formen := map[string]bool{}
 	imFilter := true // a word of beziehung or gruppe is a form of msgvault's filter; a name pattern's never
 	worte := func(eintrag map[string]any, schluessel string) ([]string, error) {
@@ -189,6 +199,9 @@ func woerterLesen(b []byte) (*woerterbuch, error) {
 				}
 			}
 		}
+	}
+	if err := w.paareLesen(f.Paare.Mein, f.Paare.Partner, f.Paare.Wir); err != nil {
+		return nil, err
 	}
 	for form := range formen {
 		w.formen = append(w.formen, form)
@@ -297,4 +310,24 @@ func (w *woerterbuch) muster() string {
 		formen[i] = regexp.QuoteMeta(f)
 	}
 	return `(^|\PL)(` + strings.Join(formen, "|") + `)(\PL|$)`
+}
+
+// paareLesen reads the couples' words (paare.go): mein, partner, wir.
+func (w *woerterbuch) paareLesen(listen ...[]string) error {
+	for i, ziel := range []map[string]bool{w.mein, w.partner, w.wir} {
+		if len(listen[i]) == 0 {
+			return fmt.Errorf("paare: eine Liste ist leer")
+		}
+		for _, s := range listen[i] {
+			if !nurWort.MatchString(s) {
+				return fmt.Errorf("paare: „%s“ ist kein einzelnes Wort", s)
+			}
+			for _, v := range vergleiche(s) {
+				ziel[v] = true
+			}
+			w.paarFormen[i] = append(w.paarFormen[i], regexp.QuoteMeta(strings.ToLower(s)), regexp.QuoteMeta(flach(s)))
+		}
+		w.paarFormen[i] = slices.Compact(slices.Sorted(slices.Values(w.paarFormen[i])))
+	}
+	return nil
 }

@@ -13,7 +13,8 @@ import (
 // tap: relations the box's model read in messages (hinweise.go) or a
 // card's name says (namensmuster.go), groups' categories the model or a
 // title suggests (gruppenmodell.go, gruppen.go), birthdays from wishes
-// (geburtstage.go). Erkannt counts them for the workplace's line; the
+// (geburtstage.go), couples from „wir“ messages (paare.go), home towns
+// and employers from mail (herkunft.go). Erkannt counts them for the workplace's line; the
 // page /tresor/erkannt lists them (erkannt_seite.go).
 
 // Erkannt is the workplace's line: messages the model read and still
@@ -24,16 +25,19 @@ type Erkannt struct {
 	Gelesen, Offen           int
 	Gezaehlt                 bool
 	Beziehungen, Geburtstage int
+	Herkunft                 int
 	GruppenVorschlaege       int
 	GruppenEingeordnet       int
 	GruppenAlle              int
 }
 
 // Vorschlaege are all the open suggestions.
-func (e Erkannt) Vorschlaege() int { return e.Beziehungen + e.Geburtstage + e.GruppenVorschlaege }
+func (e Erkannt) Vorschlaege() int {
+	return e.Beziehungen + e.Geburtstage + e.GruppenVorschlaege + e.Herkunft
+}
 
 // ErkannterBezug is a suggested relation: X is Art of Y, Weil why, Quelle
-// where it came from („modell“, „name“).
+// where it came from („modell“, „name“, „wir“).
 type ErkannterBezug struct {
 	X, Y      Knoten
 	Ich       bool
@@ -41,8 +45,8 @@ type ErkannterBezug struct {
 	Quelle    string
 }
 
-// ErkannteBeziehungen are the relations suggested by the model and the
-// cards' names whose pair the person has not answered (Später aside) and
+// ErkannteBeziehungen are the relations suggested by the model, the
+// cards' names and „wir“ messages (not discarded) whose pair the person has not answered (Später aside) and
 // no phone book names, the name's first, then by name.
 func (n *Netz) ErkannteBeziehungen() (out []ErkannterBezug) {
 	if n == nil {
@@ -76,6 +80,11 @@ func (n *Netz) ErkannteBeziehungen() (out []ErkannterBezug) {
 		}
 		dazu(h.X, y, h.Art, h.Weil, "modell")
 	}
+	for _, key := range slices.Sorted(maps.Keys(n.paare)) {
+		if p := n.paare[key]; n.paareWeg[key].IsZero() {
+			dazu(p.X, p.Y, "partner", n.paarWeil(p), "wir")
+		}
+	}
 	return out
 }
 
@@ -96,7 +105,7 @@ func (n *Netz) Erkannt(st UmfeldStand, modell bool) Erkannt {
 		return Erkannt{}
 	}
 	zs := n.Gruppenliste()
-	e := Erkannt{Modell: modell, Beziehungen: len(n.ErkannteBeziehungen()), Geburtstage: len(n.GeburtstagVorschlaege()),
+	e := Erkannt{Modell: modell, Beziehungen: len(n.ErkannteBeziehungen()), Geburtstage: len(n.GeburtstagVorschlaege()), Herkunft: len(n.HerkunftVorschlaege()),
 		GruppenVorschlaege: len(GruppenVorschlaege(zs)), GruppenAlle: len(zs), Gezaehlt: st.ModellGezaehlt, Offen: st.ModellOffen}
 	for _, z := range zs {
 		if z.Kategorie != "" {

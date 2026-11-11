@@ -1072,8 +1072,35 @@ suggestion until the person taps (owner 2026-11-11).
   answer in `geburtstage.json` (not suggested again); confirmed ones are
   a folded list with Vergessen. They stay in the vault: the Homes packet
   carries relations only, a birthday line needs its next version.
-- **Not built yet** (listed in archiv#42): home town and employer from
-  mail, couples from „wir“ messages.
+- **Couples from „wir“ messages** (archiv#44, `paare.go`; no model):
+  each round reads (the step-5 statement with `paare` of
+  `beziehungswoerter.yml` as its filter, `archiv umfeld-hinweise -sql
+  -paare`) the newest 500 messages saying „mein Mann Tom“ / „meine Frau
+  Lena“ (a mein word, a partner word, a name: one message is enough) or
+  ending signed by two in a message with a wir word („Wir kommen gern!
+  Anna und Ben“, one of them the writer's first name: from two such
+  messages on). The name must be one known person (by first name; among
+  several, the one the writer has a tie or a family name with). It is a
+  relation suggestion (Partner/in) under „Erkannt“: „Stimmt“ as every
+  other one, „Stimmt nicht“ keeps it in `paare-weg.json`, never
+  suggested again. What a round found is in `paare.json`.
+- **Home town and employer from mail** (archiv#44, `herkunft.go`): each
+  round reads (`archiv umfeld-hinweise -sql -herkunft`) the newest 400
+  mails from senders (no list, not the person's own), two per address;
+  for a sender a card knows whose cards lack an address or an ORG, at
+  most two mails each, the body (`GET /api/v1/messages/{id}`) is cut to
+  its own end (HTML made text, a quoted mail and `>` lines left out, 700
+  characters) and goes, with the address's domain when it is not a free
+  mailer's, to the box's own model under the same rules as step 5 (only
+  while open, the lease before each mail, a refusal stops the round, no
+  text or answer in the log). It answers town and employer with
+  sureness; per person and field the readings from 0.7 summed by value,
+  the one with the most, alone, is the suggestion: „Kim Berg wohnt in
+  Ulm? · Vorschlag aus 2 Mails, die letzte vom 01.10.2026“, never for a
+  field a card has. Read mails are kept in `herkunft.json` (never sent
+  twice), „Stimmt“ / „Stimmt nicht“ in `herkunft-antworten.json`;
+  confirmed ones are a folded list with Vergessen and stay in the vault
+  (no Homes packet line yet).
 
 ## Status for laib
 

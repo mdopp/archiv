@@ -82,6 +82,10 @@ var meldungen = map[string]string{
 	"geb-ja":        "Gemerkt. Der Geburtstag bleibt in deinem Archiv.",
 	"geb-nein":      "Gemerkt: Das ist nicht der Geburtstag. Das Archiv schlägt ihn nicht wieder vor.",
 	"geb-weg":       "Vergessen.",
+	"herkunft-ja":   "Gemerkt. Es bleibt in deinem Archiv.",
+	"herkunft-nein": "Gemerkt: Das stimmt nicht. Das Archiv schlägt es nicht wieder vor.",
+	"herkunft-weg":  "Vergessen.",
+	"paar-nein":     "Gemerkt: kein Paar. Das Archiv schlägt es nicht wieder vor.",
 	"zurueck":       "Rückgängig gemacht. Die Frage kommt wieder.",
 	"kante-zurueck": saysKanteZurueck,
 }
@@ -315,6 +319,8 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/umfeld/antwort", w.umfeldAntwort)
 	mux.HandleFunc("GET "+erkanntPfad, w.erkanntGet)
 	mux.HandleFunc("POST "+erkanntPfad+"/geburtstag", w.erkanntGeburtstag)
+	mux.HandleFunc("POST "+erkanntPfad+"/herkunft", w.erkanntHerkunft)
+	mux.HandleFunc("POST "+erkanntPfad+"/paar", w.erkanntPaar)
 	mux.HandleFunc("GET /tresor/kante", w.kanteGet)
 	mux.HandleFunc("GET /tresor/kante/bild", w.kanteBild)
 	return mux
