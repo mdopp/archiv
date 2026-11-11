@@ -39,7 +39,7 @@ const (
 	bandBeziehung = "beziehung"
 )
 
-var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandBeziehung: 3}
+var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandBeziehung: 3, bandName: 1, bandUeber: 0.5}
 
 // Hiding: Aus is not shown and restorable; Nicht is taken out of the
 // photos before any tie is computed.
@@ -148,8 +148,14 @@ type Netz struct {
 	gespraech   map[string]netzGespraech
 	paarGruppen map[string][]string
 	gruppen     map[string]gruppenAntwort
-	gelesen     map[string]gelesen
-	hinweise    map[string]paarHinweis
+	// gruppenModell is what the box's model read of the groups (gruppenmodell.go)
+	gruppenModell map[string]gruppenLesung
+	// gebHinweise are the birthdays the wishes suggest, gebAntworten the
+	// person's answers to them, by node (geburtstage.go)
+	gebHinweise  map[string]gebHinweis
+	gebAntworten map[string]gebAntwort
+	gelesen      map[string]gelesen
+	hinweise     map[string]paarHinweis
 	// sozial are the friends and connections of the social exports,
 	// sozialGrund their reasons by node (sozial.go, sozialBauen).
 	sozial      []sozialEintrag
@@ -158,6 +164,8 @@ type Netz struct {
 	// card of hers (IchAuch), an Immich person or a card named as she is
 	// (umlauts alike). None is ever in „Steht nahe“ or a question but as „du“.
 	selbst map[string]bool
+	// musterBaender are what the cards' names say („Mama von Lena“, namensmuster.go)
+	musterBaender []namensBand
 }
 
 // neuesNetz builds the net of st with the hidden ones and the answers.
@@ -172,7 +180,8 @@ func neuesNetz(st netzTabelle, verborgen map[string]string, antworten map[string
 	if n.st.Namen == nil {
 		n.st.Namen = map[string]string{}
 	}
-	n.gruppen, n.gelesen, n.hinweise = map[string]gruppenAntwort{}, map[string]gelesen{}, map[string]paarHinweis{}
+	n.gruppen, n.gelesen, n.hinweise, n.gruppenModell = map[string]gruppenAntwort{}, map[string]gelesen{}, map[string]paarHinweis{}, map[string]gruppenLesung{}
+	n.gebHinweise, n.gebAntworten = map[string]gebHinweis{}, map[string]gebAntwort{}
 	n.bauen()
 	return n
 }
@@ -225,6 +234,7 @@ func (n *Netz) bauen() {
 		}
 		n.knoten[id], n.von[k.Key] = kn, id
 	}
+	n.musterBauen()
 	n.sozialBauen()
 	n.ich = n.von[n.st.Ich]
 	n.selbstBauen()
@@ -236,6 +246,7 @@ func (n *Netz) bauen() {
 		}
 	}
 	n.festDazu(alle, nicht)
+	n.musterDazu(alle, nicht)
 	n.gespraecheDazu(alle, nicht)
 	n.gesagtDazu(alle, nicht)
 	n.merkmaleBauen()
@@ -510,6 +521,8 @@ func (n *Netz) gruendeListe(mitte string, k Kante) []string {
 		switch {
 		case f.Gesagt:
 			out = append(out, gesagtGrund(mitte, f))
+		case f.Art == bandName || f.Art == bandUeber:
+			out = append(out, "„"+f.Wie+"“ im Telefonbuch")
 		case f.Art == bandAdresse:
 			out = append(out, "gleiche Adresse")
 		case f.Art == bandFirma:

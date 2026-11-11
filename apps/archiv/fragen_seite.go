@@ -31,6 +31,7 @@ const (
 	saysNichtZurueck  = "Das ließ sich nicht rückgängig machen: Homes antwortet gerade nicht. Versuch es gleich noch einmal."
 	saysNichtEin      = "Homes hat es gerade nicht eingetragen. Versuch es gleich noch einmal."
 	antwortPfad       = "/tresor/umfeld/antwort"
+	saysGruppeModell  = "Vorschlag des Modells deiner Box: Es hat den Namen, die Mitglieder und ein paar Nachrichten der Gruppe gelesen."
 	saysGruppeBleibt  = "bleibt in deinem Archiv: hilft bei den Fragen zu ihren Mitgliedern, kommt in kein Adressbuch"
 )
 
@@ -159,7 +160,10 @@ func gruppenKarte(g GruppenFrage, rest int, mehr bool) string {
 		b.WriteString(chip(k, kategorieWorte[k], map[bool]string{true: " vorschlag"}[k == g.Vorschlag]))
 	}
 	b.WriteString(`</div>`)
-	if g.Vorschlag != "" {
+	switch {
+	case g.Modell:
+		fmt.Fprintf(&b, `<p class=k>%s</p>`, esc(saysGruppeModell))
+	case g.Vorschlag != "":
 		fmt.Fprintf(&b, `<p class=k>%s</p>`, esc("Vorschlag, weil „"+g.Wort+"“ im Namen der Gruppe steht."))
 	}
 	fmt.Fprintf(&b, `<p class=wohin><span class="punkt grau"></span>%s</p>`, esc(saysGruppeBleibt))
@@ -286,6 +290,9 @@ func zurueckNach(z string) string {
 	if strings.HasPrefix(z, "/tresor/umfeld") {
 		return "/tresor/umfeld"
 	}
+	if z == erkanntPfad || z == gruppenTabPfad {
+		return z
+	}
 	return "/tresor"
 }
 
@@ -329,7 +336,13 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 	}
 	if id := r.PostFormValue("gruppe"); id != "" {
 		kat := r.PostFormValue("art")
-		if _, err := w.Umfeld.Einordnen(innen, id, kat); err != nil {
+		var err error
+		if r.PostFormValue("liste") == "1" { // the group list or the suggestions: any group, any time (archiv#42)
+			err = w.Umfeld.GruppeSetzen(innen, id, kat, r.PostFormValue("eigen"))
+		} else {
+			_, err = w.Umfeld.Einordnen(innen, id, kat)
+		}
+		if err != nil {
 			w.antwortFehler(rw, r, zurueck, err)
 			return
 		}

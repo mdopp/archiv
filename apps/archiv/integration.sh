@@ -309,6 +309,19 @@ kante=$(docker exec -i archiv archiv umfeld-kante <"$D/kante-antwort.json") || f
 echo "$kante"
 grep -q "nachricht=true" <<<"$kante" || { cat "$D/kante-antwort.json"; fail "no conversation's last message read"; }
 
+echo "Umfeld (archiv#42): the statements for the groups' newest messages and the birthday wishes, against the real msgvault's views"
+# shellcheck disable=SC2086
+docker exec archiv archiv umfeld-gruppen -sql $ids >"$D/gruppen.json"
+code=$(curl -s -o "$D/gruppen-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/gruppen.json" "$U/api/v1/query")
+[ "$code" = 200 ] || { cat "$D/gruppen-antwort.json"; fail "msgvault refuses the groups' statement: $code"; }
+gruppen=$(docker exec -i archiv archiv umfeld-gruppen <"$D/gruppen-antwort.json") || fail "the groups' answer does not read: $gruppen"
+echo "$gruppen"
+grep -q "texte=[1-9]" <<<"$gruppen" || { cat "$D/gruppen-antwort.json"; fail "no conversation's newest messages read"; }
+docker exec archiv archiv umfeld-hinweise -sql -geburtstag >"$D/geburtstag.json"
+code=$(curl -s -o "$D/geburtstag-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/geburtstag.json" "$U/api/v1/query")
+[ "$code" = 200 ] || { cat "$D/geburtstag-antwort.json"; fail "msgvault refuses the birthday wishes' statement: $code"; }
+docker exec -i archiv archiv umfeld-hinweise <"$D/geburtstag-antwort.json" || fail "the birthday wishes' answer does not read"
+
 docker stop -t 90 archiv >/dev/null
 docker logs archiv >"$D/log" 2>&1
 grep -q "abgeschlossen (Container hält an)" "$D/log" || fail "stopping the container did not close the vault"

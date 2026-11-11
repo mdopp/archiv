@@ -633,7 +633,8 @@ inside the open vault; closed, there is no net, not even in memory.
   the names and Immich's birthdays, the contacts with their family name,
   birthday and streets, the ties, the household's cards as last read),
   `verborgen.json` (who is hidden), `antworten.json` (step 2),
-  `gruppen.json` and `hinweise.json` (step 5). Every round reads everything
+  `gruppen.json` and `hinweise.json` (step 5), `gruppen-modell.json`,
+  `geburtstag-hinweise.json` and `geburtstage.json` (step 8). Every round reads everything
   again and rebuilds (a merge or a rename in Immich cannot drift); Immich
   out of reach keeps the last photos.
 - **When**: at the opening, then every `UMFELD_TAKT` seconds (default an
@@ -806,8 +807,10 @@ aktive Gruppen vom Benutzer kategorisiert werden“).
   read-only statement, `messages.snippet` filtered by the words, the
   newest 500, no list mail) and keeps the messages the file's words are
   really in, whose sender and at least one recipient the phone books know
-  (in a chat the person is a recipient of what she did not send). At most
-  10 a round go to the model, one after the other, at most 3 per pair:
+  (in a chat the person is a recipient of what she did not send). A round
+  sends every such message to the model (archiv#42; before, 10 an hour),
+  one after the other, at most 3 per pair, and makes the suggestions anew
+  every 10, so the page shows them while it reads:
   `POST $MODEL_URL/chat/completions` (`X-Laib-Background`, the model key,
   `response_format: json_object`, temperature 0) with who wrote it to whom
   as letters (A the sender; the person marked), what is known of them (the
@@ -824,13 +827,15 @@ aktive Gruppen vom Benutzer kategorisiert werden“).
 - **Kept**: per message msgvault's id, when, the sender's and recipients'
   nodes, the cue (a few words around the word) and the readings, in
   `/run/tresor/umfeld/hinweise.json` (0600): no message is sent twice.
-  Before it sends, the round asks the lease (`MODEL_LEASE`, `GET`): any
+  Before each message the round asks the lease (`MODEL_LEASE`, `GET`): any
   window standing, or the proxy refusing (409, 429, 503), or no answer,
-  and the rest waits for a later round; nothing piles up. Nothing of a
+  and the rest waits for a later round; nothing piles up. The closing ends
+  it (the round never holds the vault open). Nothing of a
   text or an answer is logged (counts only); the text leaves the vault
   only in the request to the box's own model.
 - `archiv umfeld-hinweise -sql` prints the statement as msgvault's request
-  body (`-wort w`: with one word instead, for the fixtures);
+  body (`-wort w`: with one word instead, for the fixtures; `-geburtstag`:
+  the birthday wishes', step 8);
   `archiv umfeld-hinweise < antwort.json` reads an answer as a round does,
   one line a message without its text (`integration.sh` runs both against
   the real msgvault).
@@ -927,6 +932,69 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
   family name on at least five photo days together are asked with the
   person's own questions; with both birthdays the age gap suggests the
   kind (a small gap between adults Partner/in), without them none.
+
+**Step 8 (archiv#42):** what the archive recognises by itself, always a
+suggestion until the person taps (owner 2026-11-11).
+
+- **Name patterns** (`namensmuster.go`, `beziehungswoerter.yml`
+  `namensmuster`; no model): a card saved as „Mama von Lena“, „Papa vom
+  Tom“, „Eltern von Lea“ is a parent of the one named after it, not of
+  the person; „Freundin von …“, „Kollegin von …“, „Ex-Freund von …“ give
+  Freund/in, Kollege/Kollegin, Ex-Partner/in. Any word of `beziehung` or
+  of `namensmuster.worte` right before a `von` word counts („Oma von …“
+  Großeltern), seen from the one named; names after it split at „und“
+  („Mama von Lena und Tom“), marks around it are fine („Sabine (Mama von
+  Lena)“). The one named is the person of that name (umlauts alike; a
+  single given name the one person whose first name it is, none if
+  several), else a person of its own (`name:<name>`, often a child with
+  no card). It gives a tie with „„Mama von Lena“ im Telefonbuch“ as its
+  reason and a question with that kind as the suggestion, asked with the
+  derived ones, family kind or not, tie or not. „Peter via Lena“ (`ueber`
+  words: via, über, durch) is only a tie „kennt über“, never a relation
+  nor a question of its own. Such a name never suggests a kind toward the
+  person nor a family name, and its words never send a message to the model.
+- **Groups by the model** (`gruppenmodell.go`): each round, before the
+  messages, every active group (step 5) the person has not named and the
+  model has not read goes to it, one after the other, the lease asked
+  before each: its title, the members the phone books know (the person
+  as herself), its 5 newest texts (200 characters each, one read-only
+  statement, `archiv umfeld-gruppen -sql <id…>`). The answer must be
+  `{"kategorie","sicher"}`, a category of the chips; a reading of 0.7 or
+  more is the group's suggestion, before its title's, said as „Vorschlag
+  des Modells deiner Box“, and counts like a title's for reasons until
+  the person answers. Kept per group in `gruppen-modell.json`; no group
+  is sent twice.
+- **Groups by hand**: the workplace's fourth tab „Gruppen“ lists every
+  group chat with a title and two known members, the active ones first
+  (30, the rest on „auch … ältere Gruppen zeigen“), each folded: its
+  category or the suggestion, the chips (the current one pressed), the
+  person's own words as chips, and a field „Eigener Name“ (40 characters)
+  in a form of its own. A tap sets the category at any time, asked or
+  not; an own word is a reason like „Skat (Gruppe „Skatrunde“)“, and
+  suggests no kind. The toast's Rückgängig gives back what it replaced.
+- **What was recognised**: one line under Fragen, „Erkannt: 120 von 480
+  Nachrichten gelesen · 7 Vorschläge · 5 von 12 Gruppen eingeordnet“
+  (each part only when there is something), a link to `/tresor/erkannt`:
+  the relations a card's name or the model suggests (pairs not answered
+  and not in a phone book; „Stimmt“ sets it as the edge page's chips do,
+  and lands there with the toast; „Ansehen“ opens it), the groups a title
+  or the model suggests („Stimmt“, or „Anders nennen“ in the tab), the
+  birthdays. At most 20 a section.
+- **Birthdays from wishes** (`geburtstage.go`; no model): each round
+  reads (the step-5 statement with the wishes as its filter, `archiv
+  umfeld-hinweise -sql -geburtstag`) the newest 500 messages wishing a
+  happy birthday in the family's languages, never a belated one. A wish
+  to one known person alone (a direct chat, a mail to one) is a sign for
+  the day it was sent (house time); a person's day with the most signs
+  (a sender counts once a year), at least two, from two years or three
+  senders, and more than any other day, is the suggestion: „Ben Berg: 2.
+  Juli? · 2 Glückwünsche an diesem Tag, 2023 bis 2025“, never for one
+  whose birthday a card or Immich has. „Stimmt“ / „Stimmt nicht“ keep the
+  answer in `geburtstage.json` (not suggested again); confirmed ones are
+  a folded list with Vergessen. They stay in the vault: the Homes packet
+  carries relations only, a birthday line needs its next version.
+- **Not built yet** (listed in archiv#42): home town and employer from
+  mail, couples from „wir“ messages.
 
 ## Status for laib
 

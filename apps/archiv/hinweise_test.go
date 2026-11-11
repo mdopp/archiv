@@ -24,6 +24,9 @@ type fakeMsgvaultHinweise struct {
 	*httptest.Server
 	mu     sync.Mutex
 	zeilen [][]any
+	// wuensche answer the birthday wishes' statement (geburtstage.go),
+	// proben the groups' newest messages (gruppenmodell.go)
+	wuensche, proben [][]any
 }
 
 var hinweisSpalten = []string{"nachricht", "art", "am", "von_mir", "text", "rolle", "telefon", "mail"}
@@ -39,6 +42,14 @@ func neuesMsgvaultHinweise(t *testing.T) (*fakeMsgvaultHinweise, *MsgvaultAPI) {
 		json.NewDecoder(r.Body).Decode(&q)
 		if r.Header.Get("X-API-Key") != "vault-key" || r.URL.Path != "/api/v1/query" {
 			jsonAus(w, http.StatusUnauthorized, map[string]string{"error": "nein"})
+			return
+		}
+		if strings.Contains(q.SQL, "WHERE r <= ") {
+			jsonAus(w, http.StatusOK, map[string]any{"columns": []string{"gespraech", "text"}, "rows": f.proben})
+			return
+		}
+		if strings.Contains(q.SQL, "geburtstag") {
+			jsonAus(w, http.StatusOK, map[string]any{"columns": hinweisSpalten, "rows": f.wuensche})
 			return
 		}
 		if !strings.Contains(q.SQL, "regexp_matches(lower(snippet)") {

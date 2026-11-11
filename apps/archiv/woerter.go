@@ -34,7 +34,11 @@ type woerterbuch struct {
 	gruppen   map[string]string   // a word of a title (vergleich) → its category
 	rang      map[string]int      // a category → its place in the file: the first a title has wins
 	nichtName map[string]bool     // words that are also names: never a suggestion from a name
-	formen    []string            // every word as text may spell it, lower case, for msgvault's filter
+	// the name patterns (namensmuster.go): the words of namensmuster.worte
+	// by vergleich with their kinds, and its von, ueber, ex and und words
+	musterArten         map[string][]string
+	von, ueber, ex, und map[string]bool
+	formen              []string // every word as text may spell it, lower case, for msgvault's filter
 }
 
 // woerter is beziehungswoerter.yml; a broken file stops the archive at its
@@ -73,12 +77,21 @@ func woerterLesen(b []byte) (*woerterbuch, error) {
 		Beziehung    []map[string]any `yaml:"beziehung"`
 		Gruppe       []map[string]any `yaml:"gruppe"`
 		NichtImNamen []string         `yaml:"nicht_im_namen"`
+		Namensmuster struct {
+			Von   []string         `yaml:"von"`
+			Ueber []string         `yaml:"ueber"`
+			Ex    []string         `yaml:"ex"`
+			Und   []string         `yaml:"und"`
+			Worte []map[string]any `yaml:"worte"`
+		} `yaml:"namensmuster"`
 	}
 	if err := yaml.Unmarshal(b, &f); err != nil {
 		return nil, err
 	}
-	w := &woerterbuch{arten: map[string][]string{}, gruppen: map[string]string{}, rang: map[string]int{}, nichtName: map[string]bool{}}
+	w := &woerterbuch{arten: map[string][]string{}, gruppen: map[string]string{}, rang: map[string]int{}, nichtName: map[string]bool{},
+		musterArten: map[string][]string{}, von: map[string]bool{}, ueber: map[string]bool{}, ex: map[string]bool{}, und: map[string]bool{}}
 	formen := map[string]bool{}
+	imFilter := true // a word of beziehung or gruppe is a form of msgvault's filter; a name pattern's never
 	worte := func(eintrag map[string]any, schluessel string) ([]string, error) {
 		var out []string
 		for sprache, v := range eintrag {
@@ -95,6 +108,9 @@ func woerterLesen(b []byte) (*woerterbuch, error) {
 					return nil, fmt.Errorf("%v %s: „%v“ ist kein einzelnes Wort", eintrag[schluessel], sprache, x)
 				}
 				out = append(out, s)
+				if !imFilter {
+					continue
+				}
 				for _, form := range []string{strings.ToLower(s), strings.NewReplacer("ä", "ae", "ö", "oe", "ü", "ue", "ß", "ss").Replace(strings.ToLower(s)), flach(s)} {
 					formen[form] = true
 				}
@@ -144,6 +160,35 @@ func woerterLesen(b []byte) (*woerterbuch, error) {
 	}
 	if len(w.arten) == 0 {
 		return nil, fmt.Errorf("keine Beziehungswörter")
+	}
+	nm := f.Namensmuster
+	for liste, ziel := range map[*[]string]map[string]bool{&nm.Von: w.von, &nm.Ueber: w.ueber, &nm.Ex: w.ex, &nm.Und: w.und} {
+		for _, s := range *liste {
+			if !nurWort.MatchString(s) {
+				return nil, fmt.Errorf("namensmuster: „%s“ ist kein einzelnes Wort", s)
+			}
+			for _, v := range vergleiche(s) {
+				ziel[v] = true
+			}
+		}
+	}
+	imFilter = false
+	for _, e := range nm.Worte {
+		art, _ := e["art"].(string)
+		if !slices.Contains(arten, art) {
+			return nil, fmt.Errorf("namensmuster: „%s“ ist keine Art der Fragen (%s)", art, strings.Join(arten, ", "))
+		}
+		ws, err := worte(e, "art")
+		if err != nil {
+			return nil, err
+		}
+		for _, s := range ws {
+			for _, v := range vergleiche(s) {
+				if !slices.Contains(w.musterArten[v], art) {
+					w.musterArten[v] = append(w.musterArten[v], art)
+				}
+			}
+		}
 	}
 	for form := range formen {
 		w.formen = append(w.formen, form)
@@ -201,6 +246,9 @@ func (w *woerterbuch) imText(text string) (out []Worttreffer) {
 // imNamen is the relation word a contact's name begins with („Oma Hilde“,
 // „Mama ❤️“) and its kinds; none when it is also a name („Anne Berg“).
 func (w *woerterbuch) imNamen(name string) (string, []string) {
+	if _, muster := w.imMuster(name); muster { // „Mama von Lena“ is Lena's, not the person's
+		return "", nil
+	}
 	ws := strings.FieldsFunc(name, func(r rune) bool { return !unicode.IsLetter(r) })
 	if len(ws) == 0 {
 		return "", nil
