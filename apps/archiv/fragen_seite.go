@@ -33,6 +33,7 @@ const (
 	antwortPfad       = "/tresor/umfeld/antwort"
 	saysGruppeModell  = "Vorschlag des Modells deiner Box: Es hat den Namen, die Mitglieder und ein paar Nachrichten der Gruppe gelesen."
 	saysGruppeBleibt  = "bleibt in deinem Archiv: hilft bei den Fragen zu ihren Mitgliedern, kommt in kein Adressbuch"
+	saysKennenBleibt  = "bleibt in deinem Archiv: Ja zeigt die beiden als verbunden, Nein fragt nie wieder; kommt in kein Adressbuch"
 )
 
 // haeufig are the kinds offered first, after the suggestion.
@@ -89,6 +90,9 @@ func (w *Web) frageKarte(n *Netz, f Frage, rest int, mehr bool) string {
 	if f.Gruppe != nil {
 		return gruppenKarte(*f.Gruppe, rest, mehr)
 	}
+	if f.Kennen {
+		return kennenKarte(f, rest, mehr)
+	}
 	var b strings.Builder
 	fmt.Fprintf(&b, `<form method=post action="%s" class="frage sofort" id=frage><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value=/tresor>`,
 		antwortPfad, esc(f.X.ID), esc(f.Y.ID))
@@ -121,6 +125,28 @@ func (w *Web) frageKarte(n *Netz, f Frage, rest int, mehr bool) string {
 	}
 	punkt, satz := w.wohinSatz(n.Uebernahme(f.X.ID, f.Y.ID, ""))
 	fmt.Fprintf(&b, `<p class=wohin><span class="punkt %s"></span>%s</p>`, punkt, esc(satz))
+	b.WriteString(kartenFuss(rest, mehr))
+	return b.String()
+}
+
+// kennenKarte is „Kennen sich Horst und Christian?“ (fragen.go,
+// kennenFragen): both faces, why it is asked (the company both cards
+// name), Ja and Nein; the answer stays in the archive.
+func kennenKarte(f Frage, rest int, mehr bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<form method=post action="%s" class="frage sofort" id=frage><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=zurueck value=/tresor>`,
+		antwortPfad, esc(f.X.ID), esc(f.Y.ID))
+	if mehr {
+		b.WriteString(`<input type=hidden name=mehr value=1>`)
+	}
+	frage := "Kennen sich " + f.X.Name + " und " + f.Y.Name + "?"
+	if f.Ich {
+		frage = "Kennst du " + f.X.Name + "?"
+	}
+	fmt.Fprintf(&b, `<div class=gesichter>%s<span class=k>↔</span>%s</div><h2>%s</h2><p class=k>%s</p><div class=chips>`,
+		gesicht(f.X.Name), gesicht(f.Y.Name), esc(frage), esc("("+f.Weil+")"))
+	b.WriteString(chip(artKennen, "Ja", " vorschlag") + chip(artFremd, "Nein", "") + `</div>`)
+	fmt.Fprintf(&b, `<p class=wohin><span class="punkt grau"></span>%s</p>`, esc(saysKennenBleibt))
 	b.WriteString(kartenFuss(rest, mehr))
 	return b.String()
 }
@@ -195,6 +221,10 @@ func gegebenSatz(g Gegeben) string {
 		return fmt.Sprintf("Du kennst %s nicht.", g.X.Name)
 	case g.Art == artFremd:
 		return fmt.Sprintf("%s und %s kennen sich nicht.", g.X.Name, g.Y.Name)
+	case g.Art == artKennen && g.Ich:
+		return fmt.Sprintf("Du kennst %s.", g.X.Name)
+	case g.Art == artKennen:
+		return fmt.Sprintf("%s und %s kennen sich.", g.X.Name, g.Y.Name)
 	}
 	return fmt.Sprintf("%s ist %s von %s.", g.X.Name, kurzWort(g.Art), duOder(g.Y, g.Ich))
 }

@@ -96,7 +96,7 @@ func TestNamensmusterImNetz(t *testing.T) {
 		t.Fatalf("the reason: %q", fs[i].Weil)
 	}
 	k := n.kanteZwischen("privat/p", "name:lena")
-	if g := n.Gruende("privat/p", k); g != "„Peter via Lena“ im Telefonbuch" {
+	if g := n.Gruende("privat/p", k); g != "Der Kontaktname sagt: „Peter via Lena“" {
 		t.Fatalf("via: %q", g)
 	}
 	if n.imBuchBeziehung("privat/s", "name:lena") {

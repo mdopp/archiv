@@ -165,7 +165,7 @@ func (w *Web) kanteSeite(rw http.ResponseWriter, r *http.Request, code int, a, b
 	w.kanteFrage(&s, n, p, hier, r.URL.Query().Get("pruefen") != "")
 	s.WriteString(kanteFertig(von))
 	s.WriteString(w.toast(n, r.URL.Query().Get("getan"), hier))
-	w.kanteGemeinsam(&s, r, p)
+	w.kanteGemeinsam(&s, r, n, p)
 	s.WriteString(beziehungDazu(n, p.X, false, "", hier))
 	seite(rw, code, "Was verbindet die beiden?", s.String(), "")
 }
@@ -238,6 +238,8 @@ func artJetzt(art string) string {
 		return "keine Beziehung"
 	case artFremd:
 		return "kennen sich nicht"
+	case artKennen:
+		return "kennen sich"
 	}
 	return kurzWort(art)
 }
@@ -258,14 +260,43 @@ func chipGewaehlt(art, text, klasse string) string {
 // one row — and „alle zeigen“ for the rest, folded. What no count says
 // (the same address, a phone book's word) is one line at the end; the
 // relation above is never said again.
-func (w *Web) kanteGemeinsam(s *strings.Builder, r *http.Request, p PaarSicht) {
+func (w *Web) kanteGemeinsam(s *strings.Builder, r *http.Request, n *Netz, p PaarSicht) {
 	fmt.Fprintf(s, `<section class=karte id=gemeinsam><h2>Gemeinsam</h2><p class=summe>%s</p>`, esc(cmp.Or(p.Satz, saysKanteNichts)))
 	w.kanteFotos(s, p)
 	w.kanteNachrichten(s, r, p)
 	if len(p.Ausserdem) > 0 {
 		fmt.Fprintf(s, `<p class=k id=ausserdem>Außerdem: %s</p>`, esc(strings.Join(p.Ausserdem, " · ")))
 	}
+	s.WriteString(bekannteZeile(n, p.Bekannte))
 	s.WriteString(`</section>`)
+}
+
+// bekannteVorn: the shared acquaintances a line names before „und 3 weitere“.
+const bekannteVorn = 2
+
+// bekannteZeile is „Gemeinsame Bekannte: Anna, Ben und 3 weitere“, each
+// name a link to that person; "" for none. Context, no reason: the tie
+// does not come from them (gemeinsameBekannte).
+func bekannteZeile(n *Netz, ks []Knoten) string {
+	if len(ks) == 0 {
+		return ""
+	}
+	zeigen := len(ks)
+	if zeigen > bekannteVorn+1 { // „und 1 weitere“ says no less than the name
+		zeigen = bekannteVorn
+	}
+	var namen []string
+	for _, k := range ks[:zeigen] {
+		namen = append(namen, fmt.Sprintf(`<a href="%s">%s</a>`, esc(umfeldMitte(k.ID)), esc(map[bool]string{true: "du", false: k.Name}[k.ID == n.Ich()])))
+	}
+	text := strings.Join(namen, ", ")
+	switch {
+	case zeigen < len(ks):
+		text += fmt.Sprintf(" und %d weitere", len(ks)-zeigen)
+	case zeigen > 1:
+		text = strings.Join(namen[:zeigen-1], ", ") + " und " + namen[zeigen-1]
+	}
+	return `<p class=k id=bekannte>Gemeinsame Bekannte: ` + text + `</p>`
 }
 
 // kanteFotos are kanteVorn thumbnails, the newest photo of each of the

@@ -248,29 +248,28 @@ func TestNetzAusFotosUndTelefonbuch(t *testing.T) {
 		t.Fatalf("the middle is the person's: %q", anna)
 	}
 	nahe := n.Nahe(anna, 10)
-	if got := namenVon(nahe); !slices.Equal(got[:1], []string{"Ben Berg"}) || slices.Contains(got, "Gerd Lang") || slices.Contains(got, "Hanna") || !slices.Contains(got, "Carla Wolf") {
+	if got := namenVon(nahe); !slices.Equal(got[:1], []string{"Ben Berg"}) || slices.Contains(got, "Gerd Lang") || slices.Contains(got, "Hanna") || slices.Contains(got, "Carla Wolf") { // Carla: only the firm, no tie
 		t.Fatalf("anna's: %v", got)
 	}
-	if got := n.Gruende(anna, nahe[0].Kante); got != "3 Tage auf deinen Fotos seit 2019 · gleiche Adresse · Ehepartner/in (Telefonbuch)" {
+	if got := n.Gruende(anna, nahe[0].Kante); got != "3 Tage auf deinen Fotos seit 2019 · Gleiche Adresse auf beiden Karten: Gartenweg 2 · Deine Karte nennt Ben Berg als Ehepartner/in" {
 		t.Fatalf("anna–ben: %q", got)
 	}
 	ben := n.Von("haushalt/b")
-	if ben != "p-ben" || n.Gruende(ben, nahe[0].Kante) != "3 Tage auf deinen Fotos seit 2019 · gleiche Adresse · Ehepartner/in von Anna Berg (Telefonbuch)" {
+	if ben != "p-ben" || n.Gruende(ben, nahe[0].Kante) != "3 Tage auf deinen Fotos seit 2019 · Gleiche Adresse auf beiden Karten: Gartenweg 2 · Deine Karte nennt Ben Berg als Ehepartner/in" {
 		t.Fatalf("ben's view: %q %q", ben, n.Gruende(ben, nahe[0].Kante))
 	}
 	fritz := n.Nahe(n.Von("privat/urn:uuid:k2"), 5)
 	if got := namenVon(fritz); !slices.Equal(got, []string{"Anna Berg", "Kim Berg"}) {
 		t.Fatalf("fritz: %v", got)
 	}
-	if got := n.Gruende(fritz[0].Mit.ID, fritz[0].Kante); got != "Freund/in (Telefonbuch) · Geschwister (Telefonbuch)" {
+	if got := n.Gruende(fritz[0].Mit.ID, fritz[0].Kante); got != "Deine Karte nennt Fritz Kurz als Freund/in · Deine Karte nennt Fritz Kurz als Geschwister" {
 		t.Fatalf("anna–fritz: %q", got)
 	}
 	if got := n.Gruende("p-kim", fritz[1].Kante); got != "2 Tage auf deinen Fotos seit 2024" {
 		t.Fatalf("fritz–kim, not anna's: %q", got)
 	}
-	carla := slices.IndexFunc(nahe, func(v Verbindung) bool { return v.Mit.Name == "Carla Wolf" })
-	if n.Gruende(anna, nahe[carla].Kante) != "gleiche Firma" || nahe[carla].Mit.Kontakt != "haushalt/c" {
-		t.Fatalf("carla: %+v", nahe[carla])
+	if p, ok := n.Paar(anna, n.Von("haushalt/c")); !ok || !slices.Contains(p.Ausserdem, "Beide Kontaktkarten nennen die Firma Werk AG") || len(p.Kante.Fest) != 1 {
+		t.Fatalf("carla: „Warum?“ names the firm: %+v", p)
 	}
 	if z := n.Zwischen([]string{"p-ben", "p-kim", "p-gerd"}); !slices.Equal(z, [][2]int{{0, 1}}) {
 		t.Fatalf("among them: %v", z)
@@ -306,11 +305,11 @@ func TestNetzAusFotosUndTelefonbuch(t *testing.T) {
 
 // Homes' numbers to the sixth place: every tie of the fixture with its
 // strength, rank, days and first year, as Homes' internal/netz computed
-// them on 2026-11-10 (71f9de0) from the same photos and cards.
+// them on 2026-11-10 (71f9de0) from the same photos and cards; but
+// Anna–Carla, a firm alone, is no tie since 2026-11-11.
 func TestNetzZahlenWieHomes(t *testing.T) {
 	n := netzBox(t).u.Netz()
 	want := map[string][4]float64{
-		"Anna Berg–Carla Wolf": {0.4, 0.4, 0, 0},
 		"Anna Berg–Ben Berg":   {5.994137, 5.844005, 3, 2019},
 		"Anna Berg–Fritz Kurz": {3, 3, 0, 0},
 		"Anna Berg–Kim Berg":   {0.865264, 0.506535, 2, 2019},
@@ -368,7 +367,7 @@ func TestUmfeldJedeRundeNeu(t *testing.T) {
 	*ut.jetzt = ut.jetzt.Add(time.Hour)
 	ut.u.Runde(t.Context(), ut.innen)
 	n := ut.u.Netz()
-	if got := n.Nahe("p-anna", 10)[0]; got.Mit.ID != "p-ben" || got.Kante.Tage != 0 || n.Gruende("p-anna", got.Kante) != "gleiche Adresse · Ehepartner/in (Telefonbuch)" { // one day left: the phone book's only
+	if got := n.Nahe("p-anna", 10)[0]; got.Mit.ID != "p-ben" || got.Kante.Tage != 0 || n.Gruende("p-anna", got.Kante) != "Gleiche Adresse auf beiden Karten: Gartenweg 2 · Deine Karte nennt Ben Berg als Ehepartner/in" { // one day left: the phone book's only
 		t.Fatalf("after a round: %+v", got)
 	}
 	again := &Umfeld{URL: ut.u.URL, Loc: time.UTC, Now: ut.u.Now}
@@ -446,7 +445,7 @@ func TestUmfeldOhneHaushaltsbuch(t *testing.T) {
 		t.Fatalf("%+v", st)
 	}
 	// the cards last read stay; a fresh vault has none of them
-	if got := ut.u.Netz().Gruende("p-anna", ut.u.Netz().Nahe("p-anna", 1)[0].Kante); !strings.Contains(got, "gleiche Adresse") {
+	if got := ut.u.Netz().Gruende("p-anna", ut.u.Netz().Nahe("p-anna", 1)[0].Kante); !strings.Contains(got, "Gleiche Adresse auf beiden Karten: Gartenweg 2") {
 		t.Fatalf("the household's cards last read went: %q", got)
 	}
 	os.Remove(ut.innen.umfeldTabelle())
@@ -556,7 +555,7 @@ func TestUmfeldSeite(t *testing.T) {
 	ut.u.laden(innen)
 
 	page := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
-	for _, want := range []string{"<h3>Steht dir nahe</h3>", `<svg class=netzbild`, `<a class=zeile href="/tresor/umfeld?mitte=p-ben">Ben Berg <span class=k>Partner/in · 3 Tage auf deinen Fotos seit 2019 · gleiche Adresse</span></a></li>`,
+	for _, want := range []string{"<h3>Steht dir nahe</h3>", `<svg class=netzbild`, `<a class=zeile href="/tresor/umfeld?mitte=p-ben">Ben Berg <span class=k>Partner/in · 3 Tage auf deinen Fotos seit 2019 · Gleiche Adresse auf beiden Karten: Gartenweg 2</span></a></li>`,
 		`<form method=get action="/tresor/umfeld" role=search class=person-suche data-weiter><input type=search name=suche list=namen data-namen`,
 		"Zuletzt gerechnet um", `id=umfeld-netz data-live`} {
 		if !strings.Contains(page, want) {
@@ -575,7 +574,7 @@ func TestUmfeldSeite(t *testing.T) {
 	ben := wt.rufe("GET", "/tresor/umfeld?mitte=p-ben", anna, nil).Body.String()
 	for _, want := range []string{`<details class=karte id=verbergen><summary>Ausblenden …</summary><div class=aktionen>`, `name=id value="p-ben"><button name=art value="aus"`, `<button class=leise name=art value="nicht"`, "Beides lässt sich zurückholen.",
 		// who Ben is to her first, then what the two share in one sentence, then the one way on (owner 2026-11-11)
-		`<section class=person id=person><div class=wer-ist>`, `<h2>Ben Berg</h2>`, `<p class=ist>Für dich: Partner/in · sehr nah (Nr. 1 von 4) · zuletzt gemeinsam am 24.12.2025</p>`,
+		`<section class=person id=person><div class=wer-ist>`, `<h2>Ben Berg</h2>`, `<p class=ist>Für dich: Partner/in · sehr nah (Nr. 1 von 3) · zuletzt gemeinsam am 24.12.2025</p>`, `Gemeinsame Bekannte: <a href="/tresor/umfeld?mitte=p-kim">Kim Berg</a>`,
 		`<p class=summe>4 gemeinsame Fotos (2019–2025, zuletzt im Dezember)</p>`, `<a class=weiter href="/tresor/kante?a=p-ben&amp;b=p-anna">Was verbindet euch?</a>`,
 		// Ben's list: a name always opens that person's page; „mit Ben ›“ after it what connects the two (owner 2026-11-11)
 		`<li><a class=zeile href="/tresor/umfeld?mitte=p-kim">Kim Berg <span class=k>2 Tage auf deinen Fotos seit 2019</span></a><a class=paar href="/tresor/kante?a=p-ben&amp;b=p-kim">mit Ben ›</a></li>`} {

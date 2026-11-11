@@ -317,7 +317,7 @@ func TestUmfeldRundeMitGespraechen(t *testing.T) {
 	if ben.Chats != 1 || !strings.Contains(n.Gruende("p-anna", ben), "in einem Gruppen-Chat") {
 		t.Fatalf("Anna–Ben: %+v %q", ben, n.Gruende("p-anna", ben))
 	}
-	if carla.Mails != 12 || n.Gruende("p-anna", carla) != "12 Mails zusammen · gleiche Firma" {
+	if carla.Mails != 12 || n.Gruende("p-anna", carla) != "12 Mails zusammen · Beide Kontaktkarten nennen die Firma Werk AG" {
 		t.Fatalf("Anna–Carla: %+v %q", carla, n.Gruende("p-anna", carla))
 	}
 	b, err := os.ReadFile(ut.innen.umfeldTabelle())
