@@ -99,6 +99,71 @@ func immichURL() string {
 	return u
 }
 
+// immichOeffentlich is IMMICH_PUBLIC_URL without its trailing slash, an
+// http(s) address; "" none.
+func immichOeffentlich(getenv func(string) string) string {
+	u := strings.TrimRight(strings.TrimSpace(getenv("IMMICH_PUBLIC_URL")), "/")
+	if p, err := url.Parse(u); u == "" || err != nil || (p.Scheme != "http" && p.Scheme != "https") || p.Host == "" {
+		return ""
+	}
+	return u
+}
+
+// immichID: id has the form of an Immich asset id (a UUID), nothing that
+// could leave the path.
+func immichID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+// maxVorschau is the most a thumbnail may weigh.
+const maxVorschau = 4 << 20
+
+// Vorschau is a photo's thumbnail and its type (GET
+// /api/assets/{id}/thumbnail?size=thumbnail; asset.view), read whole into
+// memory for one answer, never kept.
+func (c *Immich) Vorschau(ctx context.Context, id string) ([]byte, string, error) {
+	if !immichID(id) {
+		return nil, "", errFormat
+	}
+	q, err := http.NewRequestWithContext(ctx, http.MethodGet, c.URL+"/api/assets/"+id+"/thumbnail?size=thumbnail", nil)
+	if err != nil {
+		return nil, "", err
+	}
+	q.Header.Set("x-api-key", c.Key)
+	hc := c.HTTP
+	if hc == nil {
+		hc = &http.Client{Timeout: 30 * time.Second}
+	}
+	resp, err := hc.Do(q)
+	if err != nil {
+		return nil, "", fmt.Errorf("immich Vorschau: %w", err)
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized:
+		return nil, "", errImmichSchluessel
+	case resp.StatusCode != http.StatusOK:
+		return nil, "", fmt.Errorf("immich Vorschau: %s", resp.Status)
+	}
+	typ := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(typ, "image/") {
+		return nil, "", fmt.Errorf("immich Vorschau: kein Bild (%s)", typ)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxVorschau+1))
+	if err != nil || len(b) > maxVorschau {
+		return nil, "", fmt.Errorf("immich Vorschau: zu groß oder abgebrochen")
+	}
+	return b, typ, nil
+}
+
 // immichFehltRecht is Immich refusing for a permission the key lacks
 // (403 „Missing required permission: <recht>“).
 type immichFehltRecht struct{ Recht string }

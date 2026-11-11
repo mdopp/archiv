@@ -30,7 +30,9 @@ import (
 // the derived relations between others (abgeleitet.go), the family
 // circle (familienkreis: the person, her relatives, and everyone with
 // her family name or a relative's), then two others with the same family
-// name, or whose shared address suggests family (vorschlag). And never
+// name, or whose shared address suggests family (vorschlag). Two of the
+// family circle with one family name and many photo days together are
+// asked with the person's own: a couple or siblings nobody wrote down. And never
 // all at once: fragenJeBesuch a visit (Portion), the rest waits for
 // „weitere Fragen“. An answer takes with it what follows from it by
 // definition (folgern): written in the same tap, undone with it.
@@ -89,6 +91,8 @@ type antwort struct {
 	Aus         string       `json:"aus,omitempty"`
 	Weil        string       `json:"weil,omitempty"`
 	Trotz       string       `json:"trotz,omitempty"`
+	// Vorher: what the edge page's Festlegen replaced (kante.go); Vergessen brings it back
+	Vorher *vorherStand `json:"vorher,omitempty"`
 }
 
 // merkmale are what a node's contacts and Immich say for the suggestions.
@@ -381,6 +385,8 @@ func (n *Netz) offen() (out []Frage) {
 		switch {
 		case f.Ich:
 			return 0
+		case f.Gruppe == nil && kreis[f.X.ID] && kreis[f.Y.ID] && n.gleicherName(f.X.ID, f.Y.ID) && f.Kante.Tage >= freundTage:
+			return 0 // one family name, often together, in the family: likely a couple or siblings (owner 2026-11-11, „Sabine fehlt als Partnerin“)
 		case f.Gruppe != nil:
 			return 1
 		case f.Abgeleitet:
@@ -430,7 +436,9 @@ func gruppenZeit(f Frage) int64 {
 // similar age Partner/in; the same firm Kollege/Kollegin; a group named
 // Arbeit, Nachbarschaft or Freundeskreis; the same street, another house
 // Nachbar/in; many photo days without a sign of family (both family names
-// known and different) Freund/in.
+// known and different) Freund/in. One family name and many photo days
+// with both birthdays known make family by the age gap, as an address
+// does (a small gap between adults Partner/in); without them, no guess.
 func (n *Netz) vorschlag(x, y string, k *Kante) (string, string) {
 	mx, my := n.merkmale[x], n.merkmale[y]
 	fest := func(art string) bool {
@@ -459,6 +467,8 @@ func (n *Netz) vorschlag(x, y string, k *Kante) (string, string) {
 		return "verwandt", weilFamilie
 	case fest(bandAdresse) && familie:
 		return familienArt(jahre, aelter, n.now(), mx.geb, my.geb), weilFamilie + ", " + abstand
+	case familie && k.Tage >= freundTage && jahre >= 0:
+		return familienArt(jahre, aelter, n.now(), mx.geb, my.geb), "gleicher Nachname, " + anzahlT(k.Tage, "Tag", "Tage") + " zusammen auf deinen Fotos, " + abstand
 	case gArt == "verwandt":
 		return gArt, gWeil
 	case fest(bandAdresse) && jahre >= 0 && jahre < 12:
@@ -568,15 +578,27 @@ func (n *Netz) folgern(aus string, vorher map[string]bool) {
 }
 
 // Vergessen drops the answer about the pair and what followed from it;
-// its question may come again.
+// its question may come again. An answer the edge page set over another
+// (Vorher) gives that one back, and what had followed from it.
 func (n *Netz) Vergessen(key string) (map[string]antwort, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	if _, da := n.antworten[key]; !da {
 		return nil, errFrageWeg
 	}
+	alt := n.antworten[key]
 	delete(n.antworten, key)
 	maps.DeleteFunc(n.antworten, func(_ string, a antwort) bool { return a.Aus == key })
+	if v := alt.Vorher; v != nil { // the edge page set it over another: that one comes back, with what followed from it
+		if v.Antwort != nil {
+			n.antworten[key] = *v.Antwort
+		}
+		for k, a := range v.Folgen {
+			if _, da := n.antworten[k]; !da {
+				n.antworten[k] = a
+			}
+		}
+	}
 	n.bauen()
 	return maps.Clone(n.antworten), nil
 }

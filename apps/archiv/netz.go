@@ -483,9 +483,14 @@ func (n *Netz) Verbergen(id, art string) map[string]string {
 	return maps.Clone(n.verborgen)
 }
 
-// Gruende are the tie's reasons as seen from mitte: the photo days and
-// since when, the group chats and mails, then what the phone books say.
+// Gruende are the tie's reasons as seen from mitte, in one line.
 func (n *Netz) Gruende(mitte string, k Kante) string {
+	return strings.Join(n.gruendeListe(mitte, k), " · ")
+}
+
+// gruendeListe are the tie's reasons as seen from mitte: the photo days
+// and since when, the group chats and mails, then what the phone books say.
+func (n *Netz) gruendeListe(mitte string, k Kante) []string {
 	var out []string
 	if k.Tage > 0 {
 		out = append(out, fmt.Sprintf("%s auf deinen Fotos seit %d", anzahlT(k.Tage, "Tag", "Tage"), k.Seit))
@@ -510,7 +515,7 @@ func (n *Netz) Gruende(mitte string, k Kante) string {
 			out = append(out, f.Wie+" von "+n.knoten[n.von[f.A]].Name+" (Telefonbuch)")
 		}
 	}
-	return strings.Join(out, " · ")
+	return out
 }
 
 // anzahlT is anzahl with the thousands point.
