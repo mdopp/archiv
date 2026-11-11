@@ -13,7 +13,7 @@ FROM ghcr.io/mdopp/msgvault:0.22.0-signal.2@sha256:d1708807cd0034f50f76ec3986c4d
 
 # signalbackup-tools (bepaald, GPLv3) has no Linux release binary: built
 # from the tag, checked against its commit.
-FROM docker.io/library/debian:trixie-slim AS signal
+FROM docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2 AS signal
 ARG SIGNALBACKUP_TOOLS_TAG=20261014
 ARG SIGNALBACKUP_TOOLS_COMMIT=c7a788985c1033b4fd4ea10676aba120bbd98b66
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -26,14 +26,14 @@ RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DWITHOUT_DBUS=ON \
     && cmake --build build -j"$(nproc)" \
     && install -m 0755 build/signalbackup-tools /signalbackup-tools
 
-FROM docker.io/library/golang:1.27 AS build
+FROM docker.io/library/golang:1.27@sha256:01aa404fa56b604b6f48e90c1d6e2c79fe5cd78f9592f78d80303fbe171cdcc0 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download && go mod verify
 COPY *.go *.yml ./
 RUN CGO_ENABLED=0 go build -trimpath -ldflags=-s -o /archiv .
 
-FROM docker.io/library/debian:trixie-slim
+FROM docker.io/library/debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2
 # gocryptfs + fuse3 (fusermount3): the vault. python3: wa-crypt-tools, for WhatsApp later.
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       gocryptfs fuse3 ca-certificates tzdata \
