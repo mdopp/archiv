@@ -91,7 +91,7 @@ func TestKanteSeite(t *testing.T) {
 		"<b>„Hallo Schatz“</b>", `<a href="/messages/5001">`, `<a href="/messages/4201"><b>Familie Berg</b><span class=k>Kommt ihr Sonntag zum Essen? · 01.11.2026</span>`,
 		`<a href="/messages/4300"><b>Mail-Verlauf mit 2 Personen</b><span class=k>Du: Anbei die Fotos · 02.10.2026</span>`,
 		"<h2>Warum</h2>", "<li>3 Tage auf deinen Fotos seit 2019</li>", "<li>in einem Gruppen-Chat</li>", "<li>gleiche Adresse</li>", "<li>gleicher Nachname</li>",
-		"+ Beziehung von Ben Berg", `<datalist id=namen>`} {
+		"+ Beziehung von Ben Berg", `<datalist id=namen>`, `<a href="/tresor?tab=fragen">Fertig, weiter mit den Fragen</a>`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}

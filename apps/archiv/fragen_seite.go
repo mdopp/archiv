@@ -224,12 +224,20 @@ func (w *Web) toast(n *Netz, key, zurueck string) string {
 			return ""
 		}
 		text = strings.TrimSuffix(gegebenSatz(g), ".") + " · " + w.standSatz(g)
+		if a, ok := n.Anlage(g.X.ID, g.Y.ID); ok && anlageBestaetigt(a, g) {
+			text = angelegtSatz(a) + " · " + w.standSatz(g)
+		}
 		for _, d := range n.Gefolgerte(key) {
 			text += " · daraus: weil " + d.Weil + ", ist " + d.X.Name + " " + kurzWort(d.Art) + " von " + duOder(d.Y, d.Ich)
 		}
 	}
 	return fmt.Sprintf(`<div class=toast role=status><span>✓ %s</span><form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=zurueck value="%s"><button name=tu value=vergessen class=leise data-laeuft="Nimmt zurück …">Rückgängig</button></form></div>`,
 		esc(text), antwortPfad, esc(key), esc(zurueck))
+}
+
+// anlageBestaetigt: the answer g is the kind the card's name said of the made person.
+func anlageBestaetigt(a Anlage, g Gegeben) bool {
+	return g.X.ID == a.Karte.ID && g.Art == a.Art || g.X.ID == a.Neu.ID && g.Art == cmp.Or(gegen[a.Art], a.Art)
 }
 
 // offenEinzutragen: Homes has not taken g, though it goes somewhere.
@@ -280,11 +288,12 @@ func gruppenListe(b *strings.Builder, n *Netz, zurueck string) {
 }
 
 // zurueckNach is where an answer's form goes back to: the main page's
-// Fragen, the Umfeld page or an edge page (its pair only), never elsewhere.
+// Fragen, the Umfeld page or an edge page (its pair only, and where its
+// Fertig leads), never elsewhere.
 func zurueckNach(z string) string {
 	if rest, ok := strings.CutPrefix(z, kantePfad+"?"); ok {
 		if q, err := url.ParseQuery(rest); err == nil && q.Get("a") != "" && q.Get("b") != "" {
-			return kanteAdresse(q.Get("a"), q.Get("b"))
+			return kanteVon(q.Get("a"), q.Get("b"), q.Get("aus"))
 		}
 	}
 	if strings.HasPrefix(z, "/tresor/umfeld") {

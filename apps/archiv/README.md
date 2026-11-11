@@ -953,7 +953,9 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
 - `/tresor/kante?a=…&b=…`, one page per pair, one tap from a „Steht
   nahe“ row (its reasons and bar; the face and name still open the
   person), a person's detail (each row's „Was verbindet die beiden?“), a
-  question card („Warum?“) and every line of the Stammbaum.
+  question card („Warum?“), every line of the Stammbaum and „Ansehen“
+  under Erkannt (`&aus=erkannt`). Under the relation „Fertig“ leads on:
+  back to Erkannt when it came from there, else to the questions.
 - On top both faces and the relation as the question card's chips, the
   current kind pressed (an answer, one that followed from an answer, or a
   phone book's), „keine Beziehung“ and „kennen sich nicht“ beside them. A
@@ -1023,10 +1025,15 @@ suggestion until the person taps (owner 2026-11-11).
   of `namensmuster.worte` right before a `von` word counts („Oma von …“
   Großeltern), seen from the one named; names after it split at „und“
   („Mama von Lena und Tom“), marks around it are fine („Sabine (Mama von
-  Lena)“). The one named is the person of that name (umlauts alike; a
+  Lena)“). „<Vorname> <Nachname> / <Nachname>“: what follows the slash is
+  another family name of the same one, never part of her name („Vater von
+  Wilma Gnielczyk-Jazdzejewski / Jazdzejewski“ names Wilma
+  Gnielczyk-Jazdzejewski; after a given name alone, „Lena/Tom“, it is an
+  „und“), and a word already in the name is not added again. The one named is the person of that name (umlauts alike; a
   single given name the one person whose first name it is, none if
   several), else a person of its own (`name:<name>`, often a child with
-  no card). It gives a tie with „„Mama von Lena“ im Telefonbuch“ as its
+  no card; its id is the name as the card wrote it, so answers about her
+  stay hers). It gives a tie with „„Mama von Lena“ im Telefonbuch“ as its
   reason and a question with that kind as the suggestion, asked with the
   derived ones, family kind or not, tie or not. „Peter via Lena“ (`ueber`
   words: via, über, durch) is only a tie „kennt über“, never a relation
@@ -1055,8 +1062,14 @@ suggestion until the person taps (owner 2026-11-11).
   Nachrichten gelesen · 7 Vorschläge · 5 von 12 Gruppen eingeordnet“
   (each part only when there is something), a link to `/tresor/erkannt`:
   the relations a card's name or the model suggests (pairs not answered
-  and not in a phone book; „Stimmt“ sets it as the edge page's chips do,
-  and lands there with the toast; „Ansehen“ opens it), the groups a title
+  and not in a phone book; „Stimmt“ sets it and comes back to the list
+  with the toast and its Rückgängig; „Ansehen“ opens the edge page). A
+  card's name that made a person of its own is „Lena anlegen?“ („Mama:
+  „Mama von Lena“ aus deinem Telefonbuch.“): one tap „Anlegen“ makes her
+  and the relation, and the toast says „Lena angelegt, Mama: „Mama von
+  Lena““ (owner 2026-11-11: „Das Verhältnis sollte aber direkt da sein“);
+  the same yes on a question card says the same and goes on with the next
+  question. The groups a title
   or the model suggests („Stimmt“, or „Anders nennen“ in the tab), the
   birthdays. At most 20 a section.
 - **Birthdays from wishes** (`geburtstage.go`; no model): each round
