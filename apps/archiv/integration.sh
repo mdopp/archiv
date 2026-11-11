@@ -333,7 +333,9 @@ echo "Umfeld (archiv#44): the couples' statement, the mails for home town and em
 docker exec archiv archiv umfeld-hinweise -sql -paare >"$D/paare.json"
 code=$(curl -s -o "$D/paare-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/paare.json" "$U/api/v1/query")
 [ "$code" = 200 ] || { cat "$D/paare-antwort.json"; fail "msgvault refuses the couples' statement: $code"; }
-docker exec -i archiv archiv umfeld-hinweise <"$D/paare-antwort.json" || fail "the couples' answer does not read"
+paare=$(docker exec -i archiv archiv umfeld-hinweise <"$D/paare-antwort.json") || fail "the couples' answer does not read"
+# no fixture says „mein Mann …“ or ends signed by two: the filter must not take „Hallo eins“ for one
+[ -z "$paare" ] || { cat "$D/paare-antwort.json"; fail "the couples' filter takes messages without a couple: $paare"; }
 docker exec archiv archiv umfeld-hinweise -sql -herkunft >"$D/herkunft.json"
 code=$(curl -s -o "$D/herkunft-antwort.json" -w '%{http_code}' "${H[@]}" -H 'Content-Type: application/json' --data-binary @"$D/herkunft.json" "$U/api/v1/query")
 [ "$code" = 200 ] || { cat "$D/herkunft-antwort.json"; fail "msgvault refuses the mails' statement: $code"; }

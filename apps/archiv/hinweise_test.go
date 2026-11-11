@@ -60,7 +60,7 @@ func neuesMsgvaultHinweise(t *testing.T) (*fakeMsgvaultHinweise, *MsgvaultAPI) {
 			jsonAus(w, http.StatusOK, map[string]any{"columns": []string{"nachricht", "am", "mail"}, "rows": f.herkunft})
 			return
 		}
-		if strings.Contains(q.SQL, `(&|\+|`) {
+		if strings.Contains(q.SQL, `(&|\+)`) {
 			jsonAus(w, http.StatusOK, map[string]any{"columns": hinweisSpalten, "rows": f.paare})
 			return
 		}

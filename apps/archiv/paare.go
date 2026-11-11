@@ -71,7 +71,8 @@ func paareWegLaden(innen Innen) map[string]time.Time {
 }
 
 // paarMuster is msgvault's filter (on lower(snippet)): a mein word and a
-// partner word, or two words joined by an und word, „&“ or „+“ at the end.
+// partner word, or two words joined by „&“, „+“ or an und word (with
+// spaces: „eins“ is no „e i ns“) at the end.
 func (w *woerterbuch) paarMuster() string {
 	var und []string
 	for u := range w.und {
@@ -79,7 +80,7 @@ func (w *woerterbuch) paarMuster() string {
 	}
 	slices.Sort(und)
 	return `(^|\PL)(` + strings.Join(w.paarFormen[0], "|") + `)[\s,]+(` + strings.Join(w.paarFormen[1], "|") + `)(\PL|$)` +
-		`|\pL\s*(&|\+|` + strings.Join(und, "|") + `)\s*\pL+[^\pL]*$`
+		`|\pL\s*(&|\+)\s*\pL+[^\pL]*$|\pL\s+(` + strings.Join(und, "|") + `)\s+\pL+[^\pL]*$`
 }
 
 // wortStelle is a word of a text, or „&“/„+“, with where it stands.

@@ -167,9 +167,9 @@ func (m *MsgvaultAPI) Text(ctx context.Context, id string) (string, error) {
 }
 
 var (
-	htmlWeg    = regexp.MustCompile(`(?is)<(script|style)\b.*?</(script|style)\s*>`)
-	htmlZeile  = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|li|h[1-6])\s*>`)
-	htmlTag    = regexp.MustCompile(`<[^>]*>`)
+	htmlWeg   = regexp.MustCompile(`(?is)<(script|style)\b.*?</(script|style)\s*>`)
+	htmlZeile = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|li|h[1-6])\s*>`)
+	htmlTag   = regexp.MustCompile(`<[^>]*>`)
 	// zitatKopf: where a reply quotes the mail before it
 	zitatKopf = regexp.MustCompile(`(?im)^\s*(am .{3,80} schrieb.*:|on .{3,80} wrote:|-{2,}\s*(original|ursprüngliche)|von:\s|from:\s|le .{3,80} a écrit|el .{3,80} escribió)`)
 )

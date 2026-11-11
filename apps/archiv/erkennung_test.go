@@ -201,9 +201,9 @@ func TestPaarMuster(t *testing.T) {
 		}
 	}
 	m := woerter.paarMuster()
-	for _, s := range []string{"mit meinem mann tom", "wir kommen. kim & fritz!"} {
-		if !regexp.MustCompile(m).MatchString(s) {
-			t.Errorf("msgvault's filter misses %q", s)
+	for s, want := range map[string]bool{"mit meinem mann tom": true, "wir kommen. kim & fritz!": true, "lg anna und ben :)": true, "hallo eins": false, "mein mannschaftsfoto": false} {
+		if regexp.MustCompile(m).MatchString(s) != want {
+			t.Errorf("msgvault's filter on %q: want %t", s, want)
 		}
 	}
 }
