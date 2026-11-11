@@ -55,6 +55,7 @@ func (w *Web) arbeitsplatz(b *strings.Builder, r *http.Request, bereit bool) {
 		w.umfeldFehlt(b)
 	case tab == "stammbaum":
 		stammbaumTab(b, n)
+		b.WriteString(w.toast(n, r.URL.Query().Get("getan"), "/tresor?tab=stammbaum"))
 	case tab == "nahe":
 		naheListe(b, n)
 	case tab == "gruppen":
@@ -197,6 +198,48 @@ func kontakteFinden(innen Innen, q string, hoechstens int) (out []string) {
 	return out
 }
 
+// quelleAuf is the card a failed save came from, and its error.
+type quelleAuf struct{ id, fehler string }
+
+// gescheitert: the save of card id's form failed.
+func (q quelleAuf) gescheitert(id string) bool { return q.id == id && q.fehler != "" }
+
+// quelleEnde closes a source's card.
+const quelleEnde = `</details></section>`
+
+// quelleKopf opens a source's card, folded to its name and its state line
+// (zeile); open after a failed save of its form, the error first.
+func quelleKopf(b *strings.Builder, auf quelleAuf, id, name, zeile string) {
+	fmt.Fprintf(b, `<section class=quelle id=karte-%s data-live><details id=q-%s%s><summary><h3>%s</h3><span class=k>%s</span></summary>`, id, id, offenWenn(auf.gescheitert(id)), esc(name), esc(zeile))
+	if auf.gescheitert(id) {
+		fmt.Fprintf(b, `<p class="meldung fehler" role=alert>%s</p>`, esc(auf.fehler))
+	}
+}
+
+// letzteZeile is a source's state line from what it brought: its error,
+// else when and how much it last brought, else that nothing yet.
+func (w *Web) letzteZeile(quelle, eins, mehr string) string {
+	ein, f, _ := w.Protokoll.Kopie()
+	e, ok := ein[quelle]
+	switch {
+	case f != nil && f.Quelle == quelle:
+		return "meldet einen Fehler"
+	case !ok:
+		return "noch nichts im Archiv"
+	case quelle == "mail":
+		return "zuletzt am " + datum(e.Am) + ": " + anzahl(e.Zahlen.Mails, eins, mehr)
+	}
+	return "zuletzt am " + datum(e.Am) + ": " + anzahl(e.Zahlen.Nachrichten(), eins, mehr)
+}
+
+// fehltZeile is zeile, or text when something is missing (fehlt) and the source reports no error.
+func fehltZeile(zeile string, fehlt bool, text string) string {
+	if fehlt && zeile != "meldet einen Fehler" {
+		return text
+	}
+	return zeile
+}
+
 // quellenZeile is the sources in one line: „✓ aktuell“, what runs, or the
 // first thing that needs the person; a tap opens their page.
 func (w *Web) quellenZeile(b *strings.Builder, offen bool) {
@@ -245,8 +288,10 @@ func (w *Web) quellenProbleme(offen bool) (p []string) {
 	return p
 }
 
-// quellenSeite is the sources' page: each card with what it holds and how
-// to set it up; while closed, what can be said without the vault.
+// quellenSeite is the sources' page (owner 2026-11-11: fold the forms):
+// one line per source, its state; a tap opens its card, what it holds and
+// how to set it up. After a failed save its card stays open with the
+// error. While closed, what can be said without the vault.
 func (w *Web) quellenSeite(rw http.ResponseWriter, r *http.Request, code int, meldung, fehler string) {
 	st := w.Tresor.Stand()
 	if st.Zustand == Uneingerichtet {
@@ -254,18 +299,25 @@ func (w *Web) quellenSeite(rw http.ResponseWriter, r *http.Request, code int, me
 		return
 	}
 	var b strings.Builder
-	meldungenText(&b, meldung, fehler)
 	offen := st.Zustand == Offen
+	auf := quelleAuf{id: quellenFormulare[r.URL.Path], fehler: fehler}
+	if auf.id == "umfeld" || auf.id == "passkeys" {
+		auf.id = map[bool]string{true: auf.id}[offen] // cards only of the open vault
+	}
+	if auf.id != "" {
+		fehler = "" // in its card
+	}
+	meldungenText(&b, meldung, fehler)
 	w.laeuftJetzt(&b)
-	w.signalKarte(&b, offen)
-	w.mailKarte(&b, offen)
-	w.smsKarte(&b)
-	w.whatsappKarte(&b)
-	w.sozialKarte(&b, offen)
-	w.kontakteKarte(&b, offen)
+	w.signalKarte(&b, offen, auf)
+	w.mailKarte(&b, offen, auf)
+	w.smsKarte(&b, auf)
+	w.whatsappKarte(&b, auf)
+	w.sozialKarte(&b, offen, auf)
+	w.kontakteKarte(&b, offen, auf)
 	if offen {
-		w.umfeldKarte(&b)
-		w.passkeyKarte(&b)
+		w.umfeldKarte(&b, auf)
+		w.passkeyKarte(&b, auf)
 	} else {
 		fmt.Fprintf(&b, `<p class=ruhig><span class="punkt grau"></span>%s Schlüssel ändern kannst du, wenn es offen ist.</p>`, saysAdminLiest)
 	}

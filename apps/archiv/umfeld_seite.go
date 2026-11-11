@@ -30,26 +30,38 @@ const (
 )
 
 // umfeldKarte is the card on the open vault page.
-func (w *Web) umfeldKarte(b *strings.Builder) {
-	b.WriteString(`<section class=quelle id=karte-umfeld data-live><h3>Umfeld</h3>`)
-	b.WriteString(`<p class=k>Wer dir nahe steht und wer wem: aus deinen Fotos in Immich und aus den Telefonbüchern. Das Archiv rechnet es nur, solange es offen ist, und hebt es im Tresor auf.</p>`)
+func (w *Web) umfeldKarte(b *strings.Builder, qa quelleAuf) {
 	u := w.Umfeld
-	if !u.Eingerichtet() {
-		fmt.Fprintf(b, `<p class=zugang><span class=fehlt>%s</span></p></section>`, esc(saysImmichNichtEingerichtet))
-		return
-	}
 	innen, auf := w.Tresor.Innen()
-	if !auf {
-		b.WriteString(`</section>`)
+	am, hat := HatImmichSchluessel(innen)
+	st := u.Stand()
+	zeile := "aus " + anzahlT(st.Fotos, "Foto", "Fotos") + " gerechnet"
+	switch {
+	case !u.Eingerichtet():
+		zeile = "nicht eingerichtet"
+	case !hat:
+		zeile = "Immich-Schlüssel fehlt"
+	case st.Fehler != "":
+		zeile = "gestört"
+	case st.Laeuft:
+		zeile = "liest gerade deine Fotos …"
+	}
+	quelleKopf(b, qa, "umfeld", "Umfeld", zeile)
+	b.WriteString(`<p class=k>Wer dir nahe steht und wer wem: aus deinen Fotos in Immich und aus den Telefonbüchern. Das Archiv rechnet es nur, solange es offen ist, und hebt es im Tresor auf.</p>`)
+	if !u.Eingerichtet() {
+		fmt.Fprintf(b, `<p class=zugang><span class=fehlt>%s</span></p>`+quelleEnde, esc(saysImmichNichtEingerichtet))
 		return
 	}
-	am, hat := HatImmichSchluessel(innen)
+	if !auf {
+		b.WriteString(quelleEnde)
+		return
+	}
 	if hat {
 		fmt.Fprintf(b, `<p class=zugang>Immich-Schlüssel hinterlegt am %s</p>`, datum(am))
 	} else {
 		b.WriteString(`<p class=zugang><span class=fehlt>Immich-Schlüssel fehlt</span></p>`)
 	}
-	umfeldStandText(b, u.Stand(), hat)
+	umfeldStandText(b, st, hat)
 	if n := u.Netz(); n != nil {
 		b.WriteString(`<p><a class=gross href="/tresor/umfeld">Umfeld ansehen</a></p>`)
 	}
@@ -67,8 +79,8 @@ func (w *Web) umfeldKarte(b *strings.Builder) {
 <li>Immich zeigt den Schlüssel nur einmal: Kopier ihn und füg ihn hier ein.</li></ol>
 <form method=post action="/tresor/umfeld/schluessel" class=feld>
 <label>Immich-API-Schlüssel<input name=schluessel type=password autocomplete=off spellcheck=false autocapitalize=off></label>
-%s</form><p class=hinweis>Der Schlüssel liegt im Tresor: Ist das Archiv abgeschlossen, kann ihn niemand lesen, auch der Admin nicht. Das Archiv liest damit nur, es ändert in Immich nichts.</p></details></section>`,
-		offenWenn(!hat), summary, strings.Join(rechte, ", "), knopf(knopfText, "Prüft den Schlüssel …", ""))
+%s</form><p class=hinweis>Der Schlüssel liegt im Tresor: Ist das Archiv abgeschlossen, kann ihn niemand lesen, auch der Admin nicht. Das Archiv liest damit nur, es ändert in Immich nichts.</p></details>`+quelleEnde,
+		offenWenn(true), summary, strings.Join(rechte, ", "), knopf(knopfText, "Prüft den Schlüssel …", ""))
 }
 
 // umfeldStandText says how far the round is, and what went wrong.
@@ -220,7 +232,7 @@ func (w *Web) umfeldSeiteMit(rw http.ResponseWriter, r *http.Request, code int, 
 		}
 		w.antwortenListe(&b, n, "/tresor/umfeld")
 		gruppenListe(&b, n, "/tresor/umfeld")
-		b.WriteString(w.toast(n, r.URL.Query().Get("getan"), "/tresor/umfeld"))
+		b.WriteString(w.toast(n, r.URL.Query().Get("getan"), zurueckNach(umfeldMitte(mitte))))
 		b.WriteString(toast)
 	}
 	fmt.Fprintf(&b, `<p class=hinweis>%s</p>`, esc(saysUmfeldHinweis))
@@ -243,10 +255,10 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 	case !ok || len(vs) == 0:
 		b.WriteString(`<p class=k>Zu dieser Person gibt es noch keine Verbindung.</p>`)
 		if ok && mitte != ich {
-			b.WriteString(umfeldAktionen(mitte))
+			b.WriteString(personAktionen(n, k))
 		}
 		if ok {
-			b.WriteString(beziehungDazu(n, k, true, ""))
+			b.WriteString(beziehungDazu(n, k, true, "", umfeldMitte(mitte)))
 		}
 	default:
 		titel := "Steht dir nahe"
@@ -260,11 +272,11 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 			fmt.Fprintf(b, `<p class=k><a href="%s">Wieder dich in die Mitte</a></p>`, esc(umfeldMitte(ich)))
 		}
 		if mitte != ich {
-			b.WriteString(umfeldAktionen(mitte))
+			b.WriteString(personAktionen(n, k))
 		}
 		b.WriteString(umfeldBild(n, k, vs))
 		b.WriteString(umfeldListe(n, k, vs))
-		b.WriteString(beziehungDazu(n, k, false, ""))
+		b.WriteString(beziehungDazu(n, k, false, "", umfeldMitte(mitte)))
 		if len(vs) == zeigen && !mehr {
 			fmt.Fprintf(b, `<p><a href="%s">Mehr zeigen</a></p>`, esc("/tresor/umfeld?"+url.Values{"mitte": {mitte}, "mehr": {"1"}}.Encode()))
 		}
@@ -308,6 +320,17 @@ func umfeldAktionen(id string) string {
 	}
 	return `<div class=aktionen>` + knopf(verbergenAus, "Ausblenden", "Blendet aus …", "") + knopf(verbergenNicht, "Nicht berechnen", "Nimmt heraus …", " class=leise") +
 		`</div><p class=k>Ausblenden zeigt die Person nicht mehr; Nicht berechnen nimmt sie auch aus den Verbindungen der anderen. Beides lässt sich zurückholen.</p>`
+}
+
+// personAktionen are the detail's actions on k: a person made by hand is
+// renamed or deleted (and may be one of the phone book), any other hidden.
+func personAktionen(n *Netz, k Knoten) string {
+	if !istAngelegt(k.ID) {
+		return umfeldAktionen(k.ID)
+	}
+	var b strings.Builder
+	dieselbeAbschnitt(&b, n, k.ID, umfeldMitte(k.ID))
+	return b.String() + angelegtAktionen(k)
 }
 
 // umfeldKnoepfe is a row's form: a button per art, posted with id.

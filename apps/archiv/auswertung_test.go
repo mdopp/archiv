@@ -274,7 +274,7 @@ func TestErkannt(t *testing.T) {
 	}
 	ut.u.laden(innen)
 	page := wt.rufe("GET", "/tresor", anna, nil).Body.String()
-	if !strings.Contains(page, `<a href="/tresor/erkannt">Erkannt: 1 Vorschlag</a>`) {
+	if !strings.Contains(page, `<a href="/tresor/erkannt">1 Vorschlag ansehen</a>`) {
 		t.Fatalf("the line:\n%s", page)
 	}
 	page = wt.rufe("GET", erkanntPfad, anna, nil).Body.String()

@@ -817,3 +817,41 @@ func TestTheStartIsTheWorkplace(t *testing.T) {
 		t.Fatalf("the closed page shows the hidden account field:\n%s", zu)
 	}
 }
+
+// The sources' page folds its forms (owner 2026-11-11): one line per
+// source, its state, a tap opens its card; nothing is open by itself, a
+// source set up shows its line only; after a failed save its card stays
+// open, the error in it, not on top of the page.
+func TestQuellenGefaltet(t *testing.T) {
+	wt := neuesWeb(t)
+	wt.oeffnen(t)
+	body := wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
+	for _, want := range []string{`<details id=q-signal><summary><h3>Signal</h3><span class=k>noch nicht eingerichtet</span></summary>`,
+		`<details id=q-mail><summary><h3>E-Mail</h3><span class=k>kein Postfach eingetragen</span></summary>`,
+		`<details id=q-whatsapp><summary><h3>WhatsApp</h3><span class=k>Schlüssel fehlt</span></summary>`,
+		`<details id=q-passkeys><summary><h3>Passkeys für dieses Archiv</h3><span class=k>noch keiner</span></summary>`,
+		`<section class=quelle id=karte-mail data-live>`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("Quellen lacks %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `<details id=q-signal open>`) || strings.Contains(body, `id=q-mail open`) {
+		t.Fatalf("a card is open by itself:\n%s", body)
+	}
+	// a failed save: its card open, the error in it, the form right there
+	rec := wt.rufe("POST", "/tresor/signal", anna, url.Values{"passphrase": {"12"}})
+	body = rec.Body.String()
+	karte := body[strings.Index(body, `<details id=q-signal open>`):]
+	if rec.Code != http.StatusBadRequest || !strings.HasPrefix(karte, `<details id=q-signal open><summary><h3>Signal</h3><span class=k>noch nicht eingerichtet</span></summary><p class="meldung fehler" role=alert>`+esc(saysSignalFormat)+`</p>`) ||
+		!strings.Contains(karte, `<details id=d-signal open>`) || strings.Count(body, esc(saysSignalFormat)) != 1 || strings.Contains(body, `id=q-mail open`) {
+		t.Fatalf("the failed card is not open with its error: %d\n%s", rec.Code, body)
+	}
+	// set up: its line only, folded
+	if rec := wt.rufe("POST", "/tresor/signal", anna, url.Values{"passphrase": {"12345 12345 12345 12345 12345 12345"}, "telefon": {"0049 151 1234567"}}); rec.Code != http.StatusSeeOther {
+		t.Fatalf("signal: %d %s", rec.Code, rec.Body)
+	}
+	body = wt.rufe("GET", "/tresor/quellen", anna, nil).Body.String()
+	if !strings.Contains(body, `<details id=q-signal><summary><h3>Signal</h3><span class=k>noch nichts im Archiv</span></summary>`) {
+		t.Fatalf("set up, the line:\n%s", body)
+	}
+}

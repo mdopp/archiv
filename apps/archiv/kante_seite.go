@@ -74,7 +74,7 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	a, b := q.Get("a"), q.Get("b")
+	a, b, zurueck := q.Get("a"), q.Get("b"), q.Get("zurueck")
 	for _, s := range []struct {
 		id   *string
 		name string
@@ -85,7 +85,7 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 		ks := n.Finden(s.name)
 		switch len(ks) {
 		case 0:
-			w.kanteWahl(rw, n, a, nil, saysKanteNiemand, s.name)
+			w.kanteWahl(rw, n, a, nil, saysKanteNiemand, s.name, zurueck)
 			return
 		case 1:
 			*s.id = ks[0].ID
@@ -93,7 +93,7 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 			if a == "" {
 				a = n.Ich()
 			}
-			w.kanteWahl(rw, n, a, ks, "", "")
+			w.kanteWahl(rw, n, a, ks, "", "", zurueck)
 			return
 		}
 	}
@@ -101,7 +101,7 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 		a = n.Ich()
 	}
 	if a != "" && a == b {
-		w.kanteWahl(rw, n, a, nil, saysKanteSichSelbst, "")
+		w.kanteWahl(rw, n, a, nil, saysKanteSichSelbst, "", zurueck)
 		return
 	}
 	if q.Get("a") != a || q.Get("b") != b { // found by name: the page's own address
@@ -114,9 +114,18 @@ func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
 // kanteWahl is „Welche Person meinst du?“: each of ks a link to its edge
 // with a, or (none) the sentence and the form again, the typed name
 // (gesucht) still in it, with the ways on: the name in the messages, and
-// back to the person the relation was for (owner 2026-11-11: no dead end).
-func (w *Web) kanteWahl(rw http.ResponseWriter, n *Netz, a string, ks []Knoten, fehler, gesucht string) {
+// back to the person the relation was for (owner 2026-11-11: no dead end);
+// first „<Name> anlegen“, one tap to make her with the relation, back to
+// zurueck (the page „Zu wem?“ was on; "" the person's).
+func (w *Web) kanteWahl(rw http.ResponseWriter, n *Netz, a string, ks []Knoten, fehler, gesucht, zurueck string) {
 	var b strings.Builder
+	gesucht = strings.TrimSpace(gesucht)
+	k, ok := n.Person(a)
+	zurueck = zurueckNach(cmp.Or(zurueck, umfeldMitte(a)))
+	if ok && fehler == saysKanteNiemand && klar(gesucht) != "" {
+		b.WriteString(anlegenAbschnitt(n, k, gesucht, zurueck))
+		fehler = ""
+	}
 	meldungenText(&b, "", fehler)
 	if len(ks) > 0 {
 		b.WriteString(`<section class=karte><h2>Welche Person meinst du?</h2><ul class=leute>`)
@@ -125,9 +134,8 @@ func (w *Web) kanteWahl(rw http.ResponseWriter, n *Netz, a string, ks []Knoten, 
 		}
 		b.WriteString(`</ul></section>`)
 	}
-	gesucht = strings.TrimSpace(gesucht)
-	if k, ok := n.Person(a); ok {
-		b.WriteString(beziehungDazu(n, k, true, gesucht))
+	if ok {
+		b.WriteString(beziehungDazu(n, k, true, gesucht, zurueck))
 		if gesucht != "" {
 			fmt.Fprintf(&b, `<p class=weiter-in><a href="%s">In den Nachrichten nach „%s“ suchen</a></p>`, esc(msgvaultSuche(gesucht)), esc(gesucht))
 		}
@@ -162,7 +170,7 @@ func (w *Web) kanteSeite(rw http.ResponseWriter, r *http.Request, code int, a, b
 		}
 		s.WriteString(`</ul></section>`)
 	}
-	s.WriteString(beziehungDazu(n, p.X, false, ""))
+	s.WriteString(beziehungDazu(n, p.X, false, "", hier))
 	seite(rw, code, "Was verbindet die beiden?", s.String(), "")
 }
 
@@ -337,11 +345,12 @@ func nachrichtAdresse(id string) string {
 // the net's names; the archive finds umlauts alike), then the edge page
 // of k and that person, where one tap sets the kind. offen: unfolded,
 // wert in the field. A tap on a suggested name goes on at once
-// (data-weiter: the field is all the form asks).
-func beziehungDazu(n *Netz, k Knoten, offen bool, wert string) string {
+// (data-weiter: the field is all the form asks); zurueck is the page it
+// is on, where a person made there comes back to.
+func beziehungDazu(n *Netz, k Knoten, offen bool, wert, zurueck string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, `<details class=karte id=dazu%s><summary>+ Beziehung von %s</summary><form method=get action="%s" class=feld data-weiter><input type=hidden name=a value="%s"><label>Zu wem?%s</label><button>Weiter</button></form>`,
-		offenWenn(offen), esc(map[bool]string{true: "dir", false: k.Name}[k.ID == n.Ich()]), kantePfad, esc(k.ID), namenFeld("wer", wert))
+	fmt.Fprintf(&b, `<details class=karte id=dazu%s><summary>+ Beziehung von %s</summary><form method=get action="%s" class=feld data-weiter><input type=hidden name=a value="%s"><input type=hidden name=zurueck value="%s"><label>Zu wem?%s</label><button>Weiter</button></form>`,
+		offenWenn(offen), esc(map[bool]string{true: "dir", false: k.Name}[k.ID == n.Ich()]), kantePfad, esc(k.ID), esc(zurueck), namenFeld("wer", wert))
 	b.WriteString(namenListe(n))
 	b.WriteString(`</details>`)
 	return b.String()
