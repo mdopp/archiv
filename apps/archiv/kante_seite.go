@@ -404,6 +404,8 @@ func gespraechZeile(p PaarSicht, g netzGespraech, letzte map[string]letzteNachri
 	switch {
 	case g.Art == gespraechMail:
 		titel = "Mail-Verlauf, " + anzahlT(g.Nachrichten, "Nachricht", "Nachrichten")
+	case g.Art == gespraechDirekt:
+		titel = "Zu zweit, " + anzahlT(g.Nachrichten, "Nachricht", "Nachrichten")
 	case titel == "":
 		titel = "Gruppe mit " + anzahl(g.Groesse, "Person", "Personen")
 	}

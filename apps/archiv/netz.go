@@ -20,7 +20,8 @@ import (
 // A photo day at one place is an event; a pair counts once per event,
 // less in a big group (1/(n-1)), less the longer ago (half-life
 // netzHalbwert), a little more for each year they meet in. A tie from
-// photos alone shows from two days on. The order divides by how often
+// photos alone needs two days that weigh belegMin together: two days
+// among five, never two weddings (belegt, naehe.go). The order divides by how often
 // both appear at all (hub), so a child on every photo is not close to all.
 // The phone books add the same address, the same company and a relation
 // a phone wrote (telefonbuch.go).
@@ -55,6 +56,7 @@ var firmenPlatzhalter = map[string]bool{"privat": true, "private": true, "keine"
 const (
 	verbergenAus   = "aus"
 	verbergenNicht = "nicht"
+	verbergenRuhe  = "ruhe" // not hidden: „Lange nichts gehört“ no longer names her (naehe.go)
 )
 
 // netzFoto is one photo of the table: its id, when (an instant), where,
@@ -132,14 +134,23 @@ type Kante struct {
 	Fest                 []festBand
 	Chats, Mails, Faeden int
 	Gruppen              []string
+	// Beleg is what photos, group chats and mail threads say undecayed, a
+	// big group little; Direkt the messages the two wrote each other alone;
+	// Kontakt the last time the archive saw them together (naehe.go)
+	Beleg   float64
+	Direkt  int
+	Kontakt time.Time
 }
 
-// belegt: the tie has the evidence a tie needs to show at all: two photo
-// days, something a phone book or the person says, or two conversations.
+// belegt: the tie has the evidence a tie needs to show at all: something a
+// phone book or the person says, a conversation of the two alone, or two
+// occasions (photo days, group chats, mail threads) that together weigh
+// belegMin: two days among five count, two weddings do not (naehe.go).
 // A shared company alone is none (owner 2026-11-11): it is a question
 // (fragen.go, kennenFragen), never a tie.
 func (k *Kante) belegt() bool {
-	return k.Tage >= netzMinTage || slices.ContainsFunc(k.Fest, func(f festBand) bool { return f.Art != bandFirma }) || k.Chats+k.Faeden >= gespraecheMin
+	return slices.ContainsFunc(k.Fest, func(f festBand) bool { return f.Art != bandFirma }) || k.Direkt >= direktMin ||
+		k.Tage+k.Chats+k.Faeden >= netzMinTage && k.Beleg >= belegMin-1e-9
 }
 
 // Netz is the person's contact net, built from a table.
@@ -198,6 +209,8 @@ type Netz struct {
 	// firmen are the pairs whose cards name one company, by paarKey: its
 	// ORG as written; a placeholder or one on many cards left out (festDazu)
 	firmen map[string]string
+	// ruhen are those „Lange nichts gehört“ no longer names, by node (naehe.go)
+	ruhen map[string]time.Time
 }
 
 // neuesNetz builds the net of st with the hidden ones and the answers.
@@ -238,6 +251,8 @@ type ereignis struct {
 // paar is a pair as it is summed up.
 type paar struct {
 	s, ueber    float64 // ueber: shared events over both's, geometric
+	roh         float64 // s without the decay: what the days say at all (Kante.Beleg)
+	zuletzt     time.Time
 	tage, jahre map[string]bool
 	geteilt     int
 	seit        int
@@ -275,16 +290,14 @@ func (n *Netz) bauen() {
 	n.selbstBauen()
 	alle := map[[2]string]*Kante{}
 	for key, p := range n.fotoPaare(nicht) {
-		if len(p.tage) >= netzMinTage {
-			s := p.s + netzJahrBonus*float64(len(p.jahre))
-			alle[key] = &Kante{A: key[0], B: key[1], Staerke: s, Rang: s * (0.25 + 0.75*p.ueber), Tage: len(p.tage), Seit: p.seit}
-		}
+		s := p.s + netzJahrBonus*float64(len(p.jahre))
+		alle[key] = &Kante{A: key[0], B: key[1], Staerke: s, Rang: s * (0.25 + 0.75*p.ueber), Tage: len(p.tage), Seit: p.seit, Beleg: p.roh, Kontakt: p.zuletzt}
 	}
 	n.festDazu(alle, nicht)
 	n.musterDazu(alle, nicht)
 	n.gespraecheDazu(alle, nicht)
 	n.gesagtDazu(alle, nicht)
-	maps.DeleteFunc(alle, func(_ [2]string, k *Kante) bool { return !k.belegt() }) // a company alone, perhaps with one chat
+	maps.DeleteFunc(alle, func(_ [2]string, k *Kante) bool { return !k.belegt() }) // a company alone, two weddings, two class chats
 	n.merkmaleBauen()
 	n.suchBauen()
 	for _, k := range alle {
@@ -314,7 +327,8 @@ func (n *Netz) fotoPaare(nicht map[string]bool) map[[2]string]*paar {
 	for _, e := range evs {
 		wer := slices.Sorted(maps.Keys(e.wer))
 		alter := max(0, n.now().Sub(e.t).Hours()) / netzHalbwert.Hours()
-		w := math.Pow(0.5, alter) / float64(max(1, len(wer)-1))
+		roh := 1 / float64(max(1, len(wer)-1))
+		w := math.Pow(0.5, alter) * roh
 		for i, a := range wer {
 			je[a]++
 			for _, b := range wer[i+1:] {
@@ -323,7 +337,10 @@ func (n *Netz) fotoPaare(nicht map[string]bool) map[[2]string]*paar {
 					p = &paar{tage: map[string]bool{}, jahre: map[string]bool{}, seit: e.jahr}
 					paare[[2]string{a, b}] = p
 				}
-				p.s, p.geteilt, p.seit = p.s+w, p.geteilt+1, min(p.seit, e.jahr)
+				p.s, p.roh, p.geteilt, p.seit = p.s+w, p.roh+roh, p.geteilt+1, min(p.seit, e.jahr)
+				if e.t.After(p.zuletzt) {
+					p.zuletzt = e.t
+				}
 				p.tage[e.tag], p.jahre[strconv.Itoa(e.jahr)] = true, true
 			}
 		}
@@ -458,7 +475,8 @@ func andererVon(e *Kante, id string) string {
 	return e.A
 }
 
-// Nahe are the k ties of id ranked first, those hidden left out.
+// Nahe are the k ties of id ranked first, those hidden left out: the
+// closer step first (Kante.stufe), within it the higher Rang.
 func (n *Netz) Nahe(id string, k int) []Verbindung {
 	if n == nil {
 		return nil
@@ -473,7 +491,7 @@ func (n *Netz) Nahe(id string, k int) []Verbindung {
 		}
 	}
 	slices.SortFunc(out, func(a, b Verbindung) int {
-		return cmp.Or(cmp.Compare(b.Kante.Rang, a.Kante.Rang), strings.Compare(a.Mit.Name, b.Mit.Name))
+		return cmp.Or(cmp.Compare(b.Kante.stufe(), a.Kante.stufe()), cmp.Compare(b.Kante.Rang, a.Kante.Rang), strings.Compare(a.Mit.Name, b.Mit.Name))
 	})
 	return out[:min(k, len(out))]
 }

@@ -354,8 +354,8 @@ func TestNetzGruppeUndHub(t *testing.T) {
 		{T: time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC), Stadt: "Rom", Wer: []string{"x1", "x2"}}, {T: time.Date(2025, 2, 1, 12, 0, 0, 0, time.UTC), Stadt: "Rom", Wer: []string{"x1", "x2"}}}
 	n.bauen()
 	x := n.Nahe("x1", 10)
-	if x[0].Mit.ID != "x2" || x[1].Kante.Staerke >= x[0].Kante.Staerke/2 {
-		t.Fatalf("x1: %v %+v", namenVon(x), x[:2])
+	if len(x) != 1 || x[0].Mit.ID != "x2" { // two days among ten are no tie (belegMin): only the two days alone
+		t.Fatalf("x1: %v", namenVon(x))
 	}
 }
 
@@ -367,7 +367,7 @@ func TestUmfeldJedeRundeNeu(t *testing.T) {
 	*ut.jetzt = ut.jetzt.Add(time.Hour)
 	ut.u.Runde(t.Context(), ut.innen)
 	n := ut.u.Netz()
-	if got := n.Nahe("p-anna", 10)[0]; got.Mit.ID != "p-ben" || got.Kante.Tage != 0 || n.Gruende("p-anna", got.Kante) != "Gleiche Adresse auf beiden Karten: Gartenweg 2 · Deine Karte nennt Ben Berg als Ehepartner/in" { // one day left: the phone book's only
+	if got := n.Nahe("p-anna", 10)[0]; got.Mit.ID != "p-ben" || got.Kante.Tage != 1 || n.Gruende("p-anna", got.Kante) != "1 Tag auf deinen Fotos seit 2025 · Gleiche Adresse auf beiden Karten: Gartenweg 2 · Deine Karte nennt Ben Berg als Ehepartner/in" { // one day left: no tie by itself, said beside the phone book's
 		t.Fatalf("after a round: %+v", got)
 	}
 	again := &Umfeld{URL: ut.u.URL, Loc: time.UTC, Now: ut.u.Now}
@@ -574,7 +574,7 @@ func TestUmfeldSeite(t *testing.T) {
 	ben := wt.rufe("GET", "/tresor/umfeld?mitte=p-ben", anna, nil).Body.String()
 	for _, want := range []string{`<details class=karte id=verbergen><summary>Ausblenden …</summary><div class=aktionen>`, `name=id value="p-ben"><button name=art value="aus"`, `<button class=leise name=art value="nicht"`, "Beides lässt sich zurückholen.",
 		// who Ben is to her first, then what the two share in one sentence, then the one way on (owner 2026-11-11)
-		`<section class=person id=person><div class=wer-ist>`, `<h2>Ben Berg</h2>`, `<p class=ist>Für dich: Partner/in · sehr nah (Nr. 1 von 3) · zuletzt gemeinsam am 24.12.2025</p>`, `Gemeinsame Bekannte: <a href="/tresor/umfeld?mitte=p-kim">Kim Berg</a>`,
+		`<section class=person id=person><div class=wer-ist>`, `<h2>Ben Berg</h2>`, `<p class=ist>Für dich: Partner/in · sehr nah · zuletzt gemeinsam am 24.12.2025</p>`, `Gemeinsame Bekannte: <a href="/tresor/umfeld?mitte=p-kim">Kim Berg</a>`,
 		`<p class=summe>4 gemeinsame Fotos (2019–2025, zuletzt im Dezember)</p>`, `<a class=weiter href="/tresor/kante?a=p-ben&amp;b=p-anna">Was verbindet euch?</a>`,
 		// Ben's list: a name always opens that person's page; „mit Ben ›“ after it what connects the two (owner 2026-11-11)
 		`<li><a class=zeile href="/tresor/umfeld?mitte=p-kim">Kim Berg <span class=k>2 Tage auf deinen Fotos seit 2019</span></a><a class=paar href="/tresor/kante?a=p-ben&amp;b=p-kim">mit Ben ›</a></li>`} {
@@ -582,7 +582,7 @@ func TestUmfeldSeite(t *testing.T) {
 			t.Fatalf("Ben's detail lacks %q:\n%s", want, ben)
 		}
 	}
-	for _, order := range [][2]string{{"<section class=person", "<h3>Steht Ben Berg nahe</h3>"}, {"<ol class=nahe>", "id=verbergen"}} {
+	for _, order := range [][2]string{{"<section class=person", "<h3>Steht Ben Berg nahe</h3>"}, {"<ul class=nahe>", "id=verbergen"}} {
 		if i, j := strings.Index(ben, order[0]), strings.Index(ben, order[1]); i < 0 || j < i {
 			t.Fatalf("%q not before %q:\n%s", order[0], order[1], ben)
 		}

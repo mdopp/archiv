@@ -23,7 +23,7 @@ import (
 // restorable. Only while the vault is open; closed, the locked page.
 
 const (
-	umfeldZeigen = 30 // in the picture; „Mehr zeigen“ doubles it
+	umfeldZeigen = 30 // in the picture; the list has everybody
 
 	saysUmfeldGespeichert = "Gespeichert. Das Archiv liest jetzt deine Fotos aus Immich und rechnet dein Umfeld; bei vielen Fotos dauert das ein paar Minuten."
 	saysSucheNiemand      = "Niemanden mit diesem Namen gefunden. Zu finden ist, wer in deinen Telefonbüchern steht oder auf deinen Fotos einen Namen hat."
@@ -159,7 +159,7 @@ func (w *Web) umfeldVerbergen(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id, art, mitte := r.PostFormValue("id"), r.PostFormValue("art"), r.PostFormValue("mitte")
-	gesagt := map[string]string{verbergenAus: "%s ausgeblendet", verbergenNicht: "%s wird nicht mehr berechnet", "": "%s ist wieder da."}
+	gesagt := map[string]string{verbergenAus: "%s ausgeblendet", verbergenNicht: "%s wird nicht mehr berechnet", verbergenRuhe: "An %s erinnert das Archiv nicht mehr", "": "%s ist wieder da."}
 	satz, erlaubt := gesagt[art]
 	n := w.Umfeld.Netz()
 	if !erlaubt || id == "" || n == nil {
@@ -167,7 +167,11 @@ func (w *Web) umfeldVerbergen(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	k, bekannt := n.Person(id)
-	if err := w.Umfeld.Verbergen(innen, id, art); err != nil {
+	err := w.Umfeld.Ruhen(innen, id, art == verbergenRuhe) // Rückgängig and Zurückholen name her again
+	if err == nil && art != verbergenRuhe {
+		err = w.Umfeld.Verbergen(innen, id, art)
+	}
+	if err != nil {
 		log.Printf("archiv: Umfeld verbergen: %v", err)
 		w.umfeldSeite(rw, r, http.StatusInternalServerError, mitte, "", saysUmfeldVerbergen)
 		return
@@ -232,7 +236,7 @@ func (w *Web) umfeldSeiteMit(rw http.ResponseWriter, r *http.Request, code int, 
 	b.WriteString(`</div><div id=umfeld-netz data-live>`)
 	n := u.Netz()
 	if n != nil {
-		w.umfeldNetz(&b, n, mitte, r.URL.Query().Get("mehr") != "")
+		w.umfeldNetz(&b, n, mitte)
 	} else if hat {
 		b.WriteString(`<p class=k>Noch kein Umfeld. Sobald das Archiv deine Fotos gelesen hat, erscheint es hier.</p>`)
 	}
@@ -315,23 +319,19 @@ func personenZeilen(b *strings.Builder, n *Netz, ts []Treffer) {
 }
 
 // umfeldNetz is „Steht nahe“ around mitte: the picture, the list, the hidden.
-func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
+func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string) {
 	ich := n.Ich()
 	mitte = cmp.Or(mitte, n.Mitte())
-	zeigen := umfeldZeigen
-	if mehr {
-		zeigen *= 2
-	}
 	k, ok := n.Person(mitte)
-	vs := n.Nahe(mitte, zeigen)
+	vs := n.Nahe(mitte, 1<<30)
 	if ok && ich != "" && mitte != ich {
 		umfeldKopf(b, n, k)
 	}
 	switch {
 	case mitte == "":
-		b.WriteString(`<p class=k>Noch keine Verbindungen: Ein Paar zählt, sobald es an zwei Tagen zusammen auf deinen Fotos ist oder die Telefonbücher etwas über die beiden sagen.</p>`)
+		b.WriteString(`<p class=k>Noch keine Verbindungen: Ein Paar zählt, sobald es an zwei Tagen im kleinen Kreis zusammen auf deinen Fotos ist oder die Telefonbücher etwas über die beiden sagen.</p>`)
 	case !ok || len(vs) == 0:
-		b.WriteString(`<p class=k>Im Umfeld steht diese Person noch nicht: Dafür braucht es zwei gemeinsame Fototage, einen Eintrag im Telefonbuch oder eine Beziehung von dir.</p>`)
+		b.WriteString(`<p class=k>Im Umfeld steht diese Person noch nicht: Dafür braucht es zwei gemeinsame Fototage im kleinen Kreis, einen Eintrag im Telefonbuch oder eine Beziehung von dir.</p>`)
 		if ok {
 			b.WriteString(beziehungDazu(n, k, true, "", umfeldMitte(mitte)))
 		}
@@ -347,14 +347,14 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 		if ich == "" {
 			b.WriteString(`<p class=k>Deine eigene Karte hat das Archiv in den Telefonbüchern nicht gefunden (es sucht die E-Mail deines Immich-Kontos und deine Nummer); in der Mitte steht deshalb, wer die meisten Verbindungen hat.</p>`)
 		}
-		b.WriteString(umfeldBild(n, k, vs))
-		if len(vs) > umfeldBildHoechstens {
-			fmt.Fprintf(b, `<p class=k>Im Bild die nächsten %d, alle %d in der Liste.</p>`, umfeldBildHoechstens, len(vs))
+		b.WriteString(umfeldBild(n, k, vs[:min(len(vs), umfeldZeigen)]))
+		if len(vs) > umfeldZeigen {
+			fmt.Fprintf(b, `<p class=k>Im Bild die nächsten %d, alle %d in der Liste.</p>`, umfeldZeigen, len(vs))
+		}
+		if mitte == ich {
+			b.WriteString(stilleListe(n))
 		}
 		b.WriteString(umfeldListe(n, k, vs))
-		if len(vs) == zeigen && !mehr {
-			fmt.Fprintf(b, `<p><a href="%s">Mehr zeigen</a></p>`, esc("/tresor/umfeld?"+url.Values{"mitte": {mitte}, "mehr": {"1"}}.Encode()))
-		}
 		b.WriteString(beziehungDazu(n, k, false, "", umfeldMitte(mitte)))
 		if mitte != ich {
 			b.WriteString(personAktionen(n, k))
@@ -396,21 +396,18 @@ func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
 	if p.Art != "" {
 		teile, weiter = []string{"Für dich: " + map[bool]string{true: fremdWort(true), false: artJetzt(p.Art)}[p.Art == artFremd]}, "Was verbindet euch?"
 	}
-	if platz, von := n.Platz(k.ID); platz > 0 {
-		wie := "lose verbunden"
-		switch {
-		case platz <= max(1, von/5):
-			wie = "sehr nah"
-		case platz <= max(2, von/2):
-			wie = "nah"
-		}
-		teile = append(teile, fmt.Sprintf("%s (Nr. %d von %d)", wie, platz, von))
+	if platz, _ := n.Platz(k.ID); platz > 0 {
+		teile = append(teile, p.Kante.Stufe()) // by what the archive holds, not by her place among von
 	}
 	if z := p.Gemeinsam.Zuletzt; !z.IsZero() {
 		teile = append(teile, "zuletzt gemeinsam am "+z.In(cmp.Or(n.Loc, time.Local)).Format("02.01.2006"))
 	}
-	fmt.Fprintf(b, `<p class=ist>%s</p><p class=summe>%s</p>%s<p><a class=weiter href="%s">%s</a></p></section>`, esc(strings.Join(teile, " · ")),
+	fmt.Fprintf(b, `<p class=ist>%s</p><p class=summe>%s</p>%s<p><a class=weiter href="%s">%s</a></p>`, esc(strings.Join(teile, " · ")),
 		esc(cmp.Or(p.Satz, saysKanteNichts)), bekannteZeile(n, p.Bekannte), esc(kanteAdresse(k.ID, n.Ich())), weiter)
+	if slices.ContainsFunc(n.Stille(), func(s Still) bool { return s.Mit.ID == k.ID }) {
+		b.WriteString(`<p class=k>Lange nichts gehört.` + umfeldKnoepfe("", k.ID, verbergenRuhe) + `</p>`)
+	}
+	b.WriteString(`</section>`)
 }
 
 // umfeldListe is the ranked list: each row the person and the tie in one
@@ -420,17 +417,51 @@ func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
 // the row's and the middle. No action on the
 // row (owner 2026-11-11: „gefährlich platziert, dicke Finger“): Ausblenden
 // and Nicht berechnen are at the end of the person's page (umfeldAktionen).
+//
+// The list is in the steps of naehe.go, each with its count: „Sehr nah“
+// and „Nah“ open, „Bekannt“ folded (owner 2026-11-11: fewer, better
+// statements over many weak ones).
 func umfeldListe(n *Netz, mitte Knoten, vs []Verbindung) string {
 	var b strings.Builder
-	b.WriteString(`<ol class=nahe>`)
-	for _, v := range vs {
-		paar := ""
-		if mitte.ID != n.Ich() {
-			paar = fmt.Sprintf(`<a class=paar href="%s">mit %s ›</a>`, esc(kanteAdresse(mitte.ID, v.Mit.ID)), esc(rufname(mitte.Name)))
+	for _, stufe := range []int{stufeSehrNah, stufeNah, stufeBekannt} {
+		var zeilen strings.Builder
+		anzahl := 0
+		for _, v := range vs {
+			if v.Kante.stufe() != stufe {
+				continue
+			}
+			anzahl++
+			paar := ""
+			if mitte.ID != n.Ich() {
+				paar = fmt.Sprintf(`<a class=paar href="%s">mit %s ›</a>`, esc(kanteAdresse(mitte.ID, v.Mit.ID)), esc(rufname(mitte.Name)))
+			}
+			fmt.Fprintf(&zeilen, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a>%s</li>`, esc(umfeldMitte(v.Mit.ID)), esc(n.Anzeige(v.Mit)), esc(n.Kurz(mitte.ID, v.Kante)), paar)
 		}
-		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a>%s</li>`, esc(umfeldMitte(v.Mit.ID)), esc(n.Anzeige(v.Mit)), esc(n.Kurz(mitte.ID, v.Kante)), paar)
+		titel := fmt.Sprintf("%s (%d)", map[int]string{stufeSehrNah: "Sehr nah", stufeNah: "Nah", stufeBekannt: "Bekannt"}[stufe], anzahl)
+		switch {
+		case anzahl == 0:
+		case stufe == stufeBekannt:
+			fmt.Fprintf(&b, `<details class=stufe><summary>%s</summary><ul class=nahe>%s</ul></details>`, titel, zeilen.String())
+		default:
+			fmt.Fprintf(&b, `<h4 class=stufe>%s</h4><ul class=nahe>%s</ul>`, titel, zeilen.String())
+		}
 	}
-	b.WriteString(`</ol>`)
+	return b.String()
+}
+
+// stilleListe is „Lange nichts gehört“ (Netz.Stille): each a link to the
+// person's page, where „Nicht mehr erinnern“ is; "" for nobody.
+func stilleListe(n *Netz) string {
+	ss := n.Stille()
+	if len(ss) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString(`<section class="karte still"><h4>Lange nichts gehört</h4><ul class=nahe>`)
+	for _, s := range ss {
+		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a></li>`, esc(umfeldMitte(s.Mit.ID)), esc(s.Mit.Name), esc(stillGrund(s, n.Loc)))
+	}
+	b.WriteString(`</ul></section>`)
 	return b.String()
 }
 
@@ -457,7 +488,7 @@ func personAktionen(n *Netz, k Knoten) string {
 
 // umfeldKnoepfe is a row's form: a button per art, posted with id.
 func umfeldKnoepfe(mitte, id string, arten ...string) string {
-	text := map[string][2]string{verbergenAus: {"Ausblenden", "Blendet aus …"}, verbergenNicht: {"Nicht berechnen", "Nimmt heraus …"}, "": {"Zurückholen", "Holt zurück …"}}
+	text := map[string][2]string{verbergenAus: {"Ausblenden", "Blendet aus …"}, verbergenNicht: {"Nicht berechnen", "Nimmt heraus …"}, verbergenRuhe: {"Nicht mehr erinnern", "Merkt es sich …"}, "": {"Zurückholen", "Holt zurück …"}}
 	out := `<form method=post action="/tresor/umfeld/verbergen" class=knoepfe><input type=hidden name=mitte value="` + esc(mitte) + `"><input type=hidden name=id value="` + esc(id) + `">`
 	for _, art := range arten {
 		out += `<button class=k name=art value="` + art + `" data-laeuft="` + esc(text[art][1]) + `">` + esc(text[art][0]) + `</button>`
@@ -482,6 +513,10 @@ func umfeldBild(n *Netz, mitte Knoten, vs []Verbindung) string {
 	ringe := [][2]int{{0, len(vs)}}
 	if len(vs) > bildEinRing {
 		ringe = [][2]int{{0, len(vs) / 5}, {len(vs) / 5, len(vs) / 2}, {len(vs) / 2, len(vs)}}
+	}
+	staerkste := 0.0
+	for _, v := range vs {
+		staerkste = max(staerkste, v.Kante.Staerke)
 	}
 	r := 0.0
 	for ring, rg := range ringe {
@@ -513,7 +548,7 @@ func umfeldBild(n *Netz, mitte Knoten, vs []Verbindung) string {
 		fmt.Fprintf(&s, `<line class=zw x1="%.1f" y1="%.1f" x2="%.1f" y2="%.1f"/>`, xy[p[0]][0], xy[p[0]][1], xy[p[1]][0], xy[p[1]][1])
 	}
 	for i, v := range vs {
-		fmt.Fprintf(&s, `<line x1="0" y1="0" x2="%.1f" y2="%.1f" stroke-width="%.1f"/>`, xy[i][0], xy[i][1], 0.5+2.5*v.Kante.Staerke/vs[0].Kante.Staerke)
+		fmt.Fprintf(&s, `<line x1="0" y1="0" x2="%.1f" y2="%.1f" stroke-width="%.1f"/>`, xy[i][0], xy[i][1], 0.5+2.5*v.Kante.Staerke/max(staerkste, 1e-9))
 	}
 	for i, v := range vs {
 		s.WriteString(umfeldPunkt(v.Mit, punkte[i+1]))

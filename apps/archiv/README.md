@@ -874,10 +874,35 @@ inside the open vault; closed, there is no net, not even in memory.
 - **Weights**: each conversation counts for each pair in it 2 (chat) or
   0.5 (mail) over size−1, halved every 4 years since its last message; a
   pair gets at most 2 from chats and mail together (below a phone book's
-  relation, 3), added to strength and rank. A tie from chats and mail
-  alone shows from two conversations on. The reasons say „in 3
+  relation, 3), added to strength and rank. The reasons say „in 3
   Gruppen-Chats“, „12 Mails zusammen“ (the messages of the threads both
   are in).
+- **What makes a tie** (`naehe.go`, owner 2026-11-11: fewer, truer
+  statements): a phone book or the person says so, or at least two
+  occasions (photo days, group chats, mail threads) whose weights without
+  the decay add up to 0.5, each 1 (photo day), 2 (chat) or 0.5 (thread)
+  over size−1. Two photo days among five, two chats of nine or two
+  threads of three are a tie; two weddings, two class chats of thirty or
+  two mails with eight in copy are not: the pair's page still counts
+  them. A thread only one of its people wrote in (the statement's
+  `sender`) is no conversation.
+- **The chat of two**: the statement reads the person's chats with one
+  other too (size 2, kind `direkt` in `netz.json`): a tie from 10
+  messages on when both wrote, up to 3 added to strength and rank (10
+  messages 1, 100 2, 1000 3, halved every 4 years), the reason „840
+  Nachrichten zu zweit“. Only counts and the last time are kept.
+- **How close**: points per channel — photo days (2 days 1, 12 days 2),
+  the chat of two (10 messages 1, 300 2), shared chats and threads (1),
+  a phone book or the person (partner, parents, children, siblings,
+  grandparents 3; another relation or a card's name 1) and one address
+  (2). 5 points are „sehr nah“, 3 „nah“, less „bekannt“; the list is in these
+  steps, „Bekannt“ folded, within a step by rank.
+- **„Lange nichts gehört“**: up to three of the person's ties that are
+  nah or sehr nah, not of her address, whose last photo day or message
+  in a conversation of at most six is two years or more ago, each with
+  when and what there was. Shown only once a chat of two was read
+  (without them the archive cannot tell silence). „Nicht mehr erinnern“
+  on the person's page keeps it in the vault (`umfeld/ruhen.json`).
 - `archiv umfeld-gespraeche -sql` prints the statement as msgvault's
   request body; `archiv umfeld-gespraeche < antwort.json` reads an answer
   as a round does (`integration.sh` runs both against the real msgvault).

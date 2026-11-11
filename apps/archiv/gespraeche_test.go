@@ -27,7 +27,7 @@ type fakeAbfrage struct {
 	sql    []string
 }
 
-var abfrageSpalten = []string{"gespraech", "art", "titel", "groesse", "nachrichten", "zuletzt", "liste", "teilnehmer", "telefon", "mail"}
+var abfrageSpalten = []string{"gespraech", "art", "titel", "groesse", "nachrichten", "zuletzt", "liste", "sender", "teilnehmer", "telefon", "mail"}
 
 func neueAbfrage(t *testing.T) (*fakeAbfrage, *MsgvaultAPI) {
 	f := &fakeAbfrage{status: http.StatusOK}
@@ -59,9 +59,10 @@ func neueAbfrage(t *testing.T) (*fakeAbfrage, *MsgvaultAPI) {
 	return f, &MsgvaultAPI{Port: port, Key: func() string { return "vault-key" }}
 }
 
-// abfrageZeile is one row: conversation, kind, title, size, messages, last, list, participant, phone, mail.
+// abfrageZeile is one row: conversation, kind, title, size, messages, last, list, participant, phone, mail;
+// two of its people wrote.
 func abfrageZeile(g, art, titel string, groesse, nachrichten int, zuletzt string, liste bool, wer, tel, mail string) []any {
-	return []any{g, art, titel, groesse, nachrichten, zuletzt, liste, wer, tel, mail}
+	return []any{g, art, titel, groesse, nachrichten, zuletzt, liste, 2, wer, tel, mail}
 }
 
 func gespraechsKarten() []buchKarte {
@@ -200,7 +201,7 @@ func TestGespraecheLesen(t *testing.T) {
 		t.Fatalf("%+v %v", gs, err)
 	}
 	sql := f.sql[0]
-	if !strings.HasPrefix(sql, "WITH ") || strings.Count(sql, ";") != 0 || !strings.Contains(sql, "BETWEEN 3 AND 30") || !strings.Contains(sql, "BETWEEN 2 AND 10") {
+	if !strings.HasPrefix(sql, "WITH ") || strings.Count(sql, ";") != 0 || !strings.Contains(sql, "BETWEEN 2 AND 30") || !strings.Contains(sql, "count(DISTINCT sender_id) AS sender") || !strings.Contains(sql, "BETWEEN 2 AND 10") {
 		t.Fatalf("the statement: %s", sql)
 	}
 	for _, s := range []int{http.StatusAccepted, http.StatusServiceUnavailable} {
@@ -353,7 +354,7 @@ func TestGespraecheWerkzeug(t *testing.T) {
 		abfrageZeile("9", "chat", "Zwei", 2, 2, "2026-10-01T08:00:00Z", false, "3", "+4915111111111", ""),
 	}})
 	b.Reset()
-	if gespraecheWerkzeug(nil, strings.NewReader(string(antwort)), &b) != 0 || b.String() != "chat 3 1 false Familie\nmail 2 2 false\n" {
+	if gespraecheWerkzeug(nil, strings.NewReader(string(antwort)), &b) != 0 || b.String() != "chat 3 1 false Familie\nmail 2 2 false\ndirekt 2 2 false 2\n" { // a chat of two with its senders
 		t.Fatalf("read: %q", b.String())
 	}
 }

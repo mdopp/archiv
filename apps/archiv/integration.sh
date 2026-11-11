@@ -281,6 +281,7 @@ echo "$gespraeche"
 # the MMS of three (Ben, the owner, a third) is a group; the SMS with Anna (two) is none; Ben's two mails to Anna are threads of two
 grep -qx "chat 3 1 false Familie" <<<"$gespraeche" || { cat "$D/gespraeche-antwort.json"; fail "the MMS group of three is not a group chat"; }
 if grep -q '^chat 2 ' <<<"$gespraeche"; then fail "a chat of two counted as a group"; fi
+grep -Eq '^direkt 2 [0-9]+ false [0-9]+$' <<<"$gespraeche" || { cat "$D/gespraeche-antwort.json"; fail "the SMS with Anna is no chat of two with its senders"; }
 grep -q "^mail 2 [12] false$" <<<"$gespraeche" || { cat "$D/gespraeche-antwort.json"; fail "Ben's mails to Anna are no thread of two"; }
 
 echo "Umfeld (archiv#27): the statement for messages with a relation word, against the real msgvault's views"
