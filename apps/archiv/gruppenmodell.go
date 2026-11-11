@@ -275,3 +275,33 @@ func (u *Umfeld) gruppenRunde(ctx context.Context, innen Innen, n *Netz) {
 		log.Printf("archiv: Umfeld: %d Gruppen vom Modell der Box eingeordnet", gelesenJetzt)
 	}
 }
+
+// gruppenWerkzeug is `archiv umfeld-gruppen`: with -sql id… it prints the
+// body msgvault's POST /api/v1/query takes for those groups' newest
+// messages; without, it reads msgvault's answer on stdin as a round does
+// and prints one line per conversation: its id and how many texts. No text.
+func gruppenWerkzeug(args []string, ein io.Reader, aus io.Writer) int {
+	if len(args) > 0 && args[0] == "-sql" {
+		ids := nurIDs(args[1:])
+		if len(ids) == 0 {
+			fmt.Fprintln(aus, "keine Gesprächs-ids")
+			return 2
+		}
+		json.NewEncoder(aus).Encode(map[string]string{"sql": gruppenProbenSQL(ids)})
+		return 0
+	}
+	var r abfrageAntwort
+	if err := json.NewDecoder(ein).Decode(&r); err != nil {
+		fmt.Fprintln(aus, "keine Antwort von msgvault:", err)
+		return 1
+	}
+	ps, err := probenLesen(r)
+	if err != nil {
+		fmt.Fprintln(aus, err)
+		return 1
+	}
+	for _, id := range slices.Sorted(maps.Keys(ps)) {
+		fmt.Fprintf(aus, "%s texte=%d\n", id, len(ps[id]))
+	}
+	return 0
+}

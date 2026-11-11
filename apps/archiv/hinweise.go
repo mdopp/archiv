@@ -713,13 +713,16 @@ func modellAus(getenv func(string) string) *Modell {
 // hinweiseWerkzeug is `archiv umfeld-hinweise`: with -sql it prints the
 // body msgvault's POST /api/v1/query takes for the messages with a
 // relation word (-wort w: with that one word instead of the file's, for
-// integration.sh's fixtures); without, it reads msgvault's answer on
+// integration.sh's fixtures; -geburtstag: the birthday wishes'); without, it reads msgvault's answer on
 // stdin as a round does and prints each message as one line: kind, sent
 // by the person, how many senders and recipients, its relation words. No
 // text, no number, no address.
 func hinweiseWerkzeug(args []string, ein io.Reader, aus io.Writer) int {
 	if slices.Contains(args, "-sql") {
 		muster := woerter.muster()
+		if slices.Contains(args, "-geburtstag") { // the birthday wishes' statement (geburtstage.go)
+			muster = gebWuensche
+		}
 		if i := slices.Index(args, "-wort"); i >= 0 && i+1 < len(args) && nurWort.MatchString(args[i+1]) {
 			muster = `(^|\PL)(` + strings.ToLower(args[i+1]) + `)(\PL|$)`
 		}

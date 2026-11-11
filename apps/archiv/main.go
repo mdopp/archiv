@@ -48,6 +48,9 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "umfeld-kante" {
 		os.Exit(kanteWerkzeug(os.Args[2:], os.Stdin, os.Stdout))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "umfeld-gruppen" {
+		os.Exit(gruppenWerkzeug(os.Args[2:], os.Stdin, os.Stdout))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "umfeld-hinweise" {
 		os.Exit(hinweiseWerkzeug(os.Args[2:], os.Stdin, os.Stdout))
 	}
