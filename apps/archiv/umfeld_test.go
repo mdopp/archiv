@@ -555,7 +555,8 @@ func TestUmfeldSeite(t *testing.T) {
 	ut.u.laden(innen)
 
 	page := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String()
-	for _, want := range []string{"<h3>Steht dir nahe</h3>", `<svg class=netzbild`, `<a class=zeile href="/tresor/umfeld?mitte=p-ben">Ben Berg <span class=k>3 Tage auf deinen Fotos seit 2019 · gleiche Adresse · Ehepartner/in (Telefonbuch)</span></a>`,
+	for _, want := range []string{"<h3>Steht dir nahe</h3>", `<svg class=netzbild`, `<a class=zeile href="/tresor/umfeld?mitte=p-ben">Ben Berg <span class=k>Partner/in · 3 Tage auf deinen Fotos seit 2019 · gleiche Adresse</span></a></li>`,
+		`<form method=get action="/tresor/umfeld" role=search class=person-suche data-weiter><input type=search name=suche list=namen data-namen`,
 		"Zuletzt gerechnet um", `id=umfeld-netz data-live`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
@@ -568,10 +569,23 @@ func TestUmfeldSeite(t *testing.T) {
 		t.Fatal("not ranked")
 	}
 	ben := wt.rufe("GET", "/tresor/umfeld?mitte=p-ben", anna, nil).Body.String()
-	for _, want := range []string{`<div class=aktionen>`, `name=id value="p-ben"><button name=art value="aus"`, `<button class=leise name=art value="nicht"`, "Beides lässt sich zurückholen."} {
+	for _, want := range []string{`<details class=karte id=verbergen><summary>Ausblenden …</summary><div class=aktionen>`, `name=id value="p-ben"><button name=art value="aus"`, `<button class=leise name=art value="nicht"`, "Beides lässt sich zurückholen.",
+		// who Ben is to her first, then what the two share in one sentence, then the one way on (owner 2026-11-11)
+		`<section class=person id=person><div class=wer-ist>`, `<h2>Ben Berg</h2>`, `<p class=ist>Für dich: Partner/in · sehr nah (Nr. 1 von 4) · zuletzt gemeinsam am 24.12.2025</p>`,
+		`<p class=summe>4 gemeinsame Fotos (2019–2025, zuletzt im Dezember)</p>`, `<a class=weiter href="/tresor/kante?a=p-ben&amp;b=p-anna">Was verbindet euch?</a>`,
+		// Ben's list: a row opens what connects Ben and that one
+		`<a class=zeile href="/tresor/kante?a=p-ben&amp;b=p-kim">Kim Berg <span class=k>2 Tage auf deinen Fotos seit 2019</span></a></li>`} {
 		if !strings.Contains(ben, want) {
 			t.Fatalf("Ben's detail lacks %q:\n%s", want, ben)
 		}
+	}
+	for _, order := range [][2]string{{"<section class=person", "<h3>Steht Ben Berg nahe</h3>"}, {"<ol class=nahe>", "id=verbergen"}} {
+		if i, j := strings.Index(ben, order[0]), strings.Index(ben, order[1]); i < 0 || j < i {
+			t.Fatalf("%q not before %q:\n%s", order[0], order[1], ben)
+		}
+	}
+	if strings.Count(ben, "Was verbindet") != 1 {
+		t.Fatalf("the way to the edge is said more than once:\n%s", ben)
 	}
 	if !strings.Contains(css, ".aktionen{display:flex;flex-wrap:wrap;gap:24px") || !strings.Contains(css, ".nahe a.zeile{display:block;min-height:44px") {
 		t.Fatal("the targets are not big and apart")

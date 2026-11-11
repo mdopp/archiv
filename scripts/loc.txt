@@ -3,4 +3,7 @@
 # 22,200: the first cap (laib#1170), recomputed 2026-11-11 after archiv#34, #45 and #46:
 # apps/ at 21,046 production lines (archiv), plus about 5 %, under the 95 % warning;
 # owner's approval asked in the PR that sets it
-22200 apps
+# 23,500: raised 2026-11-11 with archiv#53 (the person search and „Gemeinsam“, +467) on top of
+# archiv#52 (a person by hand, +614): apps/ at 22,266 production lines, plus about 5 %, under
+# the 95 % warning. The owner said yes to a needed raise when he asked for #53.
+23500 apps

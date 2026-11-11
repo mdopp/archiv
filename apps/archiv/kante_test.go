@@ -87,18 +87,31 @@ func TestKanteSeite(t *testing.T) {
 	for _, want := range []string{"<h1>Was verbindet die beiden?</h1>", `<div class=paar><a href="/tresor/umfeld?mitte=p-ben">`, "<span>Du</span>",
 		"Ben Berg ist für dich …", `<button name=art value=partner class="chip gewaehlt" aria-pressed=true`, "Jetzt: Partner/in, aus dem Telefonbuch.",
 		`name=art value=keine`, `name=art value=fremd`, `<input type=hidden name=zurueck value="/tresor/kante?a=p-ben&amp;b=p-anna">`,
-		"<h2>Fotos (3 Tage)</h2>", `<a href="https://fotos.box.test/photos/a4" target=_blank rel=noopener><img src="/tresor/kante/bild?id=a4" loading=lazy`,
+		`<section class=karte id=gemeinsam><h2>Gemeinsam</h2><p class=summe>4 gemeinsame Fotos (2019–2025, zuletzt im Dezember) · 1 Gruppe · 1 Mail-Verlauf · 43 Nachrichten</p>`,
+		`<div class="bilder vorn"><a href="https://fotos.box.test/photos/a4" target=_blank rel=noopener><img src="/tresor/kante/bild?id=a4" loading=lazy`,
+		`<details class=alle id=alle-fotos><summary>alle zeigen (3 Tage)</summary>`,
 		"<b>„Hallo Schatz“</b>", `<a href="/messages/5001">`, `<a href="/messages/4201"><b>Familie Berg</b><span class=k>Kommt ihr Sonntag zum Essen? · 01.11.2026</span>`,
-		`<a href="/messages/4300"><b>Mail-Verlauf mit 2 Personen</b><span class=k>Du: Anbei die Fotos · 02.10.2026</span>`,
-		"<h2>Warum</h2>", "<li>3 Tage auf deinen Fotos seit 2019</li>", "<li>in einem Gruppen-Chat</li>", "<li>gleiche Adresse</li>", "<li>gleicher Nachname</li>",
+		`<a href="/messages/4300"><b>Mail-Verlauf, 3 Nachrichten</b><span class=k>Du: Anbei die Fotos · 02.10.2026</span>`,
+		`<p class=k id=ausserdem>Außerdem: gleiche Adresse · gleicher Nachname</p>`,
 		"+ Beziehung von Ben Berg", `<datalist id=namen>`, `<a href="/tresor?tab=fragen">Fertig, weiter mit den Fragen</a>`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}
 	}
-	for _, order := range [][2]string{{"bild?id=a4", "bild?id=a3"}, {"bild?id=a3", "bild?id=a1"}, {"Hallo Schatz", "Familie Berg"}, {"Familie Berg", "Mail-Verlauf"}} {
+	for _, order := range [][2]string{{"bild?id=a4", "bild?id=a3"}, {"bild?id=a3", "bild?id=a1"}, {"Hallo Schatz", "Familie Berg"}, {"Familie Berg", "Mail-Verlauf, 3"}} {
 		if i, j := strings.Index(page, order[0]), strings.Index(page, order[1]); i < 0 || j < i {
 			t.Fatalf("%q not before %q", order[0], order[1])
+		}
+	}
+	// never the same thing twice (owner 2026-11-11): no list of reasons that repeats the counts, the phone book's relation only where it is set
+	for _, einmal := range []string{"Partner/in, aus dem Telefonbuch", "gemeinsame Fotos", "1 Gruppe"} {
+		if strings.Count(page, einmal) != 1 {
+			t.Fatalf("%q is said %d times:\n%s", einmal, strings.Count(page, einmal), page)
+		}
+	}
+	for _, weg := range []string{"<h2>Warum</h2>", "auf deinen Fotos seit", "in einem Gruppen-Chat", "Mails zusammen", "Ehepartner/in (Telefonbuch)", "(Gruppe „Familie Berg“)", "alle-nachrichten"} {
+		if strings.Contains(page, weg) {
+			t.Fatalf("%q is on the page:\n%s", weg, page)
 		}
 	}
 	if strings.Contains(page, "Verein") || strings.Contains(page, "anna@box.test") {
@@ -247,7 +260,7 @@ func TestBeziehungDazu(t *testing.T) {
 	if !strings.Contains(page, `class=feld data-weiter>`) || !strings.Contains(skript, "hasAttribute('data-weiter')") {
 		t.Fatalf("„Zu wem?“ does not go on with the tapped name:\n%s", page)
 	}
-	if page := wt.rufe("GET", "/tresor/umfeld?mitte=p-ben", anna, nil).Body.String(); !strings.Contains(page, "+ Beziehung von Ben Berg") || !strings.Contains(page, `<a class=warum-klein href="/tresor/kante?a=p-ben&amp;b=p-anna">`) {
+	if page := wt.rufe("GET", "/tresor/umfeld?mitte=p-ben", anna, nil).Body.String(); !strings.Contains(page, "+ Beziehung von Ben Berg") || !strings.Contains(page, `<a class=weiter href="/tresor/kante?a=p-ben&amp;b=p-anna">`) {
 		t.Fatalf("the person detail:\n%s", page)
 	}
 	if page := wt.rufe("GET", "/tresor?tab=stammbaum", anna, nil).Body.String(); !strings.Contains(page, "+ Beziehung ergänzen") || !strings.Contains(page, `name=von list=namen`) {

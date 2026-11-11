@@ -732,10 +732,22 @@ inside the open vault; closed, there is no net, not even in memory.
   open (an hourly round would outlast `LEERLAUF`); the closing ends it.
 - **Pages**: the vault page's card „Umfeld“ (the key, how far the round
   is, what is missing) and `/tresor/umfeld`: „Steht dir nahe“, a radial
-  picture and the ranked list with the reasons, any person into the
-  middle (`?mitte=`), the hidden ones restorable. Each row of the list is
-  the person, a link to its detail; „Ausblenden“ and „Nicht berechnen“
-  (out before any tie is computed) are only there, big and apart, each
+  picture and the ranked list, any person into the middle (`?mitte=`),
+  the hidden ones restorable. On top one field finds a person by name
+  (`?suche=`, `gemeinsam.go`; owner 2026-11-11: „Ich kann nicht nach
+  einer Person suchen“): umlauts in every spelling, part of a name, a
+  phone book's name for somebody Immich names otherwise („Papa“); one
+  hit opens the person, several are offered, the closer first; the
+  search on top of the archive lists persons too. A person's page leads
+  with who she is to the person: the relation, how close (the picture's
+  rings, „Nr. 3 von 212“), when the two were last together (the newest
+  shared photo or message in a shared chat or thread), what they share
+  in one sentence, and one button to the edge page. Each row of a list
+  is one link and one short line (the relation, then at most three
+  reasons): from the person's own list to that person's page, from
+  another's to what connects the two. „Ausblenden“ and „Nicht
+  berechnen“ (out before any tie is computed) are folded at the end of a
+  person's page, big and apart, each
   with a Rückgängig toast (owner 2026-11-11: „gefährlich platziert, dicke
   Finger“). The person herself is never on her list nor asked about but
   as „du“, nor are her other selves: a card with her name (umlauts
@@ -962,8 +974,8 @@ aktive Gruppen vom Benutzer kategorisiert werden“).
 Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
 
 - `/tresor/kante?a=…&b=…`, one page per pair, one tap from a „Steht
-  nahe“ row (its reasons and bar; the face and name still open the
-  person), a person's detail (each row's „Was verbindet die beiden?“), a
+  nahe“ row (its short line and bar; the face and name still open the
+  person), a person's page (its button, and each row of its list), a
   question card („Warum?“), every line of the Stammbaum and „Ansehen“
   under Erkannt (`&aus=erkannt`). Under the relation „Fertig“ leads on:
   back to Erkannt when it came from there, else to the questions.
@@ -977,26 +989,35 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
   with what follows from it by definition, and the vault keeps what it
   replaced (`vorher` in `antworten.json`), so the toast's Rückgängig
   brings that back, into Homes too. The same kind again writes nothing.
-- **Fotos**: the shared photo days, newest first (30 days, 4 photos a
-  day), as lazy 88 px thumbnails. A thumbnail comes through the archive
-  (`/tresor/kante/bild?id=`, only for a photo of the net's table), read
-  from Immich (`GET /api/assets/{id}/thumbnail?size=thumbnail`,
-  `asset.view`) with the person's key from the vault for that one answer,
-  never kept on the box (the browser may cache it privately for an hour).
-  A tap opens the photo in Immich (`IMMICH_PUBLIC_URL/photos/<id>`);
-  without that address the thumbnail is all.
-- **Nachrichten**: the cues the model read in messages between the two
-  first („Hallo Mama“, a tap opens the message in msgvault's view,
-  `/messages/<id>`), then the group chats and mail threads both are in,
-  each with its title and last line, read live from msgvault (one
-  read-only statement over `messages`, newest per conversation, ids
-  digits only; nothing kept). msgvault closed or busy: the conversations
-  without their last line, into msgvault's search.
-  `archiv umfeld-kante -sql <id…>` prints the statement,
-  `archiv umfeld-kante < antwort.json` reads an answer without its text
-  (`integration.sh` runs both against the real msgvault).
-- **Warum**: the photo days, chats, mails, groups, what the phone books
-  say, the same family name.
+- **Gemeinsam** (owner 2026-11-11: „unendliche Ketten von gleich
+  klingenden Meldungen … weniger mit mehr“): one sentence that counts
+  what the two share, each kind once: „37 gemeinsame Fotos (2014–2025,
+  zuletzt im Mai) · 3 Gruppen · 12 Mail-Verläufe · 1.204 Nachrichten“
+  (the messages are everybody's in the shared chats and threads). Under
+  it the most telling of each kind, the rest folded („alle zeigen“):
+  - three thumbnails, the newest photo of the last three shared days;
+    folded, every shared day (30 days, 4 photos a day), lazy 88 px. A
+    thumbnail comes through the archive (`/tresor/kante/bild?id=`, only
+    for a photo of the net's table), read from Immich
+    (`GET /api/assets/{id}/thumbnail?size=thumbnail`, `asset.view`) with
+    the person's key from the vault for that one answer, never kept on
+    the box (the browser may cache it privately for an hour). A tap opens
+    the photo in Immich (`IMMICH_PUBLIC_URL/photos/<id>`); without that
+    address the thumbnail is all.
+  - the first cue the model read in a message between the two („Hallo
+    Mama“, a tap opens the message in msgvault's view, `/messages/<id>`),
+    the three newest group chats with their category and last line, and
+    the mail threads as one row with the newest's last line; folded, the
+    other cues and groups and every thread. The last lines are read live
+    from msgvault (one read-only statement over `messages`, newest per
+    conversation, ids digits only; nothing kept). msgvault closed or
+    busy: the conversations without their last line, into msgvault's
+    search. `archiv umfeld-kante -sql <id…>` prints the statement,
+    `archiv umfeld-kante < antwort.json` reads an answer without its text
+    (`integration.sh` runs both against the real msgvault).
+  - „Außerdem“: what no count says, in one line (the same address or
+    firm, a phone book's word, a social export, the same family name);
+    the relation set above is not said again.
 - **„+ Beziehung“** (owner 2026-11-11, „Sabine fehlt als Partnerin“): on
   the edge page, a person's detail and under the tree; a name (the
   browser suggests the net's names, the archive compares umlauts and case

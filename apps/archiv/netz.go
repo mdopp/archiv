@@ -30,6 +30,7 @@ const (
 	netzJahrBonus = 0.15  // per distinct year a pair meets in
 	netzZelle     = 0.009 // a place cell, in degrees of latitude: about 1 km
 	netzMinTage   = 2     // a tie from photos shows from this many days on
+	kurzTeile     = 3     // reasons a list's row says (Kurz)
 )
 
 // The kinds of phone-book tie, and what each adds to a pair's strength.
@@ -173,6 +174,8 @@ type Netz struct {
 	// card of hers (IchAuch), an Immich person or a card named as she is
 	// (umlauts alike). None is ever in „Steht nahe“ or a question but as „du“.
 	selbst map[string]bool
+	// such are the names each shown node is found by (suche.go)
+	such map[string][]suchName
 	// musterBaender are what the cards' names say („Mama von Lena“, namensmuster.go)
 	musterBaender []namensBand
 	// angelegt are the persons made by hand, by id (angelegt.go)
@@ -264,6 +267,7 @@ func (n *Netz) bauen() {
 	n.gespraecheDazu(alle, nicht)
 	n.gesagtDazu(alle, nicht)
 	n.merkmaleBauen()
+	n.suchBauen()
 	for _, k := range alle {
 		n.kanten[k.A], n.kanten[k.B] = append(n.kanten[k.A], k), append(n.kanten[k.B], k)
 	}
@@ -514,24 +518,47 @@ func (n *Netz) Verbergen(id, art string) map[string]string {
 	return maps.Clone(n.verborgen)
 }
 
-// Gruende are the tie's reasons as seen from mitte, in one line.
-func (n *Netz) Gruende(mitte string, k Kante) string {
-	return strings.Join(n.gruendeListe(mitte, k), " · ")
+// Kurz is the tie in one short line for a list's row, as seen from
+// mitte: what the other is of mitte, if that is known, then the first
+// kurzTeile reasons, one group's category at most, the known relation
+// never a second time (owner
+// 2026-11-11: „weniger mit mehr“). The rest is one tap away.
+func (n *Netz) Kurz(mitte string, k Kante) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	art, _, _ := n.artZwischen(andererVon(&k, mitte), mitte)
+	var out []string
+	if slices.Contains(arten, art) {
+		out = append(out, kurzWort(art))
+	}
+	gs := n.gruende(mitte, k, art, 1)
+	return strings.Join(append(out, gs[:min(kurzTeile, len(gs))]...), " · ")
 }
 
-// gruendeListe are the tie's reasons as seen from mitte: the photo days
-// and since when, the group chats and mails, then what the phone books say.
-func (n *Netz) gruendeListe(mitte string, k Kante) []string {
+// gruende are the tie's reasons as seen from mitte: the photo days and
+// since when, the group chats and mails, at most gruppen of the groups'
+// categories, then what the phone books say (ausserdem). n.mu is held.
+func (n *Netz) gruende(mitte string, k Kante, art string, gruppen int) []string {
 	var out []string
 	if k.Tage > 0 {
 		out = append(out, fmt.Sprintf("%s auf deinen Fotos seit %d", anzahlT(k.Tage, "Tag", "Tage"), k.Seit))
 	}
 	out = append(out, gespraechGruende(k)...)
-	n.mu.Lock()
-	defer n.mu.Unlock()
-	out = append(out, n.gruppenGruende(k)...)
-	out = append(out, n.sozialGruende(k)...)
+	gg := n.gruppenGruende(k)
+	out = append(out, gg[:min(gruppen, len(gg))]...)
+	return append(out, n.ausserdem(mitte, k, art)...)
+}
+
+// ausserdem is what no count says about the tie, as seen from mitte: the
+// social exports and the phone books. art is the kind the page already
+// states for the pair ("" none): the answer or the phone-book relation
+// behind it is not said again. n.mu is held.
+func (n *Netz) ausserdem(mitte string, k Kante, art string) []string {
+	out := slices.Clone(n.sozialGruende(k))
 	for _, f := range k.Fest {
+		if a := buchArt(f.Wie); art != "" && (f.Gesagt || f.Art == bandBeziehung && a != "" && (a == art || gegen[a] == art)) {
+			continue
+		}
 		switch {
 		case f.Gesagt:
 			out = append(out, gesagtGrund(mitte, f))

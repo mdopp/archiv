@@ -13,7 +13,8 @@ import (
 // kommen können und diese Kante schnell nachbessern.“): what the net
 // knows of two people — their relation and where it comes from, their
 // shared photo days, the group chats and mail threads both are in, what
-// the box's model read in their messages, and the reasons of the tie —
+// the box's model read in their messages, and all of it counted
+// (gemeinsam.go) —
 // and a way to set their relation whether or not it is asked
 // (Festlegen). Everything here is read from the open vault's net; the
 // page (kante_seite.go) adds the thumbnails and the last lines live.
@@ -53,7 +54,10 @@ type PaarSicht struct {
 	FotoTage   int // all shared photo days, beyond the listed ones
 	Gespraeche []netzGespraech
 	Zitate     []Zitat
-	Gruende    []string
+	Gemeinsam  Gemeinsam
+	Satz       string            // Gemeinsam in one sentence ("" nothing shared)
+	Kategorie  map[string]string // a shared group's category as the person reads it, by conversation
+	Ausserdem  []string          // what neither a count nor the relation says (Netz.ausserdem)
 }
 
 // buchArt is a phone book's relation word as a kind ("" none it knows).
@@ -104,12 +108,19 @@ func (n *Netz) Paar(a, b string) (PaarSicht, bool) {
 	p.Fotos, p.FotoTage = n.fotoTage(a, b)
 	p.Gespraeche = n.gemeinsameGespraeche(a, b)
 	p.Zitate = n.zitate(a, b)
-	familie := n.gleicherName(a, b)
-	n.mu.Unlock()
-	p.Gruende = n.gruendeListe(b, p.Kante)
-	if familie {
-		p.Gruende = append(p.Gruende, "gleicher Nachname")
+	p.Gemeinsam = n.gemeinsam(a, b, p.Gespraeche)
+	p.Satz = p.Gemeinsam.Satz(n.now(), cmp.Or(n.Loc, time.Local))
+	p.Kategorie = map[string]string{}
+	for _, g := range p.Gespraeche {
+		if kat, _ := n.kategorieVon(g.ID); kat != "" && g.Art == gespraechChat {
+			p.Kategorie[g.ID] = kategorieName(kat, n.gruppen[g.ID].Name)
+		}
 	}
+	p.Ausserdem = n.ausserdem(b, p.Kante, p.Art)
+	if n.gleicherName(a, b) {
+		p.Ausserdem = append(p.Ausserdem, "gleicher Nachname")
+	}
+	n.mu.Unlock()
 	return p, true
 }
 

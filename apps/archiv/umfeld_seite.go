@@ -25,6 +25,7 @@ const (
 	umfeldZeigen = 30 // in the picture; „Mehr zeigen“ doubles it
 
 	saysUmfeldGespeichert = "Gespeichert. Das Archiv liest jetzt deine Fotos aus Immich und rechnet dein Umfeld; bei vielen Fotos dauert das ein paar Minuten."
+	saysSucheNiemand      = "Niemanden mit diesem Namen gefunden. Zu finden ist, wer in deinen Telefonbüchern steht oder auf deinen Fotos einen Namen hat."
 	saysUmfeldVerbergen   = "Das ließ sich nicht speichern. Versuch es gleich noch einmal."
 	saysUmfeldHinweis     = "Das Archiv zählt, an wie vielen Tagen zwei Menschen zusammen auf deinen Fotos sind; ein Tag an einem Ort zählt einmal, ein großes Gruppenfoto wenig, Altes weniger als Neues. Dazu kommt, was die Telefonbücher sagen: dieselbe Adresse, dieselbe Firma, eine eingetragene Beziehung. „Nicht berechnen“ (bei der Person selbst) nimmt jemanden ganz heraus, etwa Freunde der Kinder. Alles liegt in deinem Tresor; nur du siehst diese Seite, und nur solange dein Archiv offen ist."
 )
@@ -188,6 +189,12 @@ func verbergenToast(id, satz string) string {
 }
 
 func (w *Web) umfeldGet(rw http.ResponseWriter, r *http.Request) {
+	if q := strings.TrimSpace(r.URL.Query().Get("suche")); q != "" && w.Umfeld.Netz() != nil {
+		if _, auf := w.Tresor.Innen(); auf {
+			w.personenSuche(rw, r, w.Umfeld.Netz(), q)
+			return
+		}
+	}
 	w.umfeldSeite(rw, r, http.StatusOK, r.URL.Query().Get("mitte"), meldungen[r.URL.Query().Get("m")], "")
 }
 
@@ -213,6 +220,9 @@ func (w *Web) umfeldSeiteMit(rw http.ResponseWriter, r *http.Request, code int, 
 		return
 	}
 	_, hat := HatImmichSchluessel(innen)
+	if n := u.Netz(); n != nil {
+		b.WriteString(personSuchen(n, "", false))
+	}
 	b.WriteString(`<div id=umfeld-stand data-live aria-live=polite>`)
 	umfeldStandText(&b, u.Stand(), hat)
 	if !hat {
@@ -239,6 +249,67 @@ func (w *Web) umfeldSeiteMit(rw http.ResponseWriter, r *http.Request, code int, 
 	seite(rw, code, "Umfeld", b.String(), "")
 }
 
+// personSuchen is the one field that finds a person of the net by name
+// (owner 2026-11-11: „Ich kann nicht nach einer Person suchen“): what is
+// typed goes to /tresor/umfeld?suche=, which opens the person's page or
+// offers those it could be. The page's script shows the names that match
+// while typing, a tap goes on (data-weiter); liste adds the names for it,
+// on a page that has no „+ Beziehung“ (which brings them).
+func personSuchen(n *Netz, q string, liste bool) string {
+	s := `<form method=get action="/tresor/umfeld" role=search class=person-suche data-weiter><input type=search name=suche list=namen data-namen autocomplete=off required aria-label="Person suchen" placeholder="Person suchen" value="` +
+		esc(q) + `"><button data-laeuft="Sucht …">Finden</button></form>`
+	if liste {
+		s += namenListe(n)
+	}
+	return s
+}
+
+// personenSuche answers the field: one person (or one whose name is
+// exactly that) is opened at once; several are offered, each with what
+// she is to the person; nobody: the sentence, the field again and the
+// ways on (the name in the messages, back to the Umfeld).
+func (w *Web) personenSuche(rw http.ResponseWriter, r *http.Request, n *Netz, q string) {
+	ts, mehr := n.Suchen(q, sucheHoechstens)
+	if len(ts) == 1 || len(ts) > 1 && ts[0].Genau && !ts[1].Genau {
+		http.Redirect(rw, r, umfeldMitte(ts[0].ID), http.StatusSeeOther)
+		return
+	}
+	var b strings.Builder
+	b.WriteString(personSuchen(n, q, true))
+	if len(ts) == 0 {
+		fmt.Fprintf(&b, `<p class=ruhig><span class="punkt grau"></span>%s</p><p class=weiter-in><a href="%s">In den Nachrichten nach „%s“ suchen</a></p>`,
+			esc(saysSucheNiemand), esc(msgvaultSuche(q)), esc(q))
+	} else {
+		b.WriteString(`<section class=karte><h2>Wen meinst du?</h2>`)
+		personenZeilen(&b, n, ts)
+		b.WriteString(`</section>`)
+		if mehr {
+			fmt.Fprintf(&b, `<p class=k>Die ersten %d. Tipp mehr vom Namen ein, um die anderen zu finden.</p>`, len(ts))
+		}
+	}
+	b.WriteString(`<p class=weiter-in><a href="/tresor/umfeld">Zurück zum Umfeld</a></p>`)
+	seite(rw, http.StatusOK, "Person suchen", b.String(), "")
+}
+
+// personenZeilen are found persons as rows, each a link to its page: the
+// face, the name, the phone book's name it was found by, and the tie to
+// the person in one short line.
+func personenZeilen(b *strings.Builder, n *Netz, ts []Treffer) {
+	ich := n.Ich()
+	b.WriteString(`<ul class=leute>`)
+	for _, t := range ts {
+		var k []string
+		if t.Als != "" {
+			k = append(k, "im Telefonbuch: "+t.Als)
+		}
+		if kurz := n.Kurz(ich, n.KanteMit(ich, t.ID)); kurz != "" && t.ID != ich {
+			k = append(k, kurz)
+		}
+		fmt.Fprintf(b, `<li><a href="%s">%s<span class=wer>%s<span class=k>%s</span></span></a></li>`, esc(umfeldMitte(t.ID)), gesicht(t.Name), esc(n.Anzeige(t.Knoten)), esc(strings.Join(k, " · ")))
+	}
+	b.WriteString(`</ul>`)
+}
+
 // umfeldNetz is „Steht nahe“ around mitte: the picture, the list, the hidden.
 func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 	ich := n.Ich()
@@ -249,16 +320,19 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 	}
 	k, ok := n.Person(mitte)
 	vs := n.Nahe(mitte, zeigen)
+	if ok && ich != "" && mitte != ich {
+		umfeldKopf(b, n, k)
+	}
 	switch {
 	case mitte == "":
 		b.WriteString(`<p class=k>Noch keine Verbindungen: Ein Paar zählt, sobald es an zwei Tagen zusammen auf deinen Fotos ist oder die Telefonbücher etwas über die beiden sagen.</p>`)
 	case !ok || len(vs) == 0:
-		b.WriteString(`<p class=k>Zu dieser Person gibt es noch keine Verbindung.</p>`)
-		if ok && mitte != ich {
-			b.WriteString(personAktionen(n, k))
-		}
+		b.WriteString(`<p class=k>Im Umfeld steht diese Person noch nicht: Dafür braucht es zwei gemeinsame Fototage, einen Eintrag im Telefonbuch oder eine Beziehung von dir.</p>`)
 		if ok {
 			b.WriteString(beziehungDazu(n, k, true, "", umfeldMitte(mitte)))
+		}
+		if ok && mitte != ich {
+			b.WriteString(personAktionen(n, k))
 		}
 	default:
 		titel := "Steht dir nahe"
@@ -268,17 +342,16 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 		fmt.Fprintf(b, `<h3>%s</h3>`, esc(titel))
 		if ich == "" {
 			b.WriteString(`<p class=k>Deine eigene Karte hat das Archiv in den Telefonbüchern nicht gefunden (es sucht die E-Mail deines Immich-Kontos und deine Nummer); in der Mitte steht deshalb, wer die meisten Verbindungen hat.</p>`)
-		} else if mitte != ich {
-			fmt.Fprintf(b, `<p class=k><a href="%s">Wieder dich in die Mitte</a></p>`, esc(umfeldMitte(ich)))
-		}
-		if mitte != ich {
-			b.WriteString(personAktionen(n, k))
 		}
 		b.WriteString(umfeldBild(n, k, vs))
 		b.WriteString(umfeldListe(n, k, vs))
-		b.WriteString(beziehungDazu(n, k, false, "", umfeldMitte(mitte)))
 		if len(vs) == zeigen && !mehr {
 			fmt.Fprintf(b, `<p><a href="%s">Mehr zeigen</a></p>`, esc("/tresor/umfeld?"+url.Values{"mitte": {mitte}, "mehr": {"1"}}.Encode()))
+		}
+		b.WriteString(beziehungDazu(n, k, false, "", umfeldMitte(mitte)))
+		if mitte != ich {
+			b.WriteString(personAktionen(n, k))
+			fmt.Fprintf(b, `<p class=weiter-in><a href="%s">Wieder dich in die Mitte</a></p>`, esc(umfeldMitte(ich)))
 		}
 	}
 	if vb := n.Verborgene(); len(vb) > 0 {
@@ -297,29 +370,67 @@ func (w *Web) umfeldNetz(b *strings.Builder, n *Netz, mitte string, mehr bool) {
 // umfeldMitte is the address that puts id in the middle.
 func umfeldMitte(id string) string { return "/tresor/umfeld?" + url.Values{"mitte": {id}}.Encode() }
 
-// umfeldListe is the ranked list: each row the person, its name and its
-// reasons, one link to its detail (it in the middle). No action on the
+// umfeldKopf leads a person's page with who she is to the person (owner
+// 2026-11-11): the face and name, the relation, how close (the picture's
+// rings: the first fifth, up to half, the rest) and when the two were
+// last together, then what they share in one sentence, and the one way
+// on: the edge page, where the examples are and the relation is set.
+func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
+	fmt.Fprintf(b, `<section class=person id=person><div class=wer-ist>%s<h2>%s</h2></div>`, gesicht(k.Name), esc(k.Name))
+	p, ok := n.Paar(k.ID, n.Ich())
+	if !ok {
+		b.WriteString(`</section>`)
+		return
+	}
+	teile, weiter := []string{"Für dich: noch nichts eingetragen"}, "Beziehung eintragen"
+	if p.Art != "" {
+		teile, weiter = []string{"Für dich: " + map[bool]string{true: fremdWort(true), false: artJetzt(p.Art)}[p.Art == artFremd]}, "Was verbindet euch?"
+	}
+	if platz, von := n.Platz(k.ID); platz > 0 {
+		wie := "lose verbunden"
+		switch {
+		case platz <= max(1, von/5):
+			wie = "sehr nah"
+		case platz <= max(2, von/2):
+			wie = "nah"
+		}
+		teile = append(teile, fmt.Sprintf("%s (Nr. %d von %d)", wie, platz, von))
+	}
+	if z := p.Gemeinsam.Zuletzt; !z.IsZero() {
+		teile = append(teile, "zuletzt gemeinsam am "+z.In(cmp.Or(n.Loc, time.Local)).Format("02.01.2006"))
+	}
+	fmt.Fprintf(b, `<p class=ist>%s</p><p class=summe>%s</p><p><a class=weiter href="%s">%s</a></p></section>`, esc(strings.Join(teile, " · ")),
+		esc(cmp.Or(p.Satz, saysKanteNichts)), esc(kanteAdresse(k.ID, n.Ich())), weiter)
+}
+
+// umfeldListe is the ranked list: each row the person and the tie in one
+// short line (Netz.Kurz), one link. From the person's own list it opens
+// that person's page, which leads with what the two share; from anybody
+// else's it opens what connects that one and the row's. No action on the
 // row (owner 2026-11-11: „gefährlich platziert, dicke Finger“): Ausblenden
-// and Nicht berechnen are in the detail (umfeldAktionen).
+// and Nicht berechnen are at the end of the person's page (umfeldAktionen).
 func umfeldListe(n *Netz, mitte Knoten, vs []Verbindung) string {
 	var b strings.Builder
 	b.WriteString(`<ol class=nahe>`)
 	for _, v := range vs {
-		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a><a class=warum-klein href="%s">Was verbindet die beiden?</a></li>`, esc(umfeldMitte(v.Mit.ID)), esc(n.Anzeige(v.Mit)),
-			esc(n.Gruende(mitte.ID, v.Kante)), esc(kanteAdresse(mitte.ID, v.Mit.ID)))
+		ziel := umfeldMitte(v.Mit.ID)
+		if mitte.ID != n.Ich() {
+			ziel = kanteAdresse(mitte.ID, v.Mit.ID)
+		}
+		fmt.Fprintf(&b, `<li><a class=zeile href="%s">%s <span class=k>%s</span></a></li>`, esc(ziel), esc(n.Anzeige(v.Mit)), esc(n.Kurz(mitte.ID, v.Kante)))
 	}
 	b.WriteString(`</ol>`)
 	return b.String()
 }
 
-// umfeldAktionen are a person's two actions in its detail: big targets,
-// apart, each with Rückgängig after it (verbergenToast).
+// umfeldAktionen are a person's two actions, folded at the end of its
+// page: big targets, apart, each with Rückgängig after it (verbergenToast).
 func umfeldAktionen(id string) string {
 	knopf := func(art, text, laeuft, klasse string) string {
 		return `<form method=post action="/tresor/umfeld/verbergen"><input type=hidden name=id value="` + esc(id) + `"><button` + klasse + ` name=art value="` + art + `" data-laeuft="` + esc(laeuft) + `">` + esc(text) + `</button></form>`
 	}
-	return `<div class=aktionen>` + knopf(verbergenAus, "Ausblenden", "Blendet aus …", "") + knopf(verbergenNicht, "Nicht berechnen", "Nimmt heraus …", " class=leise") +
-		`</div><p class=k>Ausblenden zeigt die Person nicht mehr; Nicht berechnen nimmt sie auch aus den Verbindungen der anderen. Beides lässt sich zurückholen.</p>`
+	return `<details class=karte id=verbergen><summary>Ausblenden …</summary><div class=aktionen>` + knopf(verbergenAus, "Ausblenden", "Blendet aus …", "") + knopf(verbergenNicht, "Nicht berechnen", "Nimmt heraus …", " class=leise") +
+		`</div><p class=k>Ausblenden zeigt die Person nicht mehr; Nicht berechnen nimmt sie auch aus den Verbindungen der anderen. Beides lässt sich zurückholen.</p></details>`
 }
 
 // personAktionen are the detail's actions on k: a person made by hand is

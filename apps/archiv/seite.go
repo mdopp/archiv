@@ -1182,7 +1182,10 @@ ol{padding-left:1.2rem}li{margin:.3rem 0}form.zeile{display:flex;justify-content
 .bilder img{display:block;width:88px;height:88px;object-fit:cover;border-radius:8px;background:var(--panel)}
 ul.gespraeche a{display:block;min-height:44px;color:inherit;text-decoration:none}ul.gespraeche b{display:block;font-weight:600}
 li.zwei{display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}li.zwei>a:first-child{flex:1 1 10rem;min-height:44px}a.warum{display:flex;align-items:center;gap:10px;flex:1 1 100%;min-height:44px;padding-left:48px;color:inherit;text-decoration:none}a.warum .k{flex:1;min-width:0}
-a.warum-klein{display:inline-flex;align-items:center;min-height:44px;font-size:.85rem}
+.person{background:var(--card);border-radius:20px;padding:16px;margin:16px 0 0}.person p{margin:10px 0 0}.wer-ist{display:flex;align-items:center;gap:12px}.wer-ist h2{margin:0;font-size:1.2rem}.ist{font-weight:600}
+a.weiter{display:inline-flex;align-items:center;min-height:44px;padding:0 18px;border-radius:999px;background:var(--accent);color:#fff;font-weight:600;text-decoration:none}
+#gemeinsam .summe{margin:0 2px 10px;font-weight:600}#gemeinsam ul{margin-top:10px}.bilder.vorn{margin:0}details.alle>summary{font-size:.9rem;padding:0 2px}
+form.person-suche{flex-wrap:wrap}.person-suche .vorschlaege{order:1;flex:1 1 100%}
 .netzbild{display:block;width:100%;max-width:400px;height:auto;margin:1rem auto 0}.netzbild line{stroke:var(--muted);stroke-linecap:round}.netzbild line.zw{stroke:var(--line);stroke-width:.6}
 .netzbild circle{fill:var(--bg);stroke:var(--accent);stroke-width:1.5}.netzbild .mitte circle{fill:var(--accent)}.netzbild text{fill:var(--ink);font-size:10px;text-anchor:middle}.netzbild a:focus circle,.netzbild a:hover circle{fill:var(--accent)}
 ol.nahe,ul.nahe{padding-left:1.4rem}.nahe li{margin:.7rem 0}details.karte>summary{padding:0 14px}details.karte ul{list-style:none;margin:0;padding:0}.nachtrag{margin:10px 0}.nahe a.zeile{display:block;min-height:44px;padding:4px 0;text-decoration:none}.nahe a.zeile .k{display:block}.aktionen{display:flex;flex-wrap:wrap;gap:24px;margin:12px 0 4px}.aktionen form{margin:0}.nahe form.knoepfe{margin:.2rem 0 0}.nahe button{min-height:36px;padding:0 12px;font-size:.85rem}
