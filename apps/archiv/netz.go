@@ -148,8 +148,14 @@ type Netz struct {
 	gespraech   map[string]netzGespraech
 	paarGruppen map[string][]string
 	gruppen     map[string]gruppenAntwort
-	gelesen     map[string]gelesen
-	hinweise    map[string]paarHinweis
+	// gruppenModell is what the box's model read of the groups (gruppenmodell.go)
+	gruppenModell map[string]gruppenLesung
+	// gebHinweise are the birthdays the wishes suggest, gebAntworten the
+	// person's answers to them, by node (geburtstage.go)
+	gebHinweise  map[string]gebHinweis
+	gebAntworten map[string]gebAntwort
+	gelesen      map[string]gelesen
+	hinweise     map[string]paarHinweis
 	// sozial are the friends and connections of the social exports,
 	// sozialGrund their reasons by node (sozial.go, sozialBauen).
 	sozial      []sozialEintrag
@@ -174,7 +180,8 @@ func neuesNetz(st netzTabelle, verborgen map[string]string, antworten map[string
 	if n.st.Namen == nil {
 		n.st.Namen = map[string]string{}
 	}
-	n.gruppen, n.gelesen, n.hinweise = map[string]gruppenAntwort{}, map[string]gelesen{}, map[string]paarHinweis{}
+	n.gruppen, n.gelesen, n.hinweise, n.gruppenModell = map[string]gruppenAntwort{}, map[string]gelesen{}, map[string]paarHinweis{}, map[string]gruppenLesung{}
+	n.gebHinweise, n.gebAntworten = map[string]gebHinweis{}, map[string]gebAntwort{}
 	n.bauen()
 	return n
 }

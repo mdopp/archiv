@@ -57,6 +57,11 @@ type UmfeldStand struct {
 	Fotos   int       // photos with people in the table
 	Fehler  string    // Immich, as a sentence
 	Hinweis string    // the household book, as a sentence
+	// what the box's model read (hinweise.go): messages with a relation
+	// word read in all, the candidates still waiting, and whether a round
+	// counted them since the opening
+	ModellGelesen, ModellOffen int
+	ModellGezaehlt             bool
 }
 
 // Umfeld runs the rounds and holds the net while the vault is open.
@@ -226,6 +231,8 @@ func (u *Umfeld) laden(innen Innen) {
 func (u *Umfeld) netzBauen(innen Innen, tab netzTabelle) *Netz {
 	n := neuesNetz(tab, verborgenLaden(innen), antwortenLaden(innen), u.Loc, u.Now)
 	n.gruppen = gruppenLaden(innen)
+	n.gruppenModell = gruppenModellLaden(innen)
+	n.gebSetzen(gebHinweiseLaden(innen), geburtstageLaden(innen))
 	n.hinweiseSetzen(hinweiseLaden(innen))
 	n.sozialSetzen(sozialLaden(innen))
 	return n
@@ -362,6 +369,8 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 		personen, kanten := n.Groesse()
 		log.Printf("archiv: Umfeld gerechnet: %d Fotos mit Personen, %d Personen, %d Verbindungen", len(tab.Fotos), personen, kanten)
 	}
+	u.geburtstageRunde(ctx, innen, n, ks)
+	u.gruppenRunde(ctx, innen, n)
 	u.hinweiseRunde(ctx, innen, n, ks)
 }
 

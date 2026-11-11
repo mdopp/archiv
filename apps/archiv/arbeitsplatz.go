@@ -12,8 +12,9 @@ import (
 
 // The open archive as a workplace (owner 2026-11-10: „eine Seite, auf der
 // gearbeitet wird“, in Homes' patterns): the search on top, then Fragen
-// (one at a time, fragen_seite.go), Steht nahe, and the Stammbaum
-// (stammbaum.go). The sources are one line — „✓ aktuell“ or
+// (one at a time, fragen_seite.go), Steht nahe, the Stammbaum
+// (stammbaum.go) and Gruppen (erkannt_seite.go); under Fragen one line
+// of what the archive recognised by itself (erkannt.go). The sources are one line — „✓ aktuell“ or
 // what needs the person — and their details and setup are a page of their
 // own (/tresor/quellen), open or closed.
 
@@ -25,7 +26,7 @@ const (
 )
 
 // tabs are the workplace's parts, in their order: path value, word.
-var tabs = [][2]string{{"fragen", "Fragen"}, {"nahe", "Steht nahe"}, {"stammbaum", "Stammbaum"}}
+var tabs = [][2]string{{"fragen", "Fragen"}, {"nahe", "Steht nahe"}, {"stammbaum", "Stammbaum"}, {"gruppen", "Gruppen"}}
 
 // arbeitsplatz writes the tabs and the chosen one (?tab=, Fragen by
 // default). Fragen shows the visit's portion (Netz.Portion) and counts
@@ -38,7 +39,7 @@ func (w *Web) arbeitsplatz(b *strings.Builder, r *http.Request, bereit bool) {
 	tab := r.URL.Query().Get("tab")
 	b.WriteString(`<nav class=unterseiten aria-label=Bereiche>`)
 	for i, t := range tabs {
-		aktiv := t[0] == tab || i == 0 && tab != "nahe" && tab != "stammbaum"
+		aktiv := t[0] == tab || i == 0 && !slices.ContainsFunc(tabs[1:], func(t [2]string) bool { return t[0] == tab })
 		zahl := ""
 		if t[0] == "fragen" && len(fs) > 0 {
 			zahl = fmt.Sprintf(` <span class=anzahl>%d</span>`, len(fs))
@@ -56,6 +57,9 @@ func (w *Web) arbeitsplatz(b *strings.Builder, r *http.Request, bereit bool) {
 		stammbaumTab(b, n)
 	case tab == "nahe":
 		naheListe(b, n)
+	case tab == "gruppen":
+		gruppenTab(b, n, r.URL.Query().Get("alle") != "")
+		b.WriteString(w.toast(n, r.URL.Query().Get("getan"), gruppenTabPfad))
 	case len(fs) > 0:
 		b.WriteString(w.frageKarte(n, fs[0], len(fs), false))
 		if len(fs) > 1 {
@@ -71,6 +75,7 @@ func (w *Web) arbeitsplatz(b *strings.Builder, r *http.Request, bereit bool) {
 	if tab != "fragen" {
 		return
 	}
+	w.erkanntZeile(b, n)
 	if gs := n.Gegebene(); len(gs) > 0 {
 		fmt.Fprintf(b, `<p class=weiter-in><a href="/tresor/umfeld#antworten">Deine Antworten (%d)</a><span class=k>Jede lässt sich dort zurücknehmen.</span></p>`, len(gs))
 	}

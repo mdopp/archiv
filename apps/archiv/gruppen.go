@@ -32,13 +32,16 @@ import (
 //   - Elterngruppe, Klasse: „Eltern aus „…““, „aus der Klasse „…““.
 //   - Nachbarschaft, Freundeskreis: Nachbar/in, Freund/in as reason and
 //     suggestion; Verein, Reisegruppe, Politik a reason.
-// A title's suggestion counts as the category for reasons and suggestions
-// until the person answers; only the person's own Familie widens the circle.
+// A title's suggestion, or the box's model's (gruppenmodell.go, before the
+// title's), counts as the category for reasons and suggestions until the
+// person answers; only the person's own Familie widens the circle.
 
 const (
 	gruppeAktiv      = 365 * 24 * time.Hour // a group with no message for longer is not asked
 	kategorieFamilie = "familie"
 	kategorieSonst   = "sonstiges"
+	kategorieEigen   = "eigen" // the person's own word for it (archiv#42), in gruppenAntwort.Name
+	eigeneLaenge     = 40      // characters of an own category
 )
 
 // kategorien are the chips of a group question, in their order.
@@ -51,19 +54,35 @@ var kategorieWorte = map[string]string{kategorieFamilie: "Familie", "freundeskre
 // kategorieArt is the kind a category suggests for a pair in the group.
 var kategorieArt = map[string]string{kategorieFamilie: "verwandt", "arbeit": "kollege", "nachbarschaft": "nachbar", "freundeskreis": "freund"}
 
-// gruppenAntwort is the person's category of a group, or Später.
+// gruppenAntwort is the person's category of a group, or Später; Name
+// her own word for it (Kategorie eigen); Vorher what it replaced, for
+// Rückgängig (the group list sets a category over another).
 type gruppenAntwort struct {
-	Kategorie string    `json:"k"`
-	Am        time.Time `json:"am"`
+	Kategorie string          `json:"k"`
+	Name      string          `json:"n,omitempty"`
+	Am        time.Time       `json:"am"`
+	Vorher    *gruppenAntwort `json:"v,omitempty"`
+}
+
+// kategorieName is a category as the person reads it: her own word, else the chip's.
+func kategorieName(kat, eigen string) string {
+	if kat == kategorieEigen {
+		return eigen
+	}
+	return kategorieWorte[kat]
 }
 
 // GruppenFrage is „Wie würdest du die Gruppe „Titel“ nennen?“: the
 // conversation's id, its title, the members the phone books know, and the
 // category its title suggests („“ none) with the word that says so.
+//
+// Modell: the suggestion is what the box's model read (gruppenmodell.go),
+// which goes before the title's.
 type GruppenFrage struct {
 	ID, Titel       string
 	Mitglieder      []Knoten
 	Vorschlag, Wort string
+	Modell          bool
 	zuletzt         time.Time
 }
 
@@ -84,6 +103,9 @@ func gruppenLaden(innen Innen) map[string]gruppenAntwort {
 func (n *Netz) kategorieVon(id string) (kat string, gesagt bool) {
 	if a, da := n.gruppen[id]; da && a.Kategorie != artSpaeter {
 		return map[bool]string{true: a.Kategorie}[a.Kategorie != kategorieSonst], true
+	}
+	if kat := n.modellKategorie(id); kat != "" {
+		return kat, false
 	}
 	if g, da := n.gespraech[id]; da {
 		_, kat := woerter.imTitel(g.Titel)
@@ -125,7 +147,11 @@ func (n *Netz) gruppenFragen() (out []Frage) {
 			continue
 		}
 		wort, kat := woerter.imTitel(g.Titel)
-		out = append(out, Frage{Gruppe: &GruppenFrage{ID: g.ID, Titel: g.Titel, Mitglieder: wer, Vorschlag: kat, Wort: wort, zuletzt: g.Zuletzt}})
+		gf := &GruppenFrage{ID: g.ID, Titel: g.Titel, Mitglieder: wer, Vorschlag: kat, Wort: wort, zuletzt: g.Zuletzt}
+		if m := n.modellKategorie(g.ID); m != "" {
+			gf.Vorschlag, gf.Wort, gf.Modell = m, "", true
+		}
+		out = append(out, Frage{Gruppe: gf})
 	}
 	return out
 }
@@ -145,21 +171,121 @@ func (n *Netz) Einordnen(id, kat string) (Frage, map[string]gruppenAntwort, erro
 	return fs[i], maps.Clone(n.gruppen), nil
 }
 
-// Ausordnen forgets the category of the group id; its question may come again.
+// Ausordnen forgets the category of the group id, or gives back the one
+// it replaced; with none, its question may come again.
 func (n *Netz) Ausordnen(id string) (map[string]gruppenAntwort, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	if _, da := n.gruppen[id]; !da {
+	a, da := n.gruppen[id]
+	if !da {
 		return nil, errFrageWeg
 	}
-	delete(n.gruppen, id)
+	if a.Vorher != nil {
+		n.gruppen[id] = *a.Vorher
+	} else {
+		delete(n.gruppen, id)
+	}
 	return maps.Clone(n.gruppen), nil
 }
 
-// Eingeordnet is a group the person named, as the page lists it.
+// waehlbar: id is a group of the list (Gruppenliste): a chat that counts,
+// with a title and two members the phone books know; n.mu is held.
+func (n *Netz) waehlbar(id string) bool {
+	g, da := n.gespraech[id]
+	return da && g.Art == gespraechChat && g.zaehlt() && strings.TrimSpace(g.Titel) != "" && len(n.mitglieder(g)) >= 2
+}
+
+// GruppeSetzen keeps the person's category of any group of the list, at
+// any time (archiv#42): one of the chips, or her own word (eigen). What
+// it replaces is kept for Rückgängig. It answers the categories as they
+// now are, for the vault.
+func (n *Netz) GruppeSetzen(id, kat, eigen string) (map[string]gruppenAntwort, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	eigen = strings.Join(strings.Fields(eigen), " ")
+	if r := []rune(eigen); len(r) > eigeneLaenge {
+		eigen = string(r[:eigeneLaenge])
+	}
+	if kat == kategorieEigen && eigen == "" || kat != kategorieEigen && !slices.Contains(kategorien, kat) || !n.waehlbar(id) {
+		return nil, errFrageWeg
+	}
+	if kat != kategorieEigen {
+		eigen = ""
+	}
+	neu := gruppenAntwort{Kategorie: kat, Name: eigen, Am: n.now()}
+	if alt, da := n.gruppen[id]; da {
+		if alt.Kategorie == kat && alt.Name == eigen {
+			return maps.Clone(n.gruppen), nil
+		}
+		if alt.Kategorie != artSpaeter {
+			alt.Vorher = nil
+			neu.Vorher = &alt
+		}
+	}
+	n.gruppen[id] = neu
+	return maps.Clone(n.gruppen), nil
+}
+
+// GruppenZeile is a group of the list: its id, title, members, last
+// message, the person's category ("" none) and, without one, the
+// suggestion and whether the model made it.
+type GruppenZeile struct {
+	ID, Titel        string
+	Mitglieder       int
+	Zuletzt          time.Time
+	Kategorie, Eigen string
+	Vorschlag, Wort  string
+	Modell, Aktiv    bool
+}
+
+// Gruppenliste are the groups the person may name at any time (archiv#42:
+// not only when asked), the newest first.
+func (n *Netz) Gruppenliste() (out []GruppenZeile) {
+	if n == nil {
+		return nil
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for id, g := range n.gespraech {
+		if !n.waehlbar(id) {
+			continue
+		}
+		z := GruppenZeile{ID: id, Titel: g.Titel, Mitglieder: len(n.mitglieder(g)), Zuletzt: g.Zuletzt, Aktiv: n.now().Sub(g.Zuletzt) <= gruppeAktiv}
+		if a, da := n.gruppen[id]; da && a.Kategorie != artSpaeter {
+			z.Kategorie, z.Eigen = a.Kategorie, a.Name
+		}
+		z.Wort, z.Vorschlag = woerter.imTitel(g.Titel)
+		if m := n.modellKategorie(id); m != "" {
+			z.Vorschlag, z.Wort, z.Modell = m, "", true
+		}
+		out = append(out, z)
+	}
+	slices.SortFunc(out, func(a, b GruppenZeile) int { return cmp.Or(b.Zuletzt.Compare(a.Zuletzt), strings.Compare(a.ID, b.ID)) })
+	return out
+}
+
+// EigeneKategorien are the person's own words for groups, each once, by
+// name: offered again as chips.
+func (n *Netz) EigeneKategorien() (out []string) {
+	if n == nil {
+		return nil
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	for _, a := range n.gruppen {
+		if a.Kategorie == kategorieEigen && !slices.Contains(out, a.Name) {
+			out = append(out, a.Name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// Eingeordnet is a group the person named, as the page lists it; Wort
+// its category as she reads it.
 type Eingeordnet struct {
-	ID, Titel, Kategorie string
-	Am                   time.Time
+	ID, Titel, Kategorie, Wort string
+	Am                         time.Time
 }
 
 // Eingeordnete are the groups the person named (no Später), the newest first.
@@ -173,7 +299,7 @@ func (n *Netz) Eingeordnete() (out []Eingeordnet) {
 		if a.Kategorie == artSpaeter {
 			continue
 		}
-		out = append(out, Eingeordnet{ID: id, Titel: cmp.Or(n.gespraech[id].Titel, "eine Gruppe"), Kategorie: a.Kategorie, Am: a.Am})
+		out = append(out, Eingeordnet{ID: id, Titel: cmp.Or(n.gespraech[id].Titel, "eine Gruppe"), Kategorie: a.Kategorie, Wort: kategorieName(a.Kategorie, a.Name), Am: a.Am})
 	}
 	slices.SortFunc(out, func(a, b Eingeordnet) int { return cmp.Or(b.Am.Compare(a.Am), strings.Compare(a.ID, b.ID)) })
 	return out
@@ -191,7 +317,7 @@ func (n *Netz) Eingeordnetes(id string) (Eingeordnet, bool) {
 
 // eingeordnetSatz is a named group as a sentence: „„Familie Dopp“ ist für dich: Familie.“
 func eingeordnetSatz(e Eingeordnet) string {
-	return fmt.Sprintf("„%s“ ist für dich: %s.", e.Titel, kategorieWorte[e.Kategorie])
+	return fmt.Sprintf("„%s“ ist für dich: %s.", e.Titel, e.Wort)
 }
 
 // familienGruppen are the members of the groups the person named Familie;
@@ -244,7 +370,11 @@ func (n *Netz) gruppenGruende(k Kante) (out []string) {
 	var gs []grund
 	for _, id := range k.Gruppen {
 		kat, gesagt := n.kategorieVon(id)
-		if s := gruppenGrund(kat, n.gespraech[id].Titel); s != "" && !slices.ContainsFunc(gs, func(g grund) bool { return g.satz == s }) {
+		s := gruppenGrund(kat, n.gespraech[id].Titel)
+		if kat == kategorieEigen {
+			s = n.gruppen[id].Name + " (Gruppe „" + n.gespraech[id].Titel + "“)"
+		}
+		if s != "" && !slices.ContainsFunc(gs, func(g grund) bool { return g.satz == s }) {
 			gs = append(gs, grund{s, gesagt})
 		}
 	}

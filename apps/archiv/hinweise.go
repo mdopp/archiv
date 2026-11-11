@@ -43,16 +43,19 @@ import (
 // schreibt.“ A family kind makes the pair a question even without a tie.
 // Nothing is set without the person's tap.
 //
-// Limits: modellJeRunde messages a round, one after the other; none while
-// a lease holds the card (another window than the household's) or the
-// model does not answer: the rest waits for a later round, nothing piles
-// up. A pair is read in at most modellJePaar messages. Nothing of a
+// Limits (archiv#42, owner 2026-11-11: faster): while the vault is open a
+// round reads every candidate, one message after the other, and asks the
+// lease before each: any window standing, the proxy refusing or the model
+// silent, and the rest waits for a later round; nothing piles up. Every
+// modellJeSchub messages the pairs' suggestions are made anew, so the
+// page shows them while the round goes on. The closing ends it (the
+// round's context). A pair is read in at most modellJePaar messages. Nothing of a
 // message or of an answer is logged; the text leaves the vault only in
 // the request to the box's model.
 
 const (
 	modellSicher     = 0.7 // a reading counts from this sureness on
-	modellJeRunde    = 10  // messages a round sends at most
+	modellJeSchub    = 10  // messages read before the suggestions are made anew
 	modellJePaar     = 3   // messages read for one pair at most
 	modellText       = 600 // characters of a message the model gets
 	modellTreffer    = 500 // the newest messages with a word a round reads from msgvault
@@ -430,8 +433,8 @@ type kandidat struct {
 // kandidaten are the messages of roh worth a question, newest first: not
 // read before, a relation word in them (imText), a known sender and at
 // least one known recipient (in a chat the person is one, if she did not
-// send it), and a pair not yet read modellJePaar times. At most modellJeRunde.
-func (n *Netz) kandidaten(roh []rohNachricht, ks []buchKarte, gs map[string]gelesen) (out []kandidat) {
+// send it), and a pair not yet read modellJePaar times. At most hoechstens (0: all).
+func (n *Netz) kandidaten(roh []rohNachricht, ks []buchKarte, gs map[string]gelesen, hoechstens int) (out []kandidat) {
 	ich := n.Ich()
 	je := map[string]int{}
 	zaehlen := func(von string, an []string) {
@@ -471,7 +474,7 @@ func (n *Netz) kandidaten(roh []rohNachricht, ks []buchKarte, gs map[string]gele
 		}
 		out = append(out, kandidat{id: r.ID, am: r.Am, von: von, an: an, treffer: treffer, text: r.Text})
 		zaehlen(von, an)
-		if len(out) == modellJeRunde {
+		if len(out) == hoechstens {
 			break
 		}
 	}
@@ -572,7 +575,7 @@ func (n *Netz) bekanntUeber(ids []string) (out []string) {
 			for _, g := range n.paarGruppen[paarKey(a, b)] {
 				s := fmt.Sprintf("%s und %s sind beide in der Gruppe „%s“", name(a), name(b), n.gespraech[g].Titel)
 				if kat, _ := n.kategorieVon(g); kat != "" {
-					s += " (" + kategorieWorte[kat] + ")"
+					s += " (" + kategorieName(kat, n.gruppen[g].Name) + ")"
 				}
 				out = append(out, s)
 			}
@@ -626,10 +629,11 @@ func hinweisAntwort(s string, buchstaben map[string]string) (out []modellHinweis
 	return out
 }
 
-// hinweiseRunde sends the round's messages to the model, one after the
-// other, keeps each answer in the vault at once and gives the net the
-// pairs' suggestions. The model taken or silent: it stops, the rest waits.
-// It logs counts, never a text or an answer.
+// hinweiseRunde sends the candidates to the model, one after the other,
+// the lease asked before each; each answer is kept in the vault at once,
+// and every modellJeSchub the net gets the pairs' suggestions. The model
+// taken or silent, or the vault closing: it stops, the rest waits. It
+// logs counts, never a text or an answer.
 func (u *Umfeld) hinweiseRunde(ctx context.Context, innen Innen, n *Netz, ks []buchKarte) {
 	if !u.Modell.eingerichtet() || u.Msgvault == nil || n == nil {
 		return
@@ -642,37 +646,57 @@ func (u *Umfeld) hinweiseRunde(ctx context.Context, innen Innen, n *Netz, ks []b
 		return
 	}
 	gs := hinweiseLaden(innen)
-	ks2 := n.kandidaten(roh, ks, gs)
-	if len(ks2) == 0 {
-		return
+	offen := len(n.kandidaten(roh, ks, gs, 0))
+	u.setzen(func(s *UmfeldStand) { s.ModellGelesen, s.ModellOffen, s.ModellGezaehlt = len(gs), offen, true })
+	gelesenJetzt, grund := 0, ""
+	for grund == "" {
+		schub := n.kandidaten(roh, ks, gs, modellJeSchub)
+		if len(schub) == 0 {
+			break
+		}
+		neu := 0
+		for _, k := range schub {
+			if grund = u.modellLesen(ctx, innen, n, k, gs); grund != "" {
+				break
+			}
+			neu++
+		}
+		if neu > 0 {
+			gelesenJetzt += neu
+			n.hinweiseSetzen(gs)
+			offen = max(0, offen-neu)
+			u.setzen(func(s *UmfeldStand) { s.ModellGelesen, s.ModellOffen, s.ModellGezaehlt = len(gs), offen, true })
+		}
+	}
+	if grund != "" && ctx.Err() == nil {
+		log.Printf("archiv: Umfeld: Beziehungshinweise warten auf eine spätere Runde: %s", grund)
+	}
+	if gelesenJetzt > 0 {
+		log.Printf("archiv: Umfeld: %d Nachrichten mit Beziehungswörtern vom Modell der Box gelesen, %d warten", gelesenJetzt, offen)
+	}
+}
+
+// modellLesen asks the lease, then the model about k, and keeps what it
+// read in gs and the vault; "" done, else why it stopped (never a text).
+func (u *Umfeld) modellLesen(ctx context.Context, innen Innen, n *Netz, k kandidat, gs map[string]gelesen) string {
+	if ctx.Err() != nil {
+		return "der Tresor schließt"
 	}
 	modell, err := u.Modell.frei(ctx)
 	if err != nil {
-		log.Printf("archiv: Umfeld: Beziehungshinweise warten auf eine spätere Runde: %v", err)
-		return
+		return err.Error()
 	}
-	gelesenJetzt := 0
-	for _, k := range ks2 {
-		frage, buchstaben := n.hinweisFrage(k)
-		antwort, err := u.Modell.fragen(ctx, modell, hinweisSystem(), frage)
-		if err != nil {
-			if ctx.Err() == nil {
-				log.Printf("archiv: Umfeld: Beziehungshinweise warten auf eine spätere Runde: %v", err)
-			}
-			break
-		}
-		gs[k.id] = gelesen{Am: u.now(), Von: k.von, An: k.an, Zitat: k.treffer[0].Zitat, Hinweise: hinweisAntwort(antwort, buchstaben)}
-		if err := jsonImTresor(innen.umfeldHinweise(), gs); err != nil {
-			log.Printf("archiv: Umfeld: Beziehungshinweise speichern: %v", err)
-			break
-		}
-		gelesenJetzt++
+	frage, buchstaben := n.hinweisFrage(k)
+	antwort, err := u.Modell.fragen(ctx, modell, hinweisSystem(), frage)
+	if err != nil {
+		return err.Error()
 	}
-	if gelesenJetzt > 0 {
-		n.hinweiseSetzen(gs)
-		u.geaendert()
-		log.Printf("archiv: Umfeld: %d Nachrichten mit Beziehungswörtern vom Modell der Box gelesen", gelesenJetzt)
+	gs[k.id] = gelesen{Am: u.now(), Von: k.von, An: k.an, Zitat: k.treffer[0].Zitat, Hinweise: hinweisAntwort(antwort, buchstaben)}
+	if err := jsonImTresor(innen.umfeldHinweise(), gs); err != nil {
+		delete(gs, k.id)
+		return "speichern: " + err.Error()
 	}
+	return ""
 }
 
 // modellAus is the box's model from the environment laib's template sets

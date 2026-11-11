@@ -74,6 +74,9 @@ var meldungen = map[string]string{
 	"zusammen":      "Die beiden sind jetzt eine Person.",
 	"abgleich":      "Das Archiv gleicht deine Kontakte und Kalender jetzt ab.",
 	"umfeld":        saysUmfeldGespeichert,
+	"geb-ja":        "Gemerkt. Der Geburtstag bleibt in deinem Archiv.",
+	"geb-nein":      "Gemerkt: Das ist nicht der Geburtstag. Das Archiv schlägt ihn nicht wieder vor.",
+	"geb-weg":       "Vergessen.",
 	"zurueck":       "Rückgängig gemacht. Die Frage kommt wieder.",
 	"kante-zurueck": saysKanteZurueck,
 }
@@ -300,6 +303,8 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/umfeld/schluessel", w.umfeldSchluessel)
 	mux.HandleFunc("POST /tresor/umfeld/verbergen", w.umfeldVerbergen)
 	mux.HandleFunc("POST /tresor/umfeld/antwort", w.umfeldAntwort)
+	mux.HandleFunc("GET "+erkanntPfad, w.erkanntGet)
+	mux.HandleFunc("POST "+erkanntPfad+"/geburtstag", w.erkanntGeburtstag)
 	mux.HandleFunc("GET /tresor/kante", w.kanteGet)
 	mux.HandleFunc("GET /tresor/kante/bild", w.kanteBild)
 	return mux

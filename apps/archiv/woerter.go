@@ -36,9 +36,9 @@ type woerterbuch struct {
 	nichtName map[string]bool     // words that are also names: never a suggestion from a name
 	// the name patterns (namensmuster.go): the words of namensmuster.worte
 	// by vergleich with their kinds, and its von, ueber, ex and und words
-	musterArten               map[string][]string
-	von, ueber, ex, und       map[string]bool
-	formen    []string            // every word as text may spell it, lower case, for msgvault's filter
+	musterArten         map[string][]string
+	von, ueber, ex, und map[string]bool
+	formen              []string // every word as text may spell it, lower case, for msgvault's filter
 }
 
 // woerter is beziehungswoerter.yml; a broken file stops the archive at its

@@ -74,7 +74,9 @@ func TestNamensmusterImNetz(t *testing.T) {
 			t.Errorf("no question %q: %v", want, got)
 		}
 	}
-	if slices.ContainsFunc(got, func(s string) bool { return strings.HasPrefix(s, "Peter via Lena>") || strings.HasPrefix(s, "Lena>Peter") }) {
+	if slices.ContainsFunc(got, func(s string) bool {
+		return strings.HasPrefix(s, "Peter via Lena>") || strings.HasPrefix(s, "Lena>Peter")
+	}) {
 		t.Fatalf("„via“ asked: %v", got)
 	}
 	if slices.ContainsFunc(got, func(s string) bool { return strings.HasPrefix(s, "Sabine (Mama von Lena)>Anna Berg") }) {
