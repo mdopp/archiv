@@ -9,4 +9,7 @@
 # 23,596: raised 2026-11-12 with the counts for Homes (homes#362, +126: aufgaben.go and the
 # missing keys as one function): apps/ at 23,595 production lines, the minimum the owner asked
 # for; his feature request (2026-11-12) is the yes.
-23596 apps
+# 24,074: raised 2026-11-12 with the Datenpfleger (archiv#58, +478: pfleger.go, pfleger_seite.go,
+# the photos without a date in the net's table): apps/ at 24,073 production lines, the minimum;
+# the owner's feature request (2026-11-12, archiv#58) is the yes.
+24074 apps

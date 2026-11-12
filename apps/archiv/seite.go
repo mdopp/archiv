@@ -92,6 +92,8 @@ var meldungen = map[string]string{
 	"verstorben":    "Als verstorben markiert.",
 	"lebt":          "Markierung entfernt.",
 	"person-weg":    "Gelöscht, mit allen Beziehungen, die du angegeben hast.",
+	"pflege-passt":  saysPflegePasst,
+	"pflege-weg":    saysPflegeWeg,
 }
 
 // Web is the whole HTTP side.
@@ -118,6 +120,7 @@ type Web struct {
 	Personen    *Personenkarte // „Ist das dieselbe Person?“
 	Umfeld      *Umfeld        // who stands close to whom (nil: not set up)
 	Aufgaben    *Aufgaben      // the counts Homes may know (aufgaben.go)
+	pflege      pflegeZahl     // the Datenpfleger's count (pfleger.go)
 	Now         func() time.Time
 }
 
@@ -328,6 +331,8 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST "+erkanntPfad+"/herkunft", w.erkanntHerkunft)
 	mux.HandleFunc("POST "+erkanntPfad+"/paar", w.erkanntPaar)
 	mux.HandleFunc("GET /tresor/kante", w.kanteGet)
+	mux.HandleFunc("GET "+pflegePfad, w.pflegeGet)
+	mux.HandleFunc("POST "+pflegePfad+"/passt", w.pflegePasst)
 	mux.HandleFunc("GET /tresor/kante/bild", w.kanteBild)
 	return mux
 }
@@ -625,6 +630,9 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		}
 		b.WriteString(`</div>`)
 		w.arbeitsplatz(&b, r, st.Bereit)
+		if st.Bereit {
+			w.pflegeZeile(&b)
+		}
 		w.quellenZeile(&b, true)
 		// what the page must say about the open vault, after the work (owner 2026-11-11: the work first)
 		b.WriteString(`<p class="ruhig klein" id=schliesst data-live>`)

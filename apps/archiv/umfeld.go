@@ -300,7 +300,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 	defer u.setzen(func(s *UmfeldStand) { s.Laeuft = false })
 
 	alt, _ := tabelleLaden(innen)
-	tab := netzTabelle{Format: netzFormat, Version: netzVersion, Geholt: alt.Geholt, Fotos: alt.Fotos, Namen: alt.Namen, Haushalt: alt.Haushalt, Geb: alt.Geb, Gespraeche: alt.Gespraeche}
+	tab := netzTabelle{Format: netzFormat, Version: netzVersion, Geholt: alt.Geholt, Fotos: alt.Fotos, Namen: alt.Namen, Haushalt: alt.Haushalt, Geb: alt.Geb, Gespraeche: alt.Gespraeche, OhneDatum: alt.OhneDatum}
 	im := &Immich{URL: u.URL, Key: string(trimNL(key))}
 	as, err := im.Aufnahmen(ctx, func(n int) { u.setzen(func(s *UmfeldStand) { s.Gelesen = n }) })
 	if ctx.Err() != nil {
@@ -319,7 +319,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 		}
 		log.Printf("archiv: Umfeld: Immich: %v", err)
 	} else {
-		tab.Geholt, tab.Fotos, tab.Namen, tab.Geb = u.now(), nil, map[string]string{}, map[string]string{}
+		tab.Geholt, tab.Fotos, tab.Namen, tab.Geb, tab.OhneDatum = u.now(), nil, map[string]string{}, map[string]string{}, nil
 		for _, a := range as {
 			f := netzFoto{ID: a.ID, Lat: a.Exif.Lat, Lng: a.Exif.Lng, Stadt: strings.TrimSpace(a.Exif.Stadt)}
 			f.T, _ = time.Parse(time.RFC3339Nano, a.Exif.Zeit)
@@ -333,8 +333,11 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 					tab.Geb[p.ID] = cmp.Or(gebLesen(p.Geb), tab.Geb[p.ID])
 				}
 			}
-			if len(f.Wer) > 0 && !f.T.IsZero() {
+			switch {
+			case len(f.Wer) > 0 && !f.T.IsZero():
 				tab.Fotos = append(tab.Fotos, f)
+			case len(f.Wer) > 0:
+				tab.OhneDatum = append(tab.OhneDatum, f.ID)
 			}
 		}
 	}

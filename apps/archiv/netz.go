@@ -115,6 +115,7 @@ type netzTabelle struct {
 	// Gespraeche are msgvault's group chats and mail threads, matched to
 	// the contacts (gespraeche.go); kept as last read while msgvault is busy.
 	Gespraeche []netzGespraech `json:"gespraeche,omitempty"`
+	OhneDatum  []string        `json:"ohne_datum,omitempty"` // photos with people but no date: the net skips them, the Datenpfleger names them
 }
 
 // Knoten is a person: an Immich person (ID its id) or a contact without

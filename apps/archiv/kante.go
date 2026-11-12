@@ -213,14 +213,15 @@ func (n *Netz) fotoTage(a, b string) ([]FotoTag, int) {
 	return out, tage
 }
 
-// HatFoto: id is a photo of the net's table (the thumbnail route serves no other).
+// HatFoto: id is a photo of the net's table, or one of its photos without a date
+// (the Datenpfleger's); the thumbnail route serves no other.
 func (n *Netz) HatFoto(id string) bool {
 	if n == nil || id == "" {
 		return false
 	}
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	return slices.ContainsFunc(n.st.Fotos, func(f netzFoto) bool { return f.ID == id })
+	return slices.ContainsFunc(n.st.Fotos, func(f netzFoto) bool { return f.ID == id }) || slices.Contains(n.st.OhneDatum, id)
 }
 
 // teilnehmerKnoten are the shown nodes of a conversation's cards, the

@@ -1244,6 +1244,37 @@ waiting three days for an archive not set up, an error with its fix,
 missing keys while backups wait, msgvault not starting. The record lives
 beside it in `/data/archiv-stand.json`.
 
+## The Datenpfleger (archiv#58)
+
+While the vault is open, the archive finds what keeps the person's data
+from being clean and complete (`pfleger.go`, `pfleger_seite.go`; owner
+2026-11-12), with the access it already has and rules only, no model.
+The start says „N Dinge zum Aufräumen ›“; `/tresor/pflege` shows one
+finding per screen with the step in the app that owns the data, „Passt
+so“ and „Nächstes“. „Passt so“ is kept in the vault
+(`pflege-passt.json`): that finding never returns; an aggregate keeps
+each of its parts, so only a new part brings it back. A finding fixed in
+its app is gone at the next Abgleich or Umfeld round.
+
+| Area | Check | Step shown |
+|---|---|---|
+| Kontakte | a card without a name, or with only a number as its name | name it (or delete it) on the phone |
+| Kontakte | a number of 6–8 digits that starts with neither 0 nor + | add the area code on the phone |
+| Kontakte | a number twice on a card, in any spelling (all such cards one finding) | the admin runs `homes nummern-bereinigen` (homes#359) |
+| Kontakte | a birthday the person confirmed from the wishes that no card and no Immich person has | add it on the phone's card, or in Immich for a person without a card |
+| Kalender | the same title at the same start under two UIDs in one calendar | delete one in the calendar it came from |
+| Fotos | photos with people but no date (the net skips them) | edit the date in Immich (thumbnails link there) |
+| Fotos | photos with people and a date but no place | add the place in Immich |
+
+There is no „Beheben“ yet: the archive writes no book (Radicale is read
+only), and its one way into Homes (`/intern/uebernahme`) takes relations
+only, so every step is in the owning app. Left out: **Dokumente** (the
+archive has no Paperless access; adding one is a new key and flow, the
+owner's card first), duplicate cards (Google's job, owner 2026-11-11),
+unnamed faces (Homes' „Wer ist das?“), subscribed calendars that stopped
+(Radicale does not say which calendar is a subscription). Nothing of a
+finding leaves the vault; Homes gets their number (`aufraeumen`, below).
+
 ## Counts for Homes
 
 What waits for the person reaches Homes as counts only (owner
@@ -1252,7 +1283,7 @@ archive's owner alone: `GET /intern/aufgaben` with `X-Archiv-Homes`
 answers `{offen, am, fragen, aufraeumen, schluessel_fehlt}` (`aufgaben.go`).
 `fragen` are the open questions and suggestions of the workplace
 („Wie steht … zu …?“, „Kennen sich …?“, a group's name, what was
-recognised), `aufraeumen` what the Datenpfleger found (archiv#58),
+recognised), `aufraeumen` what the Datenpfleger found (below),
 `schluessel_fehlt` a key the archive waits for (Signal, WhatsApp, Immich;
 the page is `/tresor/quellen`). They are counted only while the vault is
 open; the last count stays outside it in `/data/aufgaben.json` with its
