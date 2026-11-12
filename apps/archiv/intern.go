@@ -20,6 +20,7 @@ import (
 //	GET /intern/whatsapp/medien/<pfad>     one WhatsApp media file from letzte/, decrypted — only
 //	                                       while the vault is open (the private key is inside);
 //	                                       with Range, so a phone resumes a large video
+//	GET /intern/aufgaben                   how many things wait for the person, counts only (aufgaben.go)
 //
 // The signal and WhatsApp database backups in letzte/ are encrypted by
 // the messengers themselves; Homes serves those straight from the inbox
@@ -77,6 +78,8 @@ func (w *Web) intern(rw http.ResponseWriter, r *http.Request) {
 		}
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.Write(b)
+	case r.URL.Path == "/intern/aufgaben":
+		w.aufgaben(rw)
 	case strings.HasPrefix(r.URL.Path, "/intern/whatsapp/medien/"):
 		w.medium(rw, r, strings.TrimPrefix(r.URL.Path, "/intern/whatsapp/medien/"))
 	default:

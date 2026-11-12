@@ -1244,6 +1244,22 @@ waiting three days for an archive not set up, an error with its fix,
 missing keys while backups wait, msgvault not starting. The record lives
 beside it in `/data/archiv-stand.json`.
 
+## Counts for Homes
+
+What waits for the person reaches Homes as counts only (owner
+2026-11-12, homes#362), for „Deine Aufgaben“ and Start, shown to the
+archive's owner alone: `GET /intern/aufgaben` with `X-Archiv-Homes`
+answers `{offen, am, fragen, aufraeumen, schluessel_fehlt}` (`aufgaben.go`).
+`fragen` are the open questions and suggestions of the workplace
+(„Wie steht … zu …?“, „Kennen sich …?“, a group's name, what was
+recognised), `aufraeumen` what the Datenpfleger found (archiv#58),
+`schluessel_fehlt` a key the archive waits for (Signal, WhatsApp, Immich;
+the page is `/tresor/quellen`). They are counted only while the vault is
+open; the last count stays outside it in `/data/aufgaben.json` with its
+time `am`, and `offen: false` says it is not of now. No name, no kind,
+nothing of a question; not in `laib-status.json` (the admin's). laib
+`docs/DATA.md` describes the flow.
+
 
 ### When something fails
 

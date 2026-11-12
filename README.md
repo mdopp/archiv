@@ -70,7 +70,7 @@ Made in the Werkstatt (`laib-app new archiv`).
 | | |
 |---|---|
 | env | `ARCHIV_PERSON` (the person's login, required), `PROXY_SECRET` (the route's proxySecret; Caddy sends it as `X-Archiv-Proxy`), `ARCHIV_HOMES_SECRET` (Homes' `/intern/…`), `TZ`; optional `PUBLIC_URL`, `LEERLAUF` (seconds, default 7200) |
-| mounts | `/data` ← `${DATA_DIR}/archiv/<person>` (`tresor/`, `briefkasten/`, `schluessel/`, `gesehen/`, `briefkasten.pub`, `laib-status.json`, `archiv-stand.json`); `/eingang` ← `${DATA_DIR}/archiv-eingang/<person>` (read, write, delete) |
+| mounts | `/data` ← `${DATA_DIR}/archiv/<person>` (`tresor/`, `briefkasten/`, `schluessel/`, `gesehen/`, `briefkasten.pub`, `laib-status.json`, `archiv-stand.json`, `aufgaben.json`); `/eingang` ← `${DATA_DIR}/archiv-eingang/<person>` (read, write, delete) |
 | backup | `${DATA_DIR}/archiv-eingang/<person>/letzte` is `backup: false` (a phone backup itself, GBs that change nightly) |
 | FUSE | `AddDevice=/dev/fuse`, `AddCapability=SYS_ADMIN`; the supervisor runs as the container's root |
 | port | `8080` in the container (publish on `127.0.0.1` only, `lan: false`) |

@@ -273,29 +273,43 @@ func (w *Web) quellenProbleme(offen bool) (p []string) {
 	if f != nil {
 		p = append(p, map[string]string{"signal": "Signal", "mail": "E-Mail", "sms": "SMS", "whatsapp": "WhatsApp", "sozial": "Facebook/LinkedIn"}[f.Quelle]+" meldet einen Fehler")
 	}
-	if w.fehlenSignalSchluessel() {
-		p = append(p, "Signal: Schlüssel fehlt")
-	}
-	innen, auf := w.Tresor.Innen()
-	if offen && auf && wartende(w.Eingang)["whatsapp"].Wartend > 0 {
-		if _, err := os.Stat(innen.WhatsAppSchluessel()); err != nil {
-			p = append(p, "WhatsApp: Schlüssel fehlt")
-		}
-	}
+	p = append(p, w.fehlendeSchluessel(offen)...)
 	if a := w.Abgleich; offen && a.Eingerichtet() {
 		if st := a.Stand(); st.Fehler != "" || st.Kontakte.Fehler != "" || st.KalenderFehler != "" {
 			p = append(p, "Kontakte: Abgleich gestört")
 		}
 	}
-	if u := w.Umfeld; offen && auf && u.Eingerichtet() {
-		if _, hat := HatImmichSchluessel(innen); !hat {
-			p = append(p, "Fotos: Immich-Schlüssel fehlt")
-		} else if u.Stand().Fehler != "" {
-			p = append(p, "Fotos: Umfeld gestört")
+	if u := w.Umfeld; offen && u.Eingerichtet() && u.Stand().Fehler != "" {
+		if innen, auf := w.Tresor.Innen(); auf {
+			if _, hat := HatImmichSchluessel(innen); hat {
+				p = append(p, "Fotos: Umfeld gestört")
+			}
 		}
 	}
 	if konten, _ := imapKonten(w.Schluessel); len(ein) == 0 && len(konten) == 0 && len(p) == 0 {
 		p = append(p, "noch nichts eingerichtet")
+	}
+	return p
+}
+
+// fehlendeSchluessel are the keys the archive waits for and cannot find,
+// as the sources' line says them. Only the Signal number lies outside the
+// vault; the others are known while it is open (offen).
+func (w *Web) fehlendeSchluessel(offen bool) (p []string) {
+	if w.fehlenSignalSchluessel() {
+		p = append(p, "Signal: Schlüssel fehlt")
+	}
+	innen, auf := w.Tresor.Innen()
+	if !offen || !auf {
+		return p
+	}
+	if wartende(w.Eingang)["whatsapp"].Wartend > 0 {
+		if _, err := os.Stat(innen.WhatsAppSchluessel()); err != nil {
+			p = append(p, "WhatsApp: Schlüssel fehlt")
+		}
+	}
+	if _, hat := HatImmichSchluessel(innen); w.Umfeld.Eingerichtet() && !hat {
+		p = append(p, "Fotos: Immich-Schlüssel fehlt")
 	}
 	return p
 }
