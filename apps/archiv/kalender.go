@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 )
@@ -329,31 +328,12 @@ func icsText(v string) string {
 
 // kalenderZahlen reads every calendar file in the vault: the page's counts.
 func kalenderZahlen(innen Innen) ([]KalenderZahl, error) {
-	eintraege, err := os.ReadDir(innen.Kalender())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
+	ks, err := kalenderAlle(innen)
 	var out []KalenderZahl
-	var fehler []string
-	for _, e := range eintraege {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasPrefix(e.Name(), ".") {
-			continue
-		}
-		k, err := kalenderLaden(filepath.Join(innen.Kalender(), e.Name()))
-		if err != nil {
-			fehler = append(fehler, err.Error())
-			continue
-		}
+	for _, k := range ks {
 		out = append(out, k.Zahl())
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	if len(fehler) > 0 {
-		return out, errors.New(strings.Join(fehler, "; "))
-	}
-	return out, nil
+	return out, err
 }
 
 // kalenderName is how the page names a calendar: its display name, else

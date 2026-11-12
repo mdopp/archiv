@@ -28,7 +28,7 @@ type AufgabenStand struct {
 	Offen           bool       `json:"offen"`            // the vault is open: the counts are of now
 	Am              *time.Time `json:"am,omitempty"`     // when they were counted; absent: never yet
 	Fragen          int        `json:"fragen"`           // open questions and suggestions on the workplace (/tresor)
-	Aufraeumen      int        `json:"aufraeumen"`       // what the Datenpfleger found (archiv#58)
+	Aufraeumen      int        `json:"aufraeumen"`       // what the Datenpfleger found (pfleger.go, /tresor/pflege)
 	SchluesselFehlt bool       `json:"schluessel_fehlt"` // a key the archive waits for is missing (/tresor/quellen)
 }
 
@@ -87,6 +87,9 @@ func (w *Web) aufgabenZaehlen(st Stand) {
 	s := AufgabenStand{SchluesselFehlt: len(w.fehlendeSchluessel(true)) > 0}
 	if n := w.Umfeld.Netz(); n != nil {
 		s.Fragen = len(n.Fragen()) + n.Erkannt(w.Umfeld.Stand(), w.Umfeld.modellDa()).Vorschlaege()
+	}
+	if innen, auf := w.Tresor.Innen(); auf {
+		s.Aufraeumen = w.pflege.zaehlen(innen, w.Umfeld.Netz(), w.jetzt(), false)
 	}
 	w.Aufgaben.Gezaehlt(s, w.jetzt())
 }
