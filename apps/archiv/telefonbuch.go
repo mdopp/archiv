@@ -11,7 +11,8 @@ import (
 // What the phone books say (as Homes' internal/netz/telefonbuch.go): the
 // household's book homes/haushalt-kontakte and the person's mirrored
 // handy-kontakte (from the archive's own contact store), firm cards
-// aside. The same postal address is a tie, the same company a weak one,
+// aside. The same postal address is a tie; the same company or work
+// address (ADR TYPE=work, a company's) is none, only a question,
 // and a relation a phone wrote a strong one: vCard 4's RELATED, iOS's
 // grouped X-ABRELATEDNAMES with its X-ABLabel, Android's X-ANDROID-CUSTOM
 // vnd.android.cursor.item/relation. A relation names its other by UID or
@@ -31,6 +32,8 @@ type buchKarte struct {
 	firma    string   // ORG's first part, as written
 	adressen []string // each ADR: street and code, else the whole line
 	adrText  []string // each ADR as a page says it: the street as written, else the whole line
+	arbeit   []string // each work ADR (TYPE=work) as adressen, …
+	arbText  []string // … and as adrText: a company's address, never a home
 	emails   []string
 	tels     []string
 	rel      [][2]string
@@ -209,19 +212,7 @@ func karteAus(buch string, zeilen []vcardZeile) (buchKarte, bool) {
 		case "NICKNAME":
 			k.spitz = spitznamen(k.spitz, z.wert)
 		case "ADR":
-			p := append(vTeile(z.wert), make([]string, 7)...)
-			if s := strasse(p[2]); s != "" && strings.TrimSpace(p[5]) != "" {
-				k.strassen = append(k.strassen, s+"|"+strings.TrimSpace(p[5]))
-			}
-			a := joinSome(", ", p[0], p[1], p[2], joinSome(" ", p[5], p[3]), p[4], p[6])
-			if a == "" {
-				continue
-			}
-			text := a
-			if strings.TrimSpace(p[2]) != "" {
-				a, text = strings.TrimSpace(p[2])+strings.TrimSpace(p[5]), joinSome(" ", p[2])
-			}
-			k.adressen, k.adrText = append(k.adressen, a), append(k.adrText, text)
+			k.adresseDazu(z)
 		case "EMAIL":
 			if v = strings.TrimSpace(strings.TrimPrefix(v, "mailto:")); v != "" {
 				k.emails = append(k.emails, v)
@@ -244,6 +235,31 @@ func karteAus(buch string, zeilen []vcardZeile) (buchKarte, bool) {
 	k.key = buch + uid
 	k.rel = relationen(zeilen)
 	return k, true
+}
+
+// adresseDazu reads one ADR: a home's street for the neighbours and its
+// address, or a work address (TYPE=work; vCard 2.1's ADR;WORK), which is
+// a company's: no street, apart from the homes (owner 2026-11-11).
+func (k *buchKarte) adresseDazu(z vcardZeile) {
+	p := append(vTeile(z.wert), make([]string, 7)...)
+	_, alt := z.params["WORK"]
+	arbeit := alt || slices.Contains(strings.Split(strings.ToLower(z.params["TYPE"]), ","), "work")
+	if s := strasse(p[2]); s != "" && strings.TrimSpace(p[5]) != "" && !arbeit {
+		k.strassen = append(k.strassen, s+"|"+strings.TrimSpace(p[5]))
+	}
+	a := joinSome(", ", p[0], p[1], p[2], joinSome(" ", p[5], p[3]), p[4], p[6])
+	if a == "" {
+		return
+	}
+	text := a
+	if strings.TrimSpace(p[2]) != "" {
+		a, text = strings.TrimSpace(p[2])+strings.TrimSpace(p[5]), joinSome(" ", p[2])
+	}
+	if arbeit {
+		k.arbeit, k.arbText = append(k.arbeit, a), append(k.arbText, text)
+	} else {
+		k.adressen, k.adrText = append(k.adressen, a), append(k.adrText, text)
+	}
 }
 
 // spitznamen adds a NICKNAME's names (a list, split at its unescaped
@@ -329,25 +345,26 @@ func relationen(zeilen []vcardZeile) (out [][2]string) {
 	return out
 }
 
-// gruppen are the ties of the same address and the same company, each
-// with its value as the first card wrote it (Wie: the street, the ORG),
-// so a page can say which (owner 2026-11-11).
+// gruppen are the ties of the same address, the same company and the
+// same work address, each with its value as the first card wrote it
+// (Wie: the street, the ORG), so a page can say which (owner 2026-11-11).
 func gruppen(ks []buchKarte) (out []festBand) {
-	adr, firma, wie := map[string][]string{}, map[string][]string{}, map[string]string{}
-	for _, k := range ks {
-		for i, a := range k.adressen {
+	adr, firma, arbeit, wie := map[string][]string{}, map[string][]string{}, map[string][]string{}, map[string]string{}
+	dazu := func(m map[string][]string, art, key string, roh, text []string) {
+		for i, a := range roh {
 			if a = klar(a); a != "" {
-				adr[a] = append(adr[a], k.key)
-				wie[bandAdresse+a] = cmp.Or(wie[bandAdresse+a], k.adrText[i])
+				m[a] = append(m[a], key)
+				wie[art+a] = cmp.Or(wie[art+a], text[i])
 			}
 		}
-		if f := klar(k.firma); f != "" {
-			firma[f] = append(firma[f], k.key)
-			wie[bandFirma+f] = cmp.Or(wie[bandFirma+f], k.firma)
-		}
 	}
-	for art, m := range map[string]map[string][]string{bandAdresse: adr, bandFirma: firma} {
-		grenze := map[string]int{bandAdresse: maxAdresse, bandFirma: maxFirma}[art]
+	for _, k := range ks {
+		dazu(adr, bandAdresse, k.key, k.adressen, k.adrText)
+		dazu(arbeit, bandArbeit, k.key, k.arbeit, k.arbText)
+		dazu(firma, bandFirma, k.key, []string{k.firma}, []string{k.firma})
+	}
+	for art, m := range map[string]map[string][]string{bandAdresse: adr, bandFirma: firma, bandArbeit: arbeit} {
+		grenze := map[string]int{bandAdresse: maxAdresse, bandFirma: maxFirma, bandArbeit: maxFirma}[art]
 		for wert, keys := range m {
 			if len(keys) > grenze {
 				continue

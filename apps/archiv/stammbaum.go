@@ -159,7 +159,7 @@ func (n *Netz) Stammbaum() Stammbaum {
 	}
 	n.mu.Unlock()
 	sb := baumLegen(linien, knoten, geb, ich)
-	sb.Fragen = baumFragen(sb.Weitere, sb.Linien, ich, weg)
+	sb.Fragen = slices.DeleteFunc(baumFragen(sb.Weitere, sb.Linien, ich, weg), func(f BaumFrage) bool { return knoten[f.X].Tot || knoten[f.Y].Tot })
 	return sb
 }
 

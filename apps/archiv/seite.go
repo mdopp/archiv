@@ -89,6 +89,8 @@ var meldungen = map[string]string{
 	"zurueck":       "Rückgängig gemacht. Die Frage kommt wieder.",
 	"kante-zurueck": saysKanteZurueck,
 	"umbenannt":     "Umbenannt.",
+	"verstorben":    "Als verstorben markiert.",
+	"lebt":          "Markierung entfernt.",
 	"person-weg":    "Gelöscht, mit allen Beziehungen, die du angegeben hast.",
 }
 

@@ -721,7 +721,11 @@ inside the open vault; closed, there is no net, not even in memory.
   same name (Homes keeps them named alike). A shared company alone is no
   tie (owner 2026-11-11): it is the last kind of question, „Kennen sich
   X und Y? (Beide Karten nennen die Firma …)“, Ja a tie the person stated
-  (never written to an address book), Nein never asked again. Every
+  (never written to an address book), Nein never asked again. A work
+  address (`ADR;TYPE=work`, vCard 2.1 `ADR;WORK`) is a company's
+  (owner 2026-11-11): it is never a home, a tie or a neighbour's street,
+  only the same question („Beide Karten nennen die Arbeitsadresse …“).
+  The employer the box's model reads from mail makes no tie at all. Every
   phone-book reason says its value („Gleiche Adresse auf beiden Karten:
   Mühlenweg 4“, „Max Langs Karte nennt Ute Lang als Schwester“).
   Shared acquaintances („Gemeinsame Bekannte: …“ on the edge and person
@@ -903,6 +907,12 @@ inside the open vault; closed, there is no net, not even in memory.
   when and what there was. Shown only once a chat of two was read
   (without them the archive cannot tell silence). „Nicht mehr erinnern“
   on the person's page keeps it in the vault (`umfeld/ruhen.json`).
+- **Verstorben** (owner 2026-11-11): „Ist verstorben“ on a person's page
+  marks her, „Markierung entfernen“ takes it back (`umfeld/verstorben.json`).
+  She stays in the net, the list and the Stammbaum with „†“ after her
+  name; the archive asks nothing about her any more (no question, no
+  relation hint, no place in the tree, no birthday, town or employer) and
+  „Lange nichts gehört“ never names her.
 - `archiv umfeld-gespraeche -sql` prints the statement as msgvault's
   request body; `archiv umfeld-gespraeche < antwort.json` reads an answer
   as a round does (`integration.sh` runs both against the real msgvault).

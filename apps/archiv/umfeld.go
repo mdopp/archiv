@@ -240,6 +240,8 @@ func (u *Umfeld) netzBauen(innen Innen, tab netzTabelle) *Netz {
 	n.angelegtSetzen(angelegtLaden(innen))
 	n.baumWeg = baumWegLaden(innen)
 	n.ruhen = ruhenLaden(innen)
+	n.verstorben = markeLaden(innen.umfeldVerstorben())
+	n.totMarken()
 	return n
 }
 

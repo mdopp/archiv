@@ -203,7 +203,7 @@ func (n *Netz) GeburtstagVorschlaege() (out []GebVorschlag) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	for id, h := range n.gebHinweise {
-		if a, da := n.gebAntworten[id]; da && a.Tag == h.Tag || !n.fragbar(id) || !n.merkmale[id].geb.IsZero() {
+		if a, da := n.gebAntworten[id]; da && a.Tag == h.Tag || !n.befragbar(id) || !n.merkmale[id].geb.IsZero() {
 			continue
 		}
 		out = append(out, GebVorschlag{Wer: n.knoten[id], Ich: id == n.ich, Tag: h.Tag, Belege: h.Belege, Jahre: h.Jahre})
