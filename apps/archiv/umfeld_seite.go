@@ -383,13 +383,13 @@ func umfeldMitte(id string) string { return "/tresor/umfeld?" + url.Values{"mitt
 // last together, then what they share in one sentence, and the one way
 // on: the edge page, where the examples are and the relation is set.
 func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
-	fmt.Fprintf(b, `<section class=person id=person><div class=wer-ist>%s<h2>%s</h2></div>`, gesicht(k.Name), esc(k.Name))
+	fmt.Fprintf(b, `<section class=person id=person><div class=wer-ist>%s<h2>%s</h2></div>`, gesicht(k.Name), esc(k.mitKreuz()))
 	if sp := n.Spitznamen(k.ID); len(sp) > 0 {
 		fmt.Fprintf(b, `<p class="k auch">auch: %s</p>`, esc(strings.Join(sp, ", ")))
 	}
 	p, ok := n.Paar(k.ID, n.Ich())
 	if !ok {
-		b.WriteString(`</section>`)
+		b.WriteString(verstorbenZeile(k) + `</section>`)
 		return
 	}
 	teile, weiter := []string{"Für dich: noch nichts eingetragen"}, "Beziehung eintragen"
@@ -407,7 +407,7 @@ func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
 	if slices.ContainsFunc(n.Stille(), func(s Still) bool { return s.Mit.ID == k.ID }) {
 		b.WriteString(`<p class=k>Lange nichts gehört.` + umfeldKnoepfe("", k.ID, verbergenRuhe) + `</p>`)
 	}
-	b.WriteString(`</section>`)
+	b.WriteString(verstorbenZeile(k) + `</section>`)
 }
 
 // umfeldListe is the ranked list: each row the person and the tie in one
@@ -535,9 +535,9 @@ func umfeldBild(n *Netz, mitte Knoten, vs []Verbindung) string {
 			r += bildVersatz
 		}
 	}
-	punkte := append([]bildPunkt{{x: 0, y: 0, r: 9, name: kurzName(mitte.Name)}}, make([]bildPunkt, len(vs))...)
+	punkte := append([]bildPunkt{{x: 0, y: 0, r: 9, name: kurzName(mitte.Name) + map[bool]string{true: verstorbenZeichen}[mitte.Tot]}}, make([]bildPunkt, len(vs))...)
 	for i, v := range vs {
-		punkte[i+1] = bildPunkt{x: xy[i][0], y: xy[i][1], r: 5, name: kurzName(v.Mit.Name)}
+		punkte[i+1] = bildPunkt{x: xy[i][0], y: xy[i][1], r: 5, name: kurzName(v.Mit.Name) + map[bool]string{true: verstorbenZeichen}[v.Mit.Tot]}
 	}
 	rahmen := beschriften(punkte)
 	rahmen.mindestens(bildMindestens)

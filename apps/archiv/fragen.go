@@ -331,13 +331,13 @@ func (n *Netz) familienkreis() map[string]bool {
 // with or without a tie. n.mu is held.
 func (n *Netz) offen() (out []Frage) {
 	offenesPaar := func(a, b string) bool { // shown, no answer but Später, no relation in a phone book
-		return a != b && n.fragbar(a) && n.fragbar(b) && !n.imBuchBeziehung(a, b) &&
+		return a != b && n.befragbar(a) && n.befragbar(b) && !n.imBuchBeziehung(a, b) &&
 			cmp.Or(n.antworten[paarKey(a, b)].Art, artSpaeter) == artSpaeter
 	}
 	gesehen := map[string]bool{}
 	for _, a := range n.abgeleitete() {
 		x, y, art := a.X, a.Y, a.Art
-		if !n.fragbar(x) || !n.fragbar(y) {
+		if !n.befragbar(x) || !n.befragbar(y) {
 			continue
 		}
 		if x == n.ich { // „Wie steht Carla zu dir?“
@@ -445,14 +445,14 @@ func (n *Netz) kanteZwischen(x, y string) Kante {
 		}
 	}
 	k := Kante{A: min(x, y), B: max(x, y), Gruppen: n.paarGruppen[paarKey(x, y)]}
-	if org := n.firmen[paarKey(x, y)]; org != "" { // no tie, but „Warum?“ says the company
-		k.Fest = []festBand{{A: x, B: y, Art: bandFirma, Wie: org}}
+	if f, da := n.firmen[paarKey(x, y)]; da { // no tie, but „Warum?“ says the company
+		k.Fest = []festBand{f}
 	}
 	return k
 }
 
 // kennenFragen are „Kennen sich X und Y?“: the pairs whose cards name one
-// company and nothing else ties (owner 2026-11-11: a shared company alone
+// company or work address and nothing else ties (owner 2026-11-11: a shared company alone
 // is no tie), not asked yet (gesehen, offen); Ja makes the tie (artKennen),
 // Nein (Fremd) takes the pair out for good. n.mu is held.
 func (n *Netz) kennenFragen(gesehen map[string]bool, offen func(a, b string) bool) (out []Frage) {
@@ -466,7 +466,7 @@ func (n *Netz) kennenFragen(gesehen map[string]bool, offen func(a, b string) boo
 			x, y = y, x
 		}
 		out = append(out, Frage{X: n.knoten[x], Y: n.knoten[y], Ich: y == n.ich, Kante: n.kanteZwischen(x, y), Kennen: true,
-			Weil: "Beide Karten nennen die Firma " + n.firmen[key]})
+			Weil: "Beide Karten nennen " + n.firmaSatz(n.firmen[key])})
 	}
 	return out
 }
@@ -532,9 +532,8 @@ func (n *Netz) vorschlag(x, y string, k *Kante) (string, string) {
 		return gArt, gWeil
 	case fest(bandAdresse) && jahre >= 0 && jahre < 12:
 		return "partner", "gleiche Adresse, " + abstand
-	case fest(bandFirma):
-		i := slices.IndexFunc(k.Fest, func(f festBand) bool { return f.Art == bandFirma })
-		return "kollege", strings.TrimSpace("beide Karten nennen die Firma " + n.firmaVon(k.Fest[i]))
+	case slices.ContainsFunc(k.Fest, festBand.nurFrage):
+		return "kollege", "beide Karten nennen " + n.firmaSatz(k.Fest[slices.IndexFunc(k.Fest, festBand.nurFrage)])
 	case gArt != "":
 		return gArt, gWeil
 	case !fest(bandAdresse) && slices.ContainsFunc(mx.strassen, func(s string) bool { return slices.Contains(my.strassen, s) }):

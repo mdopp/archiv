@@ -38,11 +38,12 @@ const (
 const (
 	bandAdresse   = "adresse"
 	bandFirma     = "firma"
+	bandArbeit    = "arbeit" // both cards' work address (ADR TYPE=work): a company's, no home (owner 2026-11-11)
 	bandBeziehung = "beziehung"
 	bandKennen    = "kennen" // the person said the two know each other (fragen.go, artKennen)
 )
 
-var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandBeziehung: 3, bandName: 1, bandUeber: 0.5, bandKennen: 1}
+var festGewicht = map[string]float64{bandAdresse: 1.5, bandFirma: 0.4, bandArbeit: 0.4, bandBeziehung: 3, bandName: 1, bandUeber: 0.5, bandKennen: 1}
 
 // firmenPlatzhalter are ORG values that say nothing about whom one knows
 // (klar): no tie, no question, no reason.
@@ -120,6 +121,7 @@ type netzTabelle struct {
 // one (ID its key); Kontakt its contact ("" none).
 type Knoten struct {
 	ID, Name, Kontakt string
+	Tot               bool // the person marked her deceased (verstorben.go)
 }
 
 // Kante is a tie: Staerke for the picture, Rang for the order; Tage the
@@ -146,10 +148,10 @@ type Kante struct {
 // phone book or the person says, a conversation of the two alone, or two
 // occasions (photo days, group chats, mail threads) that together weigh
 // belegMin: two days among five count, two weddings do not (naehe.go).
-// A shared company alone is none (owner 2026-11-11): it is a question
-// (fragen.go, kennenFragen), never a tie.
+// A shared company or work address alone is none (owner 2026-11-11): it
+// is a question (fragen.go, kennenFragen), never a tie.
 func (k *Kante) belegt() bool {
-	return slices.ContainsFunc(k.Fest, func(f festBand) bool { return f.Art != bandFirma }) || k.Direkt >= direktMin ||
+	return slices.ContainsFunc(k.Fest, func(f festBand) bool { return !f.nurFrage() }) || k.Direkt >= direktMin ||
 		k.Tage+k.Chats+k.Faeden >= netzMinTage && k.Beleg >= belegMin-1e-9
 }
 
@@ -206,11 +208,13 @@ type Netz struct {
 	musterBaender []namensBand
 	// angelegt are the persons made by hand, by id (angelegt.go)
 	angelegt map[string]handPerson
-	// firmen are the pairs whose cards name one company, by paarKey: its
-	// ORG as written; a placeholder or one on many cards left out (festDazu)
-	firmen map[string]string
+	// firmen are the pairs whose cards name one company or work address,
+	// by paarKey: the band; a placeholder or one on many cards left out (festDazu)
+	firmen map[string]festBand
 	// ruhen are those „Lange nichts gehört“ no longer names, by node (naehe.go)
 	ruhen map[string]time.Time
+	// verstorben are those the person marked deceased, by node (verstorben.go)
+	verstorben map[string]time.Time
 }
 
 // neuesNetz builds the net of st with the hidden ones and the answers.
@@ -286,6 +290,7 @@ func (n *Netz) bauen() {
 	n.musterBauen()
 	n.sozialBauen()
 	n.angelegtBauen()
+	n.totMarken()
 	n.ich = n.von[n.st.Ich]
 	n.selbstBauen()
 	alle := map[[2]string]*Kante{}
@@ -365,7 +370,7 @@ func ort(f netzFoto) string {
 // A company that says nothing (firmaAllgemein) is left out; the others
 // are kept in firmen, for the questions.
 func (n *Netz) festDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
-	n.firmen = map[string]string{}
+	n.firmen = map[string]festBand{}
 	karten := map[string]map[string]bool{} // the people (nodes) each company is on the cards of
 	for _, k := range n.st.Kontakte {
 		if o := klar(k.Firma); o != "" {
@@ -384,7 +389,9 @@ func (n *Netz) festDazu(alle map[[2]string]*Kante, nicht map[string]bool) {
 			if f.Wie = n.firmaVon(f); firmaAllgemein(f.Wie, karten) {
 				continue
 			}
-			n.firmen[paarKey(a, b)] = f.Wie
+		}
+		if f.nurFrage() {
+			n.firmen[paarKey(a, b)] = f
 		}
 		key := [2]string{min(a, b), max(a, b)}
 		k := alle[key]
@@ -414,6 +421,19 @@ func (n *Netz) firmaVon(f festBand) string {
 		}
 	}
 	return ""
+}
+
+// nurFrage: the band alone makes no tie, only „Kennen sich …?“: a
+// company, or a work address, which is a company's (owner 2026-11-11).
+func (f festBand) nurFrage() bool { return f.Art == bandFirma || f.Art == bandArbeit }
+
+// firmaSatz is what such a band names: „die Firma Werk AG“, „die
+// Arbeitsadresse Hafenstraße 5“; n.mu is held.
+func (n *Netz) firmaSatz(f festBand) string {
+	if f.Art == bandArbeit {
+		return "die Arbeitsadresse " + f.Wie
+	}
+	return strings.TrimSpace("die Firma " + n.firmaVon(f))
 }
 
 // firmaAllgemein: org links no two people in particular: a placeholder,
@@ -459,7 +479,7 @@ func (n *Netz) Anzeige(k Knoten) string {
 	if k.ID != "" && k.ID == n.Ich() {
 		return "Du"
 	}
-	return k.Name
+	return k.mitKreuz()
 }
 
 // Verbindung is a tie as seen from one end: the other, and the tie.
@@ -662,8 +682,8 @@ func (n *Netz) buchGrund(mitte string, f festBand) string {
 		return "Gleiche Adresse auf beiden Karten: " + f.Wie
 	case f.Art == bandAdresse:
 		return "Gleiche Adresse auf beiden Karten"
-	case f.Art == bandFirma:
-		return strings.TrimSpace("Beide Kontaktkarten nennen die Firma " + n.firmaVon(f))
+	case f.nurFrage():
+		return "Beide Kontaktkarten nennen " + n.firmaSatz(f)
 	}
 	a, b := n.von[f.A], n.von[f.B] // a relation: A's card names B
 	satz := n.wessen(a, "Deine", "Karte") + " nennt " + map[bool]string{true: "dich", false: n.knoten[b].Name}[b == n.ich]

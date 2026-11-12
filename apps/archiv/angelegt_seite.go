@@ -91,6 +91,8 @@ func (w *Web) personPost(rw http.ResponseWriter, r *http.Request) {
 		p.loeschen()
 	case "dieselbe":
 		p.dieselbe()
+	case "verstorben", "lebt":
+		p.verstorben(r.PostFormValue("tu") == "verstorben")
 	default:
 		w.zurueckFehler(rw, r, p.zurueck, http.StatusBadRequest, saysFrageOhneWahl)
 	}

@@ -2,10 +2,7 @@ package main
 
 import (
 	"cmp"
-	"encoding/json"
-	"maps"
 	"math"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -122,7 +119,7 @@ type Still struct {
 // Stille are „Lange nichts gehört“: the person's ties that are nah or
 // sehr nah, with a last photo day or message stillNach ago or more, the
 // closest first, at most stillHoechsten; nobody of her address (she sees
-// them daily), nobody she put aside (ruhen). None while the archive has
+// them daily), nobody she put aside (ruhen) or marked deceased. None while the archive has
 // read no chat of two: without them it cannot tell silence.
 func (n *Netz) Stille() (out []Still) {
 	if n == nil {
@@ -139,7 +136,7 @@ func (n *Netz) Stille() (out []Still) {
 	jetzt := n.now()
 	for _, v := range n.Nahe(ich, 1<<30) {
 		k := v.Kante
-		if k.stufe() == stufeBekannt || k.Kontakt.IsZero() || jetzt.Sub(k.Kontakt) < stillNach || !ruhen[v.Mit.ID].IsZero() ||
+		if k.stufe() == stufeBekannt || k.Kontakt.IsZero() || jetzt.Sub(k.Kontakt) < stillNach || !ruhen[v.Mit.ID].IsZero() || v.Mit.Tot ||
 			slices.ContainsFunc(k.Fest, func(f festBand) bool { return f.Art == bandAdresse }) {
 			continue
 		}
@@ -169,33 +166,10 @@ func gespraechUndFotos(k Kante) (out []string) {
 
 func (i Innen) umfeldRuhen() string { return filepath.Join(i.Umfeld(), "ruhen.json") }
 
-func ruhenLaden(innen Innen) map[string]time.Time {
-	out := map[string]time.Time{}
-	if b, err := os.ReadFile(innen.umfeldRuhen()); err == nil {
-		json.Unmarshal(b, &out)
-	}
-	return out
-}
+func ruhenLaden(innen Innen) map[string]time.Time { return markeLaden(innen.umfeldRuhen()) }
 
 // Ruhen keeps in the open vault that „Lange nichts gehört“ no longer
 // names id (an), or names it again.
 func (u *Umfeld) Ruhen(innen Innen, id string, an bool) error {
-	u.halt.Lock()
-	defer u.halt.Unlock()
-	n := u.Netz()
-	if n == nil {
-		return errUmfeldZu
-	}
-	n.mu.Lock()
-	if n.ruhen == nil {
-		n.ruhen = map[string]time.Time{}
-	}
-	if an {
-		n.ruhen[id] = n.now()
-	} else {
-		delete(n.ruhen, id)
-	}
-	alle := maps.Clone(n.ruhen)
-	n.mu.Unlock()
-	return jsonImTresor(innen.umfeldRuhen(), alle)
+	return u.marke(innen.umfeldRuhen(), id, an, func(n *Netz) *map[string]time.Time { return &n.ruhen })
 }

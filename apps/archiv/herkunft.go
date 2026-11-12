@@ -458,7 +458,7 @@ func (n *Netz) HerkunftVorschlaege() (out []HerkunftZeile) {
 	for key, v := range n.herkunft {
 		wer, feld, _ := strings.Cut(key, "|")
 		m := n.merkmale[wer]
-		if a, da := n.herkunftAntworten[key]; da && klar(a.Wert) == klar(v.Wert) || !n.fragbar(wer) || wer == n.ich ||
+		if a, da := n.herkunftAntworten[key]; da && klar(a.Wert) == klar(v.Wert) || !n.befragbar(wer) || wer == n.ich ||
 			feld == feldOrt && len(m.strassen) > 0 || feld == feldArbeit && m.firma != "" {
 			continue
 		}

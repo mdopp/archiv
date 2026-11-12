@@ -58,7 +58,7 @@ func (n *Netz) ErkannteBeziehungen() (out []ErkannterBezug) {
 	gesehen := map[string]bool{}
 	dazu := func(x, y, art, weil, quelle string) {
 		key := paarKey(x, y)
-		if gesehen[key] || x == y || !n.fragbar(x) || !n.fragbar(y) || n.imBuchBeziehung(x, y) ||
+		if gesehen[key] || x == y || !n.befragbar(x) || !n.befragbar(y) || n.imBuchBeziehung(x, y) ||
 			cmp.Or(n.antworten[key].Art, artSpaeter) != artSpaeter {
 			return
 		}
