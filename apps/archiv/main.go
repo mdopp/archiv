@@ -105,7 +105,8 @@ func main() {
 	}
 	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HomesSecret: homesSecret(os.Getenv), HomesIntern: homesIntern(os.Getenv),
 		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
-		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}, Umfeld: um, Aufraeumer: aufr}
+		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}, Umfeld: um, Aufraeumer: aufr,
+		Aufgaben: &Aufgaben{Datei: filepath.Join(data, "aufgaben.json")}}
 
 	status := func() {
 		st := tresor.Stand()
@@ -115,6 +116,7 @@ func main() {
 			}
 		}
 		statusSchreiben(statusDatei, statusBauen(web.lage(st)))
+		web.aufgabenZaehlen(st)
 		web.Puls.Senden()
 	}
 	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert, ab.Geaendert, um.Geaendert = status, status, status, status, status, status, status

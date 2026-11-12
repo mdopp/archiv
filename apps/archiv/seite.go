@@ -117,6 +117,7 @@ type Web struct {
 	Abgleich    *Abgleich      // contacts and calendars from Radicale (nil: not set up)
 	Personen    *Personenkarte // „Ist das dieselbe Person?“
 	Umfeld      *Umfeld        // who stands close to whom (nil: not set up)
+	Aufgaben    *Aufgaben      // the counts Homes may know (aufgaben.go)
 	Now         func() time.Time
 }
 

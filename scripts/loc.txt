@@ -6,4 +6,7 @@
 # 23,500: raised 2026-11-11 with archiv#53 (the person search and „Gemeinsam“, +467) on top of
 # archiv#52 (a person by hand, +614): apps/ at 22,266 production lines, plus about 5 %, under
 # the 95 % warning. The owner said yes to a needed raise when he asked for #53.
-23500 apps
+# 23,596: raised 2026-11-12 with the counts for Homes (homes#362, +126: aufgaben.go and the
+# missing keys as one function): apps/ at 23,595 production lines, the minimum the owner asked
+# for; his feature request (2026-11-12) is the yes.
+23596 apps
