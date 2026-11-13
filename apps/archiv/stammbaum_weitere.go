@@ -176,37 +176,50 @@ func seitenWort(arten []string) string {
 	return "Verwandte"
 }
 
-// baumFragenTab is the section under the tree: one card a relative.
+// baumFragenTab is the section under the tree (owner 2026-11-13: „das
+// ist immer noch viel … man sollte sagen können ‚nichts davon' und eine
+// andere Person nennen und anlegen können“): one relative at a time, how
+// many follow, and beside the names „Jemand anderes …“, a name field
+// that finds a person or makes a new one. After „weiß nicht“ a relative
+// stays on the side row of the tree and is not asked here again.
 func baumFragenTab(b *strings.Builder, n *Netz, fs []BaumFrage) {
+	fs = slices.DeleteFunc(slices.Clone(fs), func(f BaumFrage) bool { return f.Weg })
 	if len(fs) == 0 {
 		return
 	}
+	f := fs[0]
 	b.WriteString(`<section class=karte id=einordnen><h2>Noch ohne Platz im Stammbaum</h2>`)
-	for _, f := range fs {
-		x, _ := n.Person(f.X)
-		y, _ := n.Person(f.Y)
-		wer, von := n.Anzeige(x), "von "+n.Anzeige(y)
-		if f.Y == n.Ich() {
-			von = "von dir"
+	x, _ := n.Person(f.X)
+	y, _ := n.Person(f.Y)
+	wer, von := n.Anzeige(x), "von "+n.Anzeige(y)
+	if f.Y == n.Ich() {
+		von = "von dir"
+	}
+	fmt.Fprintf(b, `<div class=einordnen><p><b>%s</b> <span class=k>%s</span></p>`, esc(wer), esc(kurzWort(f.Art)+" "+von))
+	switch {
+	case len(f.Wahl) > 0:
+		b.WriteString(baumFrageForm(n, f, wer))
+	case f.Fehlt != "":
+		fmt.Fprintf(b, `<p>%s</p>`, esc("Für den Platz fehlt noch: "+f.Fehlt+" "+von+"."))
+		if u := baumUmwege[f.Art][0].Ueber; slices.Contains(bauArten, u) {
+			b.WriteString(baumNameForm(f.Y, "", map[string]string{u: "Eintragen"}, false))
+			b.WriteString(`<p class="k ohne-skript"><a href="#dazu">Eintragen</a></p>`)
+		} else {
+			b.WriteString(`<p class=k><a href="#dazu">Eintragen</a></p>`)
 		}
-		fmt.Fprintf(b, `<div class=einordnen><p><b>%s</b> <span class=k>%s</span></p>`, esc(wer), esc(kurzWort(f.Art)+" "+von))
-		switch {
-		case f.Weg:
-			fmt.Fprintf(b, `<p class=k>Wo genau, weißt du nicht. <a href="%s">Doch einordnen</a></p>`, esc(kanteAdresse(f.X, f.Y)))
-		case len(f.Wahl) > 0:
-			b.WriteString(baumFrageForm(n, f, wer))
-		case f.Fehlt != "":
-			fmt.Fprintf(b, `<p class=k>%s <a href="#dazu">Eintragen</a></p>`, esc("Für den Platz fehlt noch: "+f.Fehlt+" "+von+"."))
-		default:
-			fmt.Fprintf(b, `<p><a class=zeile href="%s">%s</a></p>`, esc(kanteAdresse(f.X, f.Y)), esc("Wie genau ist "+wer+" verwandt?"))
-		}
-		b.WriteString(`</div>`)
+	default:
+		fmt.Fprintf(b, `<p><a class=zeile href="%s">%s</a></p>`, esc(kanteAdresse(f.X, f.Y)), esc("Wie genau ist "+wer+" verwandt?"))
+	}
+	b.WriteString(`</div>`)
+	if len(fs) > 1 {
+		fmt.Fprintf(b, `<p class=k>%s</p>`, esc(fmt.Sprintf("Danach noch %d.", len(fs)-1)))
 	}
 	b.WriteString(`</section>`)
 }
 
 // baumFrageForm is „Hedwig ist Schwester oder Bruder von …“, the names
-// as chips, „weiß nicht“; a chip sets the relation as the edge page does.
+// as chips, „Jemand anderes …“ and „weiß nicht“; a chip sets the
+// relation as the edge page does.
 func baumFrageForm(n *Netz, f BaumFrage, wer string) string {
 	var b strings.Builder
 	eine := !slices.ContainsFunc(f.Wahl, func(w baumWahl) bool { return w.Art != f.Wahl[0].Art })
@@ -215,6 +228,7 @@ func baumFrageForm(n *Netz, f BaumFrage, wer string) string {
 		frage = wer + " ist " + umwegWort[f.Wahl[0].Art] + " von …"
 	}
 	fmt.Fprintf(&b, `<p>%s</p><div class=chips>`, esc(frage))
+	knoepfe := map[string]string{}
 	for _, w := range f.Wahl {
 		m, _ := n.Person(w.M)
 		text := n.Anzeige(m)
@@ -223,9 +237,27 @@ func baumFrageForm(n *Netz, f BaumFrage, wer string) string {
 		}
 		fmt.Fprintf(&b, `<form method=post action="%s" class=sofort><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=festlegen value=1><input type=hidden name=zurueck value="/tresor?tab=stammbaum">%s</form>`,
 			antwortPfad, esc(f.X), esc(w.M), chip(w.Art, text, ""))
+		// The one named is the counterpart of X: X is w.Art of her.
+		knoepfe[cmp.Or(gegen[w.Art], w.Art)] = map[bool]string{true: "Eintragen", false: wer + " ist " + umwegWort[w.Art]}[eine]
 	}
+	b.WriteString(`<button type=button class="chip anderer">Jemand anderes …</button>`)
 	fmt.Fprintf(&b, `<form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=tu value=weissnicht><input type=hidden name=zurueck value="/tresor?tab=stammbaum"><button class="chip leise" data-laeuft="weiß nicht …">weiß nicht</button></form></div>`,
 		antwortPfad, esc(paarKey(f.X, f.Y)))
+	b.WriteString(baumNameForm(f.X, paarKey(f.X, f.Y), knoepfe, true))
+	return b.String()
+}
+
+// baumNameForm is a name field for the editor's post: the one named is
+// art of y, one button an art; erledigt the question it answers. The
+// script finds the name among the editor's names or makes a new person.
+func baumNameForm(y, erledigt string, knoepfe map[string]string, zu bool) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<form class=bau-frage data-y="%s" data-erledigt="%s"%s><label>Wer?<input name=name list=namen data-namen autocomplete=off required placeholder="Name, auch neu"></label><div class=chips>`,
+		esc(y), esc(erledigt), map[bool]string{true: " hidden"}[zu])
+	for _, art := range slices.Sorted(maps.Keys(knoepfe)) {
+		fmt.Fprintf(&b, `<button name=art value="%s" class=voll>%s</button>`, esc(art), esc(knoepfe[art]))
+	}
+	b.WriteString(`</div></form>`)
 	return b.String()
 }
 

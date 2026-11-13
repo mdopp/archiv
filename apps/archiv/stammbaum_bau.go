@@ -200,6 +200,11 @@ func (w *Web) bauVerbinden(r *http.Request, innen Innen) (bauAntwort, int) {
 			zurueck.Add("neu", b)
 		}
 	}
+	if k := r.PostFormValue("erledigt"); strings.Contains(k, "|") {
+		if err := w.Umfeld.BaumWeissNicht(innen, k); err != nil {
+			log.Printf("archiv: Umfeld: eine Frage nicht als beantwortet gemerkt: %v", err)
+		}
+	}
 	return fertig(nil)
 }
 
@@ -326,16 +331,23 @@ tab.innerHTML=h;s=Q('#bau-suche');if(s)s.value=q;filtern();b=Q('.baum');if(b){if
 function ganz(b){var an=b.classList.toggle('ganz'),k=Q('#baum-ganz');if(k)k.textContent=an?'Groß zeigen':'Ganzen Baum zeigen'}
 function senden(art,zurueck){var d=new URLSearchParams(zurueck||'');
 if(zurueck)d.append('tu','zurueck');else{d.append('art',art);d.append('y',ziel.id);wahl.forEach(function(w){if(w.neu)d.append('neu',w.neu);else d.append('x',w.id)})}
-leiste.textContent='Speichert …';wahl=[];ziel=null;
+schicken(d)}
+function schicken(d){leiste.textContent='Speichert …';leiste.hidden=false;wahl=[];ziel=null;
 fetch('` + verbindenPfad + `',{method:'POST',body:d,credentials:'same-origin'}).then(function(r){return r.json()}).then(function(a){
 if(a.html)tauschen(a.html);malen();melden(a.fehler||a.satz||'',a.zurueck)
 }).catch(function(){malen();melden('Das hat nicht geklappt. Lade die Seite neu und versuch es noch einmal.')})}
 function mehr(m){leiste.textContent='';m.dataset.mehr.split('\n').forEach(function(z){var t=z.split('\t'),a=el('a','',t[1]);a.href=t[0];leiste.appendChild(a)});
 leiste.appendChild(knopf('Schließen','leise',zu));leiste.hidden=false}
 document.addEventListener('input',function(e){if(e.target.id==='bau-suche')filtern()});
+document.addEventListener('submit',function(e){var f=e.target;if(!f.classList.contains('bau-frage'))return;e.preventDefault();
+var name=f.elements.namedItem('name').value.replace(/\s+/g,' ').trim(),s=e.submitter,art=s&&s.value;if(!name||!art)return;
+var da=[];A('#bau-liste .bau-name',function(b){if(klar(b.dataset.name)===klar(name))da.push(b.dataset.id)});
+if(da.length>1){melden('„'+name+'“ gibt es mehrmals. Zieh den Namen aus der Liste oben auf die Person.');return}
+var d=new URLSearchParams();d.append('art',art);d.append('y',f.dataset.y);d.append(da.length?'x':'neu',da.length?da[0]:name);if(f.dataset.erledigt)d.append('erledigt',f.dataset.erledigt);schicken(d)});
 document.addEventListener('click',function(e){if(!im(e))return;
 if(Date.now()-gezogen<400){e.preventDefault();return}
 var t=e.target;if(t.id==='baum-ganz'){ganz(Q('.baum'));return}
+if(t.classList.contains('anderer')){var g=t.closest('.einordnen').querySelector('.bau-frage');g.hidden=false;t.hidden=true;g.querySelector('input').focus();return}
 var n=t.closest('.bau-name'),p=t.closest('.baum a[data-id]'),m=t.closest('.baum a[data-mehr]');
 if(n){if(ziel)return;var w=von(n),i=wahl.findIndex(function(x){return gleich(x,w)});
 if(i>=0)wahl.splice(i,1);else if(!wahl.length||mehrere)wahl.push(w);else{fragen(w);return}
@@ -365,7 +377,8 @@ document.addEventListener('contextmenu',function(e){if(im(e)&&e.target.closest('
 
 // bauCSS is the editor's and the new strokes' look.
 const bauCSS = `
-html:not(.skript) #bauen,html:not(.skript) #baum-ganz{display:none}
+html:not(.skript) #bauen,html:not(.skript) #baum-ganz,html:not(.skript) .bau-frage,html:not(.skript) .anderer{display:none}html.skript .ohne-skript{display:none}
+.bau-frage{display:grid;gap:8px;margin-top:8px}.bau-frage label{display:grid;gap:4px}
 .baum{touch-action:pan-x pan-y pinch-zoom}.baum.ganz svg{width:100%;height:auto}.baum text.wer{font-size:10px}.baum .linie.mit{stroke-width:1.2}.baum .linie.stamm,.baum .linie.kind,.baum .linie.geschwister{stroke-linecap:square}
 .baum a.du rect{fill:var(--accent-soft)}.baum a.ziel rect{stroke:var(--accent);stroke-width:3;fill:var(--accent-soft)}
 .bau-liste{max-height:15rem;overflow-y:auto;overscroll-behavior:contain;background:var(--card);border-radius:14px;padding:10px 10px 4px;margin-top:8px}

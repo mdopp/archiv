@@ -17,4 +17,8 @@
 # script, verwandt.go; the old layout is gone): apps/ at 25,359 production lines, the minimum;
 # the owner's request (2026-11-12, „Die Darstellung … das kannst du besser“, „per Drag and Drop
 # verbinden“, „implizit ins Netz aufnehmen“) is the yes.
-25360 apps
+# 25405: raised 2026-11-13 with one relative at a time under the tree and „Jemand anderes …“,
+# a name field that finds or makes the person in between (+45: stammbaum_weitere.go,
+# stammbaum_bau.go): apps/ at 25,404, the minimum; the owner's request (2026-11-13, „man sollte
+# sagen können ‚nichts davon' und eine andere Person nennen und anlegen können“) is the yes.
+25405 apps
