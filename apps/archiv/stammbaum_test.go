@@ -82,19 +82,25 @@ func TestStammbaumLayout(t *testing.T) {
 	}
 }
 
-// The SVG: every person a link to its detail (≥ 44 px), every line a link
-// to its edge page with a wide hit stroke, dashed for derived; Uwe marked
-// for the script to scroll to; the lines as a list too; sideways scroll
-// only inside the box.
+// The SVG: every person a link to its detail (≥ 44 px) with what she is
+// of the person under her name; a stroke a link to the edge page of the
+// line it stands for, with a wide hit stroke, dashed while one of its
+// lines is derived; Lena's one drop stands for the line to each parent
+// and names both (data-mehr); Uwe marked for the script to scroll to;
+// the lines and who is who as lists too; sideways scroll only inside
+// the box.
 func TestStammbaumSVG(t *testing.T) {
 	n := baumNetz(nil)
 	var b strings.Builder
 	stammbaumTab(&b, n)
 	page := b.String()
-	for _, want := range []string{`<div class=baum id=stammbaum><svg viewBox=`, `<a href="/tresor/umfeld?mitte=h%2Fuwe" class=du data-du aria-label="Uwe"><rect`,
-		`width="96" height="48" rx="10"`, `<a href="/tresor/kante?a=h%2Fsilke&amp;b=h%2Flena" aria-label="Silke und Lena: Mutter/Vater und Kind (abgeleitet, noch nicht bestätigt)"><path class=treffer`,
-		`class="linie eltern vermutet"`, `aria-label="Du und Lena: Mutter/Vater und Kind"><path class=treffer d="M`, `class="linie eltern" d="M`,
-		`class="linie partner"`, `class="linie expartner"`, `class="linie geschwister"`, "Alle Linien als Liste (6)", "Silke ist Mutter/Vater · abgeleitet, noch nicht bestätigt"} {
+	for _, want := range []string{`<div id=baum-tab><div class=baum id=stammbaum><svg viewBox=`, `<a href="/tresor/umfeld?mitte=h%2Fuwe" class=du data-du data-id="h/uwe" data-name="Du" aria-label="Uwe"><rect`,
+		`width="96" height="58" rx="10"`,
+		`<a href="/tresor/kante?a=h%2Fuwe&amp;b=h%2Flena" aria-label="Du und Lena: Mutter/Vater und Kind; Silke und Lena: Mutter/Vater und Kind (abgeleitet, noch nicht bestätigt)" data-mehr="/tresor/kante?a=h%2Fuwe&amp;b=h%2Flena`,
+		"/tresor/kante?a=h%2Fsilke&amp;b=h%2Flena\tSilke und Lena: Mutter/Vater und Kind (abgeleitet, noch nicht bestätigt)\"><path class=treffer",
+		`class="linie kind vermutet"`, `aria-label="Hedwig und Du: Mutter/Vater und Kind"><path class=treffer d="M`, `class="linie kind" d="M`, `<path class="linie stamm" d="M`,
+		`class="linie partner"`, `class="linie expartner"`, `aria-label="Bruno und Du: Geschwister"`, "Alle Linien als Liste (6)", "Silke ist Mutter/Vater · abgeleitet, noch nicht bestätigt",
+		`<text x="296.0" y="229.0" class="k wer">Partner/in</text>`, `<summary>Wer ist wer für dich (4)</summary>`, `id=baum-ganz>Ganzen Baum zeigen</button>`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}
@@ -168,7 +174,7 @@ func TestStammbaumBestaetigen(t *testing.T) {
 	wt, _, _, _, _ := kanteBox(t)
 	wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"kind"}, "zurueck": {"/tresor"}}))
 	baum := wt.rufe("GET", "/tresor?tab=stammbaum", anna, nil).Body.String()
-	if !strings.Contains(baum, `<a href="/tresor/kante?a=p-ben&amp;b=p-kim" aria-label="Ben Berg und Kim Berg: Mutter/Vater und Kind (abgeleitet, noch nicht bestätigt)">`) {
+	if !strings.Contains(baum, "/tresor/kante?a=p-ben&amp;b=p-kim\tBen Berg und Kim Berg: Mutter/Vater und Kind (abgeleitet, noch nicht bestätigt)\"><path class=treffer") || !strings.Contains(baum, `class="linie kind vermutet"`) {
 		t.Fatalf("no dashed line from Ben to Kim:\n%s", baum)
 	}
 	page := wt.rufe("GET", kanteAdresse("p-ben", "p-kim"), anna, nil).Body.String()
@@ -178,7 +184,7 @@ func TestStammbaumBestaetigen(t *testing.T) {
 	}
 	wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {"p-ben"}, "y": {"p-kim"}, "art": {"eltern"}, "zurueck": {kanteAdresse("p-ben", "p-kim")}}))
 	baum = wt.rufe("GET", "/tresor?tab=stammbaum", anna, nil).Body.String()
-	if !strings.Contains(baum, `aria-label="Ben Berg und Kim Berg: Mutter/Vater und Kind">`) {
+	if !strings.Contains(baum, "Ben Berg und Kim Berg: Mutter/Vater und Kind\"") || strings.Contains(baum, `class="linie kind vermutet"`) {
 		t.Fatalf("still dashed:\n%s", baum)
 	}
 	if page := wt.rufe("GET", kanteAdresse("p-ben", "p-kim")+"&pruefen=1", anna, nil).Body.String(); !strings.Contains(page, esc(saysKantePruefen)) {

@@ -12,4 +12,9 @@
 # 24,074: raised 2026-11-12 with the Datenpfleger (archiv#58, +478: pfleger.go, pfleger_seite.go,
 # the photos without a date in the net's table): apps/ at 24,073 production lines, the minimum;
 # the owner's feature request (2026-11-12, archiv#58) is the yes.
-24074 apps
+# 25360: raised 2026-11-13 with the Stammbaum as a family tree, „Verbindungen bauen“ and the
+# derived relatives (+1,286: stammbaum_legen.go, stammbaum_striche.go, stammbaum_bau.go with its
+# script, verwandt.go; the old layout is gone): apps/ at 25,359 production lines, the minimum;
+# the owner's request (2026-11-12, „Die Darstellung … das kannst du besser“, „per Drag and Drop
+# verbinden“, „implizit ins Netz aufnehmen“) is the yes.
+25360 apps

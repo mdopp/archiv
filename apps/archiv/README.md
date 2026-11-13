@@ -1076,19 +1076,49 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
 
 - The family circle's Eltern/Kind, Partner/Ex-Partner and Geschwister
   lines: answered, followed from an answer or a phone book's (solid),
-  derived and not confirmed (dashed). Generations are rows, partners side
-  by side (one with several in the middle), a child under its parents,
-  parents moved over their children; no birthday is needed.
-- One server-side SVG, no library, no script needed: it scrolls sideways
-  inside its box, never the page (the page's script only scrolls „Du“
-  into view). Boxes are 96×48 px links to the person's detail; every line
-  is a link to its edge page with a 22 px invisible hit stroke. The lines
-  are also a folded list.
+  derived and not confirmed (dashed). Generations are rows; no birthday
+  is needed.
+- Drawn as a family tree is (owner 2026-11-12; `stammbaum_legen.go`,
+  `stammbaum_striche.go`): the children of one set of parents are a
+  family. Partners stand side by side, one line between them; one line
+  goes down from the middle of that line to a bar, each child hangs from
+  the bar by one drop. A single parent's line starts under her box; two
+  parents nobody called partners get a thin line; three parents, or two
+  with someone between, a rail under their boxes. Siblings without
+  parents share a bar, half-siblings a bracket. A row keeps a family's
+  children side by side, one who married in outside, and two families a
+  couple ties end to end. No two strokes lie on each other and none runs
+  through a box (`TestStammbaumStriche` checks the laid-out data).
+- One server-side SVG, no library: it scrolls sideways inside its box,
+  never the page; „Ganzen Baum zeigen“ fits it to the width. Boxes are
+  96×58 px links to the person's detail, with what she is of the person
+  under her name. A stroke is a link to the edge page of the line it
+  stands for, with a 22 px invisible hit stroke; a child's drop stands
+  for the line to each parent and offers both. The lines and „Wer ist
+  wer für dich“ are folded lists too.
+- Who is what, derived (owner 2026-11-12; `verwandt.go`): the person
+  says only Mutter/Vater, Kind, Partner/in and Geschwister. Everything
+  else is read from the shortest way over those lines: named where
+  German has a word (Großonkel/Großtante, Schwager/Schwägerin,
+  Neffe/Nichte, Cousin/e 2. Grades …), else described („Partner/in von
+  Jonas (Cousin/e)“). Nothing of it is stored; `antworten.json` keeps its
+  shape, and a kind said without its way („Hedwig ist meine Tante“) stays
+  an answer until a line places it. A relative the lines name is a tie
+  on „Steht nahe“ with that name as the reason, and no pair they name
+  over more than one step is asked.
+- „Verbindungen bauen“ (owner 2026-11-12; `stammbaum_bau.go`): under the
+  tree every name, grouped by family name, one field to find one or to
+  make a person by hand of a name nobody has. Drag a name onto a person
+  or another name (a finger holds 350 ms), or tap the name, then the
+  person; four chips set the line; „Mehrere“ sends several at once. One
+  background POST to `/tresor/umfeld/verbinden` (same session, open
+  vault and origin as every form) answers JSON: the sentence, what takes
+  it back, the tab anew. Without script „+ Beziehung ergänzen“ stays.
 - Messy data: the generations follow the confirmed lines first (a 0-1
   breadth-first walk where a derived line costs one); a line that does
   not fit — a cycle, someone two generations at once — is not drawn but
   listed under „Passt nicht in den Stammbaum“, its edge page saying why
-  (`&pruefen=1`). A step-family gets a line from each parent.
+  (`&pruefen=1`).
 - Relatives a step away (owner 2026-11-11: „Wenn Hedwig meine Tante
   ist, wird das nicht im Stammbaum angezeigt.“; `stammbaum_weitere.go`):
   Großeltern, Onkel/Tante, Cousin/e, Neffe/Nichte, Enkel/in,

@@ -97,6 +97,9 @@ type festBand struct {
 	Wie string `json:"wie,omitempty"`
 	// Gesagt: the person's answer (fragen.go), A and B nodes, Wie a kind
 	Gesagt bool `json:"-"`
+	// Abgeleitet: read from the family's lines (verwandt.go), A the person
+	// and B the relative as nodes, Wie what B is of her
+	Abgeleitet bool `json:"-"`
 }
 
 // netzTabelle is what a round read, kept in the vault.
@@ -303,6 +306,7 @@ func (n *Netz) bauen() {
 	n.musterDazu(alle, nicht)
 	n.gespraecheDazu(alle, nicht)
 	n.gesagtDazu(alle, nicht)
+	n.verwandtDazu(alle, nicht)
 	maps.DeleteFunc(alle, func(_ [2]string, k *Kante) bool { return !k.belegt() }) // a company alone, two weddings, two class chats
 	n.merkmaleBauen()
 	n.suchBauen()
@@ -673,6 +677,8 @@ func (n *Netz) buchGrund(mitte string, f festBand) string {
 	switch {
 	case f.Gesagt:
 		return gesagtGrund(mitte, f)
+	case f.Abgeleitet:
+		return f.Wie + " (aus dem Stammbaum)"
 	case f.Art == bandName || f.Art == bandUeber: // A and B are nodes; A's card's name says it
 		wer := n.knoten[f.A].Name
 		if klar(wer) == klar(f.Wie) {

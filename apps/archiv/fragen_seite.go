@@ -474,10 +474,7 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// a refusal stays visible: the toast and the list say „noch nicht eingetragen“
-	w.eintragen(r.Context(), innen, key)
-	for _, d := range w.Umfeld.Netz().Gefolgerte(key) {
-		w.eintragen(r.Context(), innen, d.Key)
-	}
+	w.eintragenMit(r.Context(), innen, key)
 	http.Redirect(rw, r, weiter(url.Values{"getan": {key}}), http.StatusSeeOther)
 }
 
@@ -520,10 +517,7 @@ func (w *Web) vergessen(rw http.ResponseWriter, r *http.Request, innen Innen, zu
 	if !strings.HasPrefix(zurueck, kantePfad) {
 		return "zurueck", true
 	}
-	w.eintragen(r.Context(), innen, key)
-	for _, d := range w.Umfeld.Netz().Gefolgerte(key) {
-		w.eintragen(r.Context(), innen, d.Key)
-	}
+	w.eintragenMit(r.Context(), innen, key)
 	return "kante-zurueck", true
 }
 
@@ -536,25 +530,17 @@ func (w *Web) kanteFestlegen(rw http.ResponseWriter, r *http.Request, innen Inne
 		http.Redirect(rw, r, zurueck, http.StatusSeeOther)
 		return
 	}
-	key := paarKey(x, y)
-	if g, da := w.Umfeld.Netz().Gegebenes(key); da && g.X.ID == x && g.Art == art || da && g.Y.ID == x && cmp.Or(gegen[g.Art], g.Art) == art {
-		http.Redirect(rw, r, zurueck, http.StatusSeeOther) // already so: nothing to write, nothing to undo
-		return
-	}
-	if err := w.ausHomes(r.Context(), innen, key); err != nil {
-		log.Printf("archiv: Umfeld: eine alte Antwort nicht aus Homes: %v", err)
+	getan, err := w.festlegen(r.Context(), innen, x, y, art)
+	switch {
+	case errors.Is(err, errAusHomes):
 		w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtEin)
-		return
-	}
-	if _, err := w.Umfeld.Festlegen(innen, x, y, art); err != nil {
+	case err != nil:
 		w.antwortFehler(rw, r, zurueck, err)
-		return
+	case !getan:
+		http.Redirect(rw, r, zurueck, http.StatusSeeOther) // already so: nothing to write, nothing to undo
+	default:
+		http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"getan": {paarKey(x, y)}}), http.StatusSeeOther)
 	}
-	w.eintragen(r.Context(), innen, key)
-	for _, d := range w.Umfeld.Netz().Gefolgerte(key) {
-		w.eintragen(r.Context(), innen, d.Key)
-	}
-	http.Redirect(rw, r, mitAnfrage(zurueck, url.Values{"getan": {key}}), http.StatusSeeOther)
 }
 
 // eintragen has Homes write the answer key, if it goes anywhere and is not

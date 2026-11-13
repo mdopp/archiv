@@ -325,6 +325,7 @@ func (w *Web) seiten() *http.ServeMux {
 	mux.HandleFunc("POST /tresor/umfeld/schluessel", w.umfeldSchluessel)
 	mux.HandleFunc("POST /tresor/umfeld/verbergen", w.umfeldVerbergen)
 	mux.HandleFunc("POST /tresor/umfeld/antwort", w.umfeldAntwort)
+	mux.HandleFunc("POST "+verbindenPfad, w.umfeldVerbinden)
 	mux.HandleFunc("POST "+personPfad, w.personPost)
 	mux.HandleFunc("GET "+erkanntPfad, w.erkanntGet)
 	mux.HandleFunc("POST "+erkanntPfad+"/geburtstag", w.erkanntGeburtstag)
@@ -1037,7 +1038,7 @@ func seite(rw http.ResponseWriter, code int, titel, body, extra string) {
 		kopf = `<header class=oben><a class=zurueck href="/tresor">‹ Dein Archiv</a></header><h1>` + esc(titel) + `</h1>`
 	}
 	fmt.Fprintf(rw, `<!doctype html><html lang=de><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name=color-scheme content="dark light"><title>%s</title><style>%s</style>%s</head><body><main>%s%s%s</main></body></html>`,
-		esc(titel), css, skript, kopf, body, extra)
+		esc(titel), css+bauCSS, skript+bauSkript, kopf, body, extra)
 }
 
 // skript: a pressed button says at once what runs (data-laeuft). A form

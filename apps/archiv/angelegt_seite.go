@@ -132,10 +132,7 @@ func (p personForm) ausHomes(keys []string) bool {
 // eintragen has Homes write the answers keys and what followed from them.
 func (p personForm) eintragen(keys []string) {
 	for _, key := range keys {
-		p.w.eintragen(p.r.Context(), p.innen, key)
-		for _, d := range p.w.Umfeld.Netz().Gefolgerte(key) {
-			p.w.eintragen(p.r.Context(), p.innen, d.Key)
-		}
+		p.w.eintragenMit(p.r.Context(), p.innen, key)
 	}
 }
 
