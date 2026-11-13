@@ -113,8 +113,8 @@ type baumOrdnung struct {
 }
 
 // neueBaumOrdnung orders the rows: first by erst (birthday, name), then
-// by sweeps down and up.
-func neueBaumOrdnung(reihen map[int][]string, hoch int, linien []baumLinie, fams []*baumFamilie, erst func(a, b string) int) *baumOrdnung {
+// by sweeps down and up; not frei: by erst alone, a couple side by side.
+func neueBaumOrdnung(reihen map[int][]string, hoch int, linien []baumLinie, fams []*baumFamilie, frei bool, erst func(a, b string) int) *baumOrdnung {
 	o := &baumOrdnung{reihen: reihen, hoch: hoch, eltern: map[string][]string{}, kinder: map[string][]string{}, paar: map[string][]string{},
 		mit: map[string][]string{}, familie: map[string]*baumFamilie{}, pos: map[string]float64{}}
 	for g, ids := range reihen {
@@ -143,6 +143,17 @@ func neueBaumOrdnung(reihen map[int][]string, hoch int, linien []baumLinie, fams
 				o.mit[e], o.mit[m] = append(o.mit[e], m), append(o.mit[m], e)
 			}
 		}
+	}
+	for g := 0; !frei && g <= hoch; g++ {
+		var neu []string
+		for _, b := range o.bloecke(g) {
+			slices.SortFunc(b, erst)
+			neu = append(neu, b...)
+		}
+		o.reihen[g] = neu
+	}
+	if !frei {
+		return o
 	}
 	for range 3 {
 		for g := 0; g <= hoch; g++ {
@@ -460,7 +471,7 @@ func (o *baumOrdnung) schieben(g int, x, schub map[string]float64) (bewegt bool)
 func (o *baumOrdnung) unter(g int, x map[string]float64, gen map[string]int) map[string]float64 {
 	schub := map[string]float64{}
 	for _, f := range o.fams {
-		if d := f.anker(x) - f.mitte(x); len(f.Eltern) > 0 && gen[f.Kinder[0]] == g && d > 0.5 {
+		if d := f.anker(x) - f.mitte(x); len(f.Eltern) > 0 && !istFrei(f.Eltern[0]) && gen[f.Kinder[0]] == g && d > 0.5 { // free parents stand over the child, they do not move her
 			for _, k := range f.Kinder {
 				schub[k] = d
 			}

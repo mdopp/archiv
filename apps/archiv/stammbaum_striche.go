@@ -236,7 +236,7 @@ func (z *baumZeichner) familien(fams []*baumFamilie, anker map[*baumFamilie][2]f
 			lo, hi = min(lo, x), max(hi, x)
 			ls := f.Fuer[k]
 			z.out = append(z.out, baumStrich{Art: "kind", Seg: [][4]float64{{x, y, x, oben}}, Fuer: ls, Fest: alleFest(ls)})
-			stamm.Fest = stamm.Fest || slices.ContainsFunc(ls, func(l baumLinie) bool { return l.Fest })
+			stamm.Fest = stamm.Fest || slices.ContainsFunc(ls, func(l baumLinie) bool { return l.Fest && l.Art == "eltern" }) // a sibling who only hangs on the bar confirms no parent
 		}
 		if hi-lo > 0.5 {
 			stamm.Seg = append(stamm.Seg, [4]float64{lo, y, hi, y})

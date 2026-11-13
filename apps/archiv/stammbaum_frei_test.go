@@ -71,9 +71,20 @@ func TestStammbaumFrei(t *testing.T) {
 			t.Fatalf("a stroke of a place: %+v", s)
 		}
 	}
-	for _, p := range sb.Personen { // the people stand in the edit tree as in the tree, row by row
+	for i, p := range sb.Personen { // the people stand in the edit tree as in the tree: the same row, the same order from left to right
 		if wo[p.ID].Gen != p.Gen+wo[sb.ich].Gen-baumPos(sb)[sb.ich].Gen {
 			t.Fatalf("%s changed its row", p.Name)
+		}
+		if q := sb.Personen[max(i-1, 0)]; q.Gen == p.Gen && q.X < p.X && wo[q.ID].X >= wo[p.ID].X {
+			t.Fatalf("%s and %s changed sides", q.Name, p.Name)
+		}
+	}
+	if eb.Breite > sb.Breite+3*baumSpalte {
+		t.Fatalf("the edit tree is %v wide, the tree %v", eb.Breite, sb.Breite)
+	}
+	for _, s := range eb.Striche { // the line up to parents nobody stands at is dashed, also over Emil and Kurt, siblings without parents
+		if g := s.Seg[0]; s.Art == "stamm" && g[1] < wo["s/greta"].Y && s.Fest {
+			t.Fatalf("a solid line up to empty places: %+v", s)
 		}
 	}
 	var b strings.Builder

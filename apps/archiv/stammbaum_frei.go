@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"fmt"
 	"maps"
 	"slices"
@@ -179,7 +180,7 @@ func (sb Stammbaum) zumBearbeiten(linien []baumLinie, knoten map[string]Knoten, 
 		}
 		knoten[f.ID], plaetze[f.ID] = Knoten{ID: f.ID}, f
 	}
-	eb := baumLegen(append(slices.Clone(linien), mehr...), knoten, geb, sb.ich)
+	eb := baumLegen(append(slices.Clone(linien), mehr...), knoten, geb, sb.ich, sb.freiOrt(frei))
 	eb.Frei, eb.Wer = plaetze, sb.Wer
 	for i, s := range eb.Striche {
 		fuer := slices.DeleteFunc(slices.Clone(s.Fuer), func(l baumLinie) bool { return istFrei(l.A) || istFrei(l.B) })
@@ -192,6 +193,42 @@ func (sb Stammbaum) zumBearbeiten(linien []baumLinie, knoten map[string]Knoten, 
 		eb.Striche[i] = s
 	}
 	return eb
+}
+
+// freiOrt is where each box of the edit tree stands in its row's order:
+// the people where they stand in the tree, so nobody changes sides; a
+// free parent beside the one there is, or over her children; a free
+// child after its siblings, on the side where none of them has a
+// partner standing, or under its parents.
+func (sb Stammbaum) freiOrt(frei []baumFrei) map[string]float64 {
+	ort := map[string]float64{}
+	for _, p := range sb.Personen {
+		ort[p.ID] = p.X
+	}
+	nahe := neueBaumNahe(sb.Linien, nil)
+	paar := func(k string, seite float64) bool { // her partner, or her child's other parent, stands on that side
+		ps := slices.Clone(nahe.partner[k])
+		for _, c := range nahe.kinder[k] {
+			ps = append(ps, nahe.eltern[c]...)
+		}
+		return slices.ContainsFunc(ps, func(p string) bool { return (ort[p]-ort[k])*seite > 0 })
+	}
+	for i, f := range frei {
+		x, d := baumMitte(f.Y, ort), 0.3+float64(i)/1000
+		ks := slices.SortedFunc(slices.Values(f.Neben), func(a, b string) int { return cmp.Compare(ort[a], ort[b]) })
+		switch es := nahe.eltern[f.Y[0]]; {
+		case f.Art == "eltern" && len(es) > 0:
+			x = ort[es[0]]
+		case f.Art == "kind" && len(ks) > 0 && !paar(ks[len(ks)-1], 1):
+			x = ort[ks[len(ks)-1]]
+		case f.Art == "kind" && len(ks) > 0 && !paar(ks[0], -1):
+			x, d = ort[ks[0]], -d
+		case f.Art == "kind" && len(ks) > 0:
+			x = ort[ks[0]]
+		}
+		ort[f.ID] = x + d
+	}
+	return ort
 }
 
 // text says a place: „Kind von Jutta und Rolf“, „Mutter oder Vater von dir“.

@@ -166,14 +166,16 @@ func (n *Netz) Stammbaeume() (sb, frei Stammbaum) {
 	}
 	wer := n.verwandte(ich, true)
 	n.mu.Unlock()
-	sb = baumLegen(linien, knoten, geb, ich)
+	sb = baumLegen(linien, knoten, geb, ich, nil)
 	sb.Wer = wer
 	sb.Fragen = baumFragen(sb.Weitere, sb.Linien, ich)
 	return sb, sb.zumBearbeiten(linien, knoten, geb, selbst)
 }
 
 // baumLegen places the boxes and splits the lines into drawn and broken.
-func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]string, ich string) Stammbaum {
+// ort: where each stands in its row's order (the edit tree keeps the
+// tree's); nil: the rows are ordered by birthday, name and the families.
+func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]string, ich string, ort map[string]float64) Stammbaum {
 	sb := Stammbaum{ich: ich}
 	if len(linien) == 0 {
 		return sb
@@ -200,8 +202,8 @@ func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]stri
 			unten = min(unten, gen[id])
 		}
 		reihen, seitlich, hoch := baumZeilen(ids, gen, unten, seite)
-		o := neueBaumOrdnung(reihen, hoch, sb.Linien, fams, func(a, b string) int {
-			return cmp.Or(strings.Compare(geb[a], geb[b]), strings.Compare(knoten[a].Name, knoten[b].Name), strings.Compare(a, b))
+		o := neueBaumOrdnung(reihen, hoch, sb.Linien, fams, ort == nil, func(a, b string) int {
+			return cmp.Or(cmp.Compare(ort[a], ort[b]), strings.Compare(geb[a], geb[b]), strings.Compare(knoten[a].Name, knoten[b].Name), strings.Compare(a, b))
 		})
 		rechts := o.setzen(x, start)
 		rechts = max(rechts, sb.seitenLegen(seitlich, seite, x, o.reihen, start))
