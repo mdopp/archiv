@@ -45,7 +45,8 @@ func sippeNetz(mehr map[string]antwort) *Netz {
 	return neuesNetz(st, nil, as, time.UTC, func() time.Time { return am })
 }
 
-// TestVorschau writes the Stammbaum tab of sippeNetz, with the page's
+// TestVorschau writes the Stammbaum tab of sippeNetz (or, with
+// ARCHIV_VORSCHAU_NETZ=breit, of breitNetz), with the page's
 // stylesheet and script inline, to the file ARCHIV_VORSCHAU names: to
 // look at before it goes live. „Bearbeiten“ and the sheet of a place work
 // as on the page; the post is answered by the page itself (nothing is
@@ -56,7 +57,11 @@ func TestVorschau(t *testing.T) {
 		t.Skip("ARCHIV_VORSCHAU is not set")
 	}
 	var b strings.Builder
-	stammbaumTab(&b, sippeNetz(nil))
+	n := sippeNetz(nil)
+	if os.Getenv("ARCHIV_VORSCHAU_NETZ") == "breit" { // the big family of stammbaum_luecke_test.go
+		n = breitNetz()
+	}
+	stammbaumTab(&b, n)
 	const probe = `<script>
 window.fetch=function(){return Promise.resolve({json:function(){return Promise.resolve({satz:'Vorschau: Hier wird nichts gespeichert. Im Archiv steht der Name jetzt an diesem Platz, und der nächste Platz ist frei.'})}})};
 document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href^="/tresor"]');if(a&&!e.defaultPrevented){e.preventDefault();var h=document.getElementById('hinweis');h.textContent='Vorschau: „'+(a.getAttribute('aria-label')||a.textContent)+'“ öffnet im Archiv die Seite dazu.'}});
