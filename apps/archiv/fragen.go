@@ -330,8 +330,9 @@ func (n *Netz) familienkreis() map[string]bool {
 // name's word or the box's model points to family (hinweise.go) is asked
 // with or without a tie. n.mu is held.
 func (n *Netz) offen() (out []Frage) {
-	offenesPaar := func(a, b string) bool { // shown, no answer but Später, no relation in a phone book
-		return a != b && n.befragbar(a) && n.befragbar(b) && !n.imBuchBeziehung(a, b) &&
+	benannt := n.benannt()
+	offenesPaar := func(a, b string) bool { // shown, no answer but Später, no relation in a phone book, none the family's lines name (verwandt.go)
+		return a != b && n.befragbar(a) && n.befragbar(b) && !n.imBuchBeziehung(a, b) && !benannt[paarKey(a, b)] &&
 			cmp.Or(n.antworten[paarKey(a, b)].Art, artSpaeter) == artSpaeter
 	}
 	gesehen := map[string]bool{}

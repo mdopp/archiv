@@ -1,12 +1,12 @@
 # scripts/ratchet.py gocognit: functions over 30, the number is the score
 # written by `scripts/ratchet.py --update`; lowered in the PR that fixes one, raised only with --accept
-# total 21
+# total 20
 61 apps/archiv/abgeleitet.go: main.(*Netz).abgeleitete
 37 apps/archiv/abgleich.go: main.(*Abgleich).kalender
 55 apps/archiv/abgleich.go: main.(*Abgleich).kontakte
 93 apps/archiv/aufraeumen.go: main.(*Aufraeumer).pruefen
 51 apps/archiv/fragen.go: main.(*Netz).offen
-38 apps/archiv/fragen_seite.go: main.(*Web).umfeldAntwort
+37 apps/archiv/fragen_seite.go: main.(*Web).umfeldAntwort
 33 apps/archiv/geburtstage.go: main.(*Netz).geburtstagHinweise
 101 apps/archiv/mail.go: main.(*Mailholer).holen
 31 apps/archiv/mail_seite.go: main.(*Web).imap
@@ -18,7 +18,6 @@
 31 apps/archiv/postbote.go: main.(*Postbote).Runde
 32 apps/archiv/postbote.go: main.(*Postbote).Zustellen
 35 apps/archiv/seite.go: main.(*Web).kontakteKarte
-40 apps/archiv/stammbaum.go: main.baumReihe
 51 apps/archiv/status.go: main.statusBauen
 34 apps/archiv/umfeld.go: main.(*Umfeld).Runde
 82 apps/archiv/woerter.go: main.woerterLesen

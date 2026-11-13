@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"math"
-	"net/url"
 	"slices"
 	"strings"
 )
@@ -21,23 +20,25 @@ import (
 // dashed line's edge page has the derivation pre-chosen, so one tap
 // confirms it.
 //
-// Drawn on the server as one SVG, no library, no script: the tree
-// scrolls sideways inside its box, never the page. Real data is messy,
-// and the layout takes it as it comes: several partners (in a row, the
-// one with most in the middle where it can), step-families (a child's
-// line from each parent it has), people without birthdays (no order by
-// age is needed: a row is ordered by where the parents stand), and lines
+// Drawn on the server as one SVG, no library: the tree scrolls sideways
+// inside its box, never the page. Real data is messy, and the layout
+// takes it as it comes (stammbaum_legen.go, stammbaum_striche.go):
+// several partners (in a row, the one with most in the middle),
+// step-families (a rail under three parents), people without birthdays
+// (a row is ordered by where the families stand), and lines
 // that contradict each other — a cycle, or someone who would be two
 // generations at once. Those are not drawn: the generations follow the
 // confirmed lines first (a 0-1 breadth-first walk, a derived line costs
 // one), and a line that does not fit is listed under the tree as a
 // question („Passt nicht in den Stammbaum“), its edge page saying why.
+// „Bearbeiten“ shows the same tree with its empty places (stammbaum_frei.go).
 
 const (
 	baumBreite  = 96.0  // a person's box
-	baumHoehe   = 48.0  // ≥ 44 px: a finger's target
-	baumSpalte  = 112.0 // a box and the gap to the next
-	baumZeile   = 124.0 // a generation and the room for its lines
+	baumHoehe   = 58.0  // ≥ 44 px: a finger's target; the name and what she is of the person
+	baumSpalte  = 112.0 // a box and the gap to its partner
+	baumLuft    = 12.0  // more gap between two who are no couple
+	baumZeile   = 150.0 // a generation and the room for its lines
 	baumRand    = 24.0
 	baumKlammer = 12.0 // a sibling bracket above the boxes
 )
@@ -74,6 +75,12 @@ type Stammbaum struct {
 	Weitere []baumLinie
 	Fragen  []BaumFrage
 	Seiten  []baumSeite
+	// Striche: what is drawn (stammbaum_striche.go); Wer: what each one is
+	// of the person by the lines known (verwandt.go)
+	Striche []baumStrich
+	Wer     map[string]string
+	// Frei: the edit tree's empty places by their box's id (stammbaum_frei.go)
+	Frei map[string]baumFrei
 }
 
 // baumSeite is a side row's label and where it stands.
@@ -138,33 +145,37 @@ func (n *Netz) baumLinien() (out []baumLinie) {
 	return out
 }
 
-// Stammbaum lays the tree out.
-func (n *Netz) Stammbaum() Stammbaum {
+// Stammbaeume lays the tree out twice: as it is, and with its empty
+// places for edit mode (no person: none).
+func (n *Netz) Stammbaeume() (sb, frei Stammbaum) {
 	if n == nil {
-		return Stammbaum{}
+		return sb, frei
 	}
 	n.mu.Lock()
 	linien := n.baumLinien()
-	weg := maps.Clone(n.baumWeg)
-	knoten := map[string]Knoten{}
+	ich := n.ich
+	knoten, selbst := map[string]Knoten{}, n.knoten[ich]
 	for _, l := range linien {
 		knoten[l.A], knoten[l.B] = n.knoten[l.A], n.knoten[l.B]
 	}
-	ich := n.ich
 	geb := map[string]string{}
 	for id := range knoten {
 		if g := n.merkmale[id].geb; !g.IsZero() {
 			geb[id] = g.Format("2006-01-02")
 		}
 	}
+	wer := n.verwandte(ich, true)
 	n.mu.Unlock()
-	sb := baumLegen(linien, knoten, geb, ich)
-	sb.Fragen = slices.DeleteFunc(baumFragen(sb.Weitere, sb.Linien, ich, weg), func(f BaumFrage) bool { return knoten[f.X].Tot || knoten[f.Y].Tot })
-	return sb
+	sb = baumLegen(linien, knoten, geb, ich, nil)
+	sb.Wer = wer
+	sb.Fragen = baumFragen(sb.Weitere, sb.Linien, ich)
+	return sb, sb.zumBearbeiten(linien, knoten, geb, selbst)
 }
 
 // baumLegen places the boxes and splits the lines into drawn and broken.
-func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]string, ich string) Stammbaum {
+// ort: where each stands in its row's order (the edit tree keeps the
+// tree's); nil: the rows are ordered by birthday, name and the families.
+func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]string, ich string, ort map[string]float64) Stammbaum {
 	sb := Stammbaum{ich: ich}
 	if len(linien) == 0 {
 		return sb
@@ -181,18 +192,7 @@ func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]stri
 		}
 	}
 	seite := baumSeitlich(sb)
-	eltern, partner, geschw := map[string][]string{}, map[string][]string{}, map[string][]string{}
-	for _, l := range sb.Linien {
-		switch l.Art {
-		case "eltern":
-			eltern[l.B] = append(eltern[l.B], l.A)
-		case "geschwister":
-			geschw[l.A], geschw[l.B] = append(geschw[l.A], l.B), append(geschw[l.B], l.A)
-		default:
-			partner[l.A], partner[l.B] = append(partner[l.A], l.B), append(partner[l.B], l.A)
-		}
-	}
-	name := func(id string) string { return knoten[id].Name }
+	fams, quer := baumFamilien(sb.Linien)
 	x := map[string]float64{}
 	start := 0.0
 	for _, k := range slices.Sorted(maps.Keys(baumMengen(komp))) {
@@ -202,75 +202,24 @@ func baumLegen(linien []baumLinie, knoten map[string]Knoten, geb map[string]stri
 			unten = min(unten, gen[id])
 		}
 		reihen, seitlich, hoch := baumZeilen(ids, gen, unten, seite)
-		rechts := start
-		geordnet := map[int][]string{}
-		for g := 0; g <= hoch; g++ {
-			reihe := baumReihe(reihen[g], x, eltern, partner, geschw, geb, name)
-			geordnet[g] = reihe
-			vorher := math.Inf(-1)
-			for _, id := range reihe {
-				soll := start
-				if ks := eltern[id]; len(ks) > 0 {
-					soll = 0
-					for _, e := range ks {
-						soll += x[e]
-					}
-					soll /= float64(len(ks))
-				}
-				x[id] = max(soll, vorher+baumSpalte, start)
-				vorher = x[id]
-				rechts = max(rechts, x[id])
-			}
-		}
-		baumZentrieren(geordnet, hoch, x, eltern)
-		rechts = max(rechts, sb.seitenLegen(seitlich, seite, x, geordnet, start))
+		o := neueBaumOrdnung(reihen, hoch, sb.Linien, fams, ort == nil, func(a, b string) int {
+			return cmp.Or(cmp.Compare(ort[a], ort[b]), strings.Compare(geb[a], geb[b]), strings.Compare(knoten[a].Name, knoten[b].Name), strings.Compare(a, b))
+		})
+		rechts := o.setzen(x, start)
+		rechts = max(rechts, sb.seitenLegen(seitlich, seite, x, o.reihen, start))
 		start = rechts + baumSpalte*1.5
 	}
 	for id, k := range knoten {
 		sb.Personen = append(sb.Personen, baumPerson{Knoten: k, Gen: gen[id], X: baumRand + x[id], Y: baumRand + baumKlammer + float64(gen[id])*baumZeile})
 		sb.Breite = max(sb.Breite, baumRand+x[id]+baumBreite+baumRand)
-		sb.Hoehe = max(sb.Hoehe, baumRand+baumKlammer+float64(gen[id])*baumZeile+baumHoehe+baumRand+10)
+		sb.Hoehe = max(sb.Hoehe, baumRand+baumKlammer+float64(gen[id])*baumZeile+baumHoehe+baumRand)
 	}
 	for _, s := range sb.Seiten {
 		sb.Breite = max(sb.Breite, baumRand+s.X+float64(len([]rune(s.Text)))*6.5+baumRand)
 	}
 	slices.SortFunc(sb.Personen, func(a, b baumPerson) int { return cmp.Or(cmp.Compare(a.Gen, b.Gen), cmp.Compare(a.X, b.X)) })
+	sb.zeichnen(fams, quer)
 	return sb
-}
-
-// baumZentrieren moves parents right, over their children, from the
-// lowest row up, as far as the next box in the row lets them: a row is
-// laid out left to right before its children, so a parent may stand far
-// left of them.
-func baumZentrieren(reihen map[int][]string, hoch int, x map[string]float64, eltern map[string][]string) {
-	kinder := map[string][]string{}
-	for k, es := range eltern {
-		for _, e := range es {
-			kinder[e] = append(kinder[e], k)
-		}
-	}
-	for g := hoch - 1; g >= 0; g-- {
-		reihe := reihen[g]
-		for i := len(reihe) - 1; i >= 0; i-- {
-			id := reihe[i]
-			ks := kinder[id]
-			if len(ks) == 0 {
-				continue
-			}
-			soll := 0.0
-			for _, k := range ks {
-				soll += x[k]
-			}
-			soll /= float64(len(ks))
-			grenze := math.Inf(1)
-			if i+1 < len(reihe) {
-				grenze = x[reihe[i+1]] - baumSpalte
-			}
-			if ziel := min(soll, grenze); ziel > x[id] {
-				x[id] = ziel
-			}
-		}
-	}
 }
 
 // baumZeilen moves a component's generations to start at 0 (unten its
@@ -397,77 +346,6 @@ func baumGenerationen(linien []baumLinie, knoten map[string]Knoten, ich string) 
 	return gen, komp
 }
 
-// baumReihe orders one row: by where the parents stand (placed already,
-// one row up), a sibling taking its sibling's place, then by birthday and
-// name; partners side by side, one with several in the middle.
-func baumReihe(ids []string, x map[string]float64, eltern, partner, geschw map[string][]string, geb map[string]string, name func(string) string) []string {
-	ort := map[string]float64{}
-	for _, id := range ids {
-		ort[id] = math.Inf(1)
-		if ks := eltern[id]; len(ks) > 0 {
-			s := 0.0
-			for _, e := range ks {
-				s += x[e]
-			}
-			ort[id] = s / float64(len(ks))
-		}
-	}
-	for _, id := range ids {
-		for _, g := range geschw[id] {
-			if o, da := ort[g]; da && o < ort[id] {
-				ort[id] = o
-			}
-		}
-	}
-	for _, id := range ids { // one without parents stands by its partner
-		for _, p := range partner[id] {
-			if o, da := ort[p]; da && math.IsInf(ort[id], 1) && !math.IsInf(o, 1) {
-				ort[id] = o
-			}
-		}
-	}
-	sortiert := slices.Clone(ids)
-	slices.SortFunc(sortiert, func(a, b string) int {
-		return cmp.Or(cmp.Compare(ort[a], ort[b]), strings.Compare(geb[a], geb[b]), strings.Compare(name(a), name(b)), strings.Compare(a, b))
-	})
-	inReihe := map[string]bool{}
-	for _, id := range ids {
-		inReihe[id] = true
-	}
-	var out []string
-	da := map[string]bool{}
-	for _, id := range sortiert {
-		if da[id] {
-			continue
-		}
-		// the partners reachable from id in this row, as a chain
-		gruppe := []string{id}
-		for i := 0; i < len(gruppe); i++ {
-			for _, p := range partner[gruppe[i]] {
-				if inReihe[p] && !slices.Contains(gruppe, p) {
-					gruppe = append(gruppe, p)
-				}
-			}
-		}
-		if len(gruppe) > 2 { // the one with most partners in the middle
-			mitte := slices.MaxFunc(gruppe, func(a, b string) int {
-				return cmp.Or(cmp.Compare(len(partner[a]), len(partner[b])), strings.Compare(b, a))
-			})
-			rest := slices.DeleteFunc(slices.Clone(gruppe), func(s string) bool { return s == mitte })
-			slices.SortFunc(rest, func(a, b string) int { return cmp.Compare(slices.Index(sortiert, a), slices.Index(sortiert, b)) })
-			h := len(rest) / 2
-			gruppe = append(append(append([]string{}, rest[:h]...), mitte), rest[h:]...)
-		} else if len(gruppe) == 2 && ort[gruppe[1]] < ort[gruppe[0]] {
-			gruppe[0], gruppe[1] = gruppe[1], gruppe[0]
-		}
-		for _, g := range gruppe {
-			da[g] = true
-		}
-		out = append(out, gruppe...)
-	}
-	return out
-}
-
 // baumWort is a line's kind as the tree's label says it.
 func baumWort(l baumLinie) string {
 	if l.Art == "eltern" {
@@ -476,19 +354,34 @@ func baumWort(l baumLinie) string {
 	return kurzWort(l.Art)
 }
 
-// stammbaumTab is the workplace's Stammbaum: the tree in its box, the
-// lines as a list (the screen reader's way and the small screen's), the
-// lines that did not fit, and „Beziehung ergänzen“.
+// stammbaumTab is the workplace's Stammbaum, in the box the editor's
+// answer fills anew (stammbaum_bau.go).
 func stammbaumTab(b *strings.Builder, n *Netz) {
-	sb := n.Stammbaum()
+	b.WriteString(`<div id=baum-tab>` + stammbaumInhalt(n) + `</div>`)
+}
+
+// stammbaumInhalt is the tab. To look at (nur-zeigen): the tree in its
+// box, the lines and who is who as lists (the screen reader's way and
+// the small screen's), the lines that did not fit, and „Beziehung
+// ergänzen“. To edit (nur-bearbeiten, the script's „Bearbeiten“ shows
+// the one and hides the other): the tree with its empty places, and the
+// names the sheet of a place offers.
+func stammbaumInhalt(n *Netz) string {
+	b := &strings.Builder{}
+	sb, frei := n.Stammbaeume()
+	if len(frei.Personen) > 0 {
+		b.WriteString(`<p class=baum-kopf><button type=button class=voll id=baum-modus>Bearbeiten</button><button type=button class=leise id=baum-ganz>Ganzen Baum zeigen</button></p>`)
+		b.WriteString(frei.svg(n, "baum-frei"))
+		fmt.Fprintf(b, `<p class="k nur-bearbeiten">%s</p>%s`, esc(saysBauErklaert), bauNamen(n))
+	}
+	b.WriteString(`<div class=nur-zeigen>`)
 	if len(sb.Personen) == 0 {
 		fmt.Fprintf(b, `<p class=ruhig><span class="punkt grau"></span>%s</p>`, esc(saysStammbaumLeer))
 	} else {
-		b.WriteString(sb.svg(n))
+		b.WriteString(sb.svg(n, "stammbaum"))
 		b.WriteString(`<p class=k>Tipp auf eine Person: ihre Verbindungen. Tipp auf eine Linie: was die beiden verbindet, und dort nachbessern. Gestrichelt ist abgeleitet und noch nicht bestätigt.</p>`)
 		sb.liste(b, n)
 	}
-	baumFragenTab(b, n, sb.Fragen)
 	if len(sb.Brueche) > 0 {
 		b.WriteString(`<section class=karte><h2>Passt nicht in den Stammbaum</h2><ul class=nahe>`)
 		for _, l := range sb.Brueche {
@@ -496,8 +389,9 @@ func stammbaumTab(b *strings.Builder, n *Netz) {
 		}
 		b.WriteString(`</ul></section>`)
 	}
-	fmt.Fprintf(b, `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary><form method=get action="%s" class=feld><input type=hidden name=zurueck value="/tresor?tab=stammbaum"><label>Wer?%s</label><label>Zu wem?%s</label><button>Weiter</button></form>%s</details>`,
+	fmt.Fprintf(b, `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary><form method=get action="%s" class=feld><input type=hidden name=zurueck value="/tresor?tab=stammbaum"><label>Wer?%s</label><label>Zu wem?%s</label><button>Weiter</button></form>%s</details></div>`,
 		kantePfad, namenFeld("von", "Du"), namenFeld("wer", ""), namenListe(n))
+	return b.String()
 }
 
 // baumPaar is a line's two names: „Anna Berg und Ben Berg“.
@@ -522,84 +416,20 @@ func (sb Stammbaum) liste(b *strings.Builder, n *Netz) {
 		fmt.Fprintf(b, `<li><a href="%s">%s<span class=k>%s</span></a></li>`, esc(kanteAdresse(l.A, l.B)), esc(baumPaar(n, l)), esc(wie))
 	}
 	b.WriteString(`</ul></details>`)
-}
-
-// svg draws the tree: the lines under the boxes, each a link with a wide
-// invisible stroke to hit; the boxes, each a link to the person.
-func (sb Stammbaum) svg(n *Netz) string {
-	wo := map[string]baumPerson{}
+	var wer []baumPerson
 	for _, p := range sb.Personen {
-		wo[p.ID] = p
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, `<div class=baum id=stammbaum><svg viewBox="0 0 %.0f %.0f" width="%.0f" height="%.0f" role=group aria-label="Stammbaum">`, sb.Breite, sb.Hoehe, sb.Breite, sb.Hoehe)
-	elternVon := map[string][]string{}
-	for _, l := range sb.Linien {
-		if l.Art == "eltern" {
-			elternVon[l.B] = append(elternVon[l.B], l.A)
+		if sb.Wer[p.ID] != "" {
+			wer = append(wer, p)
 		}
 	}
-	for _, l := range sb.Linien {
-		a, c := wo[l.A], wo[l.B]
-		var d string
-		switch l.Art {
-		case "eltern":
-			i := slices.Index(elternVon[l.B], l.A)
-			versatz := 0.0
-			if len(elternVon[l.B]) > 1 {
-				versatz = float64(i)*8 - 4*float64(len(elternVon[l.B])-1)
-			}
-			px, py := a.X+baumBreite/2, a.Y+baumHoehe
-			cx, cy := c.X+baumBreite/2+versatz, c.Y
-			mitte := py + (cy-py)/2 + versatz
-			d = fmt.Sprintf("M%.1f %.1fV%.1fH%.1fV%.1f", px, py, mitte, cx, cy)
-		case "geschwister":
-			if gemeinsam(elternVon[l.A], elternVon[l.B]) {
-				continue // the parents' lines show it; the edge stays a tap away in the list
-			}
-			d = fmt.Sprintf("M%.1f %.1fV%.1fH%.1fV%.1f", a.X+baumBreite/2, a.Y, a.Y-baumKlammer, c.X+baumBreite/2, c.Y)
-		default:
-			links, rechts := a, c
-			if c.X < a.X {
-				links, rechts = c, a
-			}
-			if rechts.X-links.X <= baumSpalte+0.5 {
-				d = fmt.Sprintf("M%.1f %.1fH%.1f", links.X+baumBreite, links.Y+baumHoehe/2, rechts.X)
-			} else { // someone between: under the boxes
-				d = fmt.Sprintf("M%.1f %.1fV%.1fH%.1fV%.1f", links.X+baumBreite/2, links.Y+baumHoehe, links.Y+baumHoehe+8, rechts.X+baumBreite/2, rechts.Y+baumHoehe)
-			}
-		}
-		klasse := "linie " + l.Art
-		titel := baumPaar(n, l) + ": " + baumWort(l)
-		if !l.Fest {
-			klasse += " vermutet"
-			titel += " (abgeleitet, noch nicht bestätigt)"
-		}
-		fmt.Fprintf(&b, `<a href="%s" aria-label="%s"><path class=treffer d="%s"/><path class="%s" d="%s"/></a>`, esc(kanteAdresse(l.A, l.B)), esc(titel), d, klasse, d)
+	if len(wer) == 0 {
+		return
 	}
-	for _, s := range sb.Seiten {
-		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" class="k seite">%s</text>`, s.X, s.Y, esc(s.Text))
+	fmt.Fprintf(b, `<details class=karte id=baum-wer><summary>Wer ist wer für dich (%d)</summary><ul>`, len(wer))
+	for _, p := range wer {
+		fmt.Fprintf(b, `<li><a href="%s">%s<span class=k>%s</span></a></li>`, esc(umfeldMitte(p.ID)), esc(p.mitKreuz()), esc(sb.Wer[p.ID]))
 	}
-	for _, p := range sb.Personen {
-		vor, nach := baumName(n.Anzeige(p.Knoten))
-		du := ""
-		if p.ID == sb.ich {
-			du = ` class=du data-du`
-		}
-		fmt.Fprintf(&b, `<a href="%s"%s aria-label="%s"><rect x="%.1f" y="%.1f" width="%.0f" height="%.0f" rx="10"/><text x="%.1f" y="%.1f">%s</text>`,
-			esc("/tresor/umfeld?"+url.Values{"mitte": {p.ID}}.Encode()), du, esc(p.Name), p.X, p.Y, baumBreite, baumHoehe, p.X+baumBreite/2, p.Y+map[bool]float64{true: 29, false: 21}[nach == ""], esc(vor))
-		if nach != "" {
-			fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" class=k>%s</text>`, p.X+baumBreite/2, p.Y+37, esc(nach))
-		}
-		b.WriteString(`</a>`)
-	}
-	b.WriteString(`</svg></div>`)
-	return b.String()
-}
-
-// gemeinsam: the two lists share one.
-func gemeinsam(a, b []string) bool {
-	return slices.ContainsFunc(a, func(s string) bool { return slices.Contains(b, s) })
+	b.WriteString(`</ul></details>`)
 }
 
 // baumName is a box's two lines: the first name, the rest, each short.

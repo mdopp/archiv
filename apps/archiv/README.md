@@ -736,8 +736,8 @@ inside the open vault; closed, there is no net, not even in memory.
   birthday and streets, the ties, the household's cards as last read),
   `verborgen.json` (who is hidden), `antworten.json` (step 2),
   `gruppen.json` and `hinweise.json` (step 5), `gruppen-modell.json`,
-  `geburtstag-hinweise.json` and `geburtstage.json` (step 8),
-  `baum-weissnicht.json` (step 7). Every round reads everything
+  `geburtstag-hinweise.json` and `geburtstage.json` (step 8). A
+  `baum-weissnicht.json` of before 2026-11-13 is no longer read. Every round reads everything
   again and rebuilds (a merge or a rename in Immich cannot drift); Immich
   out of reach keeps the last photos.
 - **When**: at the opening, then every `UMFELD_TAKT` seconds (default an
@@ -1076,19 +1076,58 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
 
 - The family circle's Eltern/Kind, Partner/Ex-Partner and Geschwister
   lines: answered, followed from an answer or a phone book's (solid),
-  derived and not confirmed (dashed). Generations are rows, partners side
-  by side (one with several in the middle), a child under its parents,
-  parents moved over their children; no birthday is needed.
-- One server-side SVG, no library, no script needed: it scrolls sideways
-  inside its box, never the page (the page's script only scrolls „Du“
-  into view). Boxes are 96×48 px links to the person's detail; every line
-  is a link to its edge page with a 22 px invisible hit stroke. The lines
-  are also a folded list.
+  derived and not confirmed (dashed). Generations are rows; no birthday
+  is needed.
+- Drawn as a family tree is (owner 2026-11-12; `stammbaum_legen.go`,
+  `stammbaum_striche.go`): the children of one set of parents are a
+  family. Partners stand side by side, one line between them; one line
+  goes down from the middle of that line to a bar, each child hangs from
+  the bar by one drop. A single parent's line starts under her box; two
+  parents nobody called partners get a thin line; three parents, or two
+  with someone between, a rail under their boxes. Siblings without
+  parents share a bar, half-siblings a bracket. A row keeps a family's
+  children side by side, one who married in outside, and two families a
+  couple ties end to end. No two strokes lie on each other and none runs
+  through a box (`TestStammbaumStriche` checks the laid-out data).
+- One server-side SVG, no library: it scrolls sideways inside its box,
+  never the page; „Ganzen Baum zeigen“ fits it to the width. Boxes are
+  96×58 px links to the person's detail, with what she is of the person
+  under her name. A stroke is a link to the edge page of the line it
+  stands for, with a 22 px invisible hit stroke; a child's drop stands
+  for the line to each parent and offers both. The lines and „Wer ist
+  wer für dich“ are folded lists too.
+- Who is what, derived (owner 2026-11-12; `verwandt.go`): the person
+  says only Mutter/Vater, Kind, Partner/in and Geschwister. Everything
+  else is read from the shortest way over those lines: named where
+  German has a word (Großonkel/Großtante, Schwager/Schwägerin,
+  Neffe/Nichte, Cousin/e 2. Grades …), else described („Partner/in von
+  Jonas (Cousin/e)“). Nothing of it is stored; `antworten.json` keeps its
+  shape, and a kind said without its way („Hedwig ist meine Tante“) stays
+  an answer until a line places it. A relative the lines name is a tie
+  on „Steht nahe“ with that name as the reason, and no pair they name
+  over more than one step is asked.
+- Look and edit (owner 2026-11-13; `stammbaum_frei.go`,
+  `stammbaum_bau.go`): the tab shows the tree with the people in it;
+  „Bearbeiten“ shows the same tree with its empty places as dashed
+  boxes, „Fertig“ goes back. Upward, the person, her partner and their
+  ancestors have two parents' places, the unfilled ones free (nobody who
+  only married in). Every couple and every parent alone has one free
+  child, which is the free sibling of its children; the person without
+  parents has a free sibling, without a partner a free partner. A tap on
+  a place opens a sheet: what it is („Kind von Jutta und Rolf“), one name
+  field, first the relatives without a place who fit there, then the
+  names that match, then „… neu anlegen“ (a person by hand). One
+  background POST to `/tresor/umfeld/verbinden` (x or neu, art, one y
+  or, for a parent or a child, several: both parents of a couple's
+  child are set, none only derived; same session, open vault and origin
+  as every form) answers JSON: the sentence, what takes it back, the tab
+  anew, still in edit mode, with the next place free. Without script the
+  tab is the tree to look at and „+ Beziehung ergänzen“.
 - Messy data: the generations follow the confirmed lines first (a 0-1
   breadth-first walk where a derived line costs one); a line that does
   not fit — a cycle, someone two generations at once — is not drawn but
   listed under „Passt nicht in den Stammbaum“, its edge page saying why
-  (`&pruefen=1`). A step-family gets a line from each parent.
+  (`&pruefen=1`).
 - Relatives a step away (owner 2026-11-11: „Wenn Hedwig meine Tante
   ist, wird das nicht im Stammbaum angezeigt.“; `stammbaum_weitere.go`):
   Großeltern, Onkel/Tante, Cousin/e, Neffe/Nichte, Enkel/in,
@@ -1096,14 +1135,10 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
   verwandt, answered or in a phone book, are in the tree at their
   generation. Where the drawn lines give the path (an aunt is a sibling
   of a parent), she stands there by that line; where not, on a side row
-  right of her row („Tanten und Onkel“), and „Noch ohne Platz im
-  Stammbaum“ asks once, one tap: „Hedwig ist Schwester oder Bruder von …“
-  with the ones in between (the parents) and „weiß nicht“. A tap sets
-  that pair as the edge page does (Homes writes it, Rückgängig undoes
-  it), and the tree derives the rest; „weiß nicht“ keeps her on the side
-  row, not asked again (`baum-weissnicht.json`). Without anyone in
-  between it says what is missing; Sonstige verwandt opens the edge page
-  to say how. Nothing is dropped.
+  right of her row („Tanten und Onkel“), and edit mode offers her first
+  at each place a line to one in between would give her (an aunt: the
+  free child of the grandparents). Sonstige verwandt stays on its side
+  row until the edge page says how. Nothing is dropped.
 - Asked early (owner 2026-11-11): two of the family circle with one
   family name on at least five photo days together are asked with the
   person's own questions; with both birthdays the age gap suggests the

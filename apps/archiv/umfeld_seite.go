@@ -395,6 +395,8 @@ func umfeldKopf(b *strings.Builder, n *Netz, k Knoten) {
 	teile, weiter := []string{"Für dich: noch nichts eingetragen"}, "Beziehung eintragen"
 	if p.Art != "" {
 		teile, weiter = []string{"Für dich: " + map[bool]string{true: fremdWort(true), false: artJetzt(p.Art)}[p.Art == artFremd]}, "Was verbindet euch?"
+	} else if v := n.Verwandt(k.ID, n.Ich()); v != "" { // nobody said it: the family's lines do (verwandt.go)
+		teile, weiter = []string{"Für dich: " + v + " (aus dem Stammbaum)"}, "Was verbindet euch?"
 	}
 	if platz, _ := n.Platz(k.ID); platz > 0 {
 		teile = append(teile, p.Kante.Stufe()) // by what the archive holds, not by her place among von

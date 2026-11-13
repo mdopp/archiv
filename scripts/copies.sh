@@ -2,7 +2,7 @@
 # The gates have one source (laib#1170): laib's werkstatt/scaffold/repo/scripts/.
 # Every repo of the household (laib, homes, archiv, dokumente, and each repo
 # `laib-app new` makes) carries copies of ratchet.py, test_ratchet.py,
-# pins.sh and this file, and loc.sh where scripts/loc.txt holds its one cap
+# ablaeufe.py, test_ablaeufe.py, pins.sh and this file, and loc.sh where scripts/loc.txt holds its one cap
 # (laib and homes keep a loc.sh of their own, with areas). This fails when a
 # copy differs from the source: change laib's first, then copy it here.
 #
@@ -16,7 +16,7 @@ src=${COPIES_FROM:-}
 if [ -z "$src" ]; then
   if [ -d "$here" ]; then src=$here; else src=https://raw.githubusercontent.com/mdopp/laib/main/$here; fi
 fi
-files="copies.sh pins.sh ratchet.py test_ratchet.py"
+files="ablaeufe.py copies.sh pins.sh ratchet.py test_ablaeufe.py test_ratchet.py"
 [ ! -f scripts/loc.txt ] || files="$files loc.sh"
 want=$(mktemp)
 trap 'rm -f "$want"' EXIT

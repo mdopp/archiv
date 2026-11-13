@@ -12,4 +12,18 @@
 # 24,074: raised 2026-11-12 with the Datenpfleger (archiv#58, +478: pfleger.go, pfleger_seite.go,
 # the photos without a date in the net's table): apps/ at 24,073 production lines, the minimum;
 # the owner's feature request (2026-11-12, archiv#58) is the yes.
-24074 apps
+# 25360: raised 2026-11-13 with the Stammbaum as a family tree, „Verbindungen bauen“ and the
+# derived relatives (+1,286: stammbaum_legen.go, stammbaum_striche.go, stammbaum_bau.go with its
+# script, verwandt.go; the old layout is gone): apps/ at 25,359 production lines, the minimum;
+# the owner's request (2026-11-12, „Die Darstellung … das kannst du besser“, „per Drag and Drop
+# verbinden“, „implizit ins Netz aufnehmen“) is the yes.
+# 25405: raised 2026-11-13 with one relative at a time under the tree and „Jemand anderes …“,
+# a name field that finds or makes the person in between (+45: stammbaum_weitere.go,
+# stammbaum_bau.go): apps/ at 25,404, the minimum; the owner's request (2026-11-13, „man sollte
+# sagen können ‚nichts davon' und eine andere Person nennen und anlegen können“) is the yes.
+# 25455: raised 2026-11-13 with the edit tree keeping the tree's order from left to right (+50:
+# stammbaum_frei.go freiOrt, stammbaum_legen.go; show and edit mode itself fitted under the cap,
+# the name list with drag and drop went): apps/ at 25,454, the minimum; the owner's request
+# (2026-11-13, after the preview: the same order in edit mode as in view mode, the partner does
+# not switch sides) is the yes.
+25455 apps
