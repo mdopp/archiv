@@ -47,9 +47,9 @@ func sippeNetz(mehr map[string]antwort) *Netz {
 
 // TestVorschau writes the Stammbaum tab of sippeNetz, with the page's
 // stylesheet and script inline, to the file ARCHIV_VORSCHAU names: to
-// look at before it goes live. The editor's post is answered by the page
-// itself (nothing is saved, no link leads anywhere). Without the variable
-// it does nothing.
+// look at before it goes live. „Bearbeiten“ and the sheet of a place work
+// as on the page; the post is answered by the page itself (nothing is
+// saved, no link leads anywhere). Without the variable it does nothing.
 func TestVorschau(t *testing.T) {
 	ziel := os.Getenv("ARCHIV_VORSCHAU")
 	if ziel == "" {
@@ -58,7 +58,7 @@ func TestVorschau(t *testing.T) {
 	var b strings.Builder
 	stammbaumTab(&b, sippeNetz(nil))
 	const probe = `<script>
-window.fetch=function(){return Promise.resolve({json:function(){return Promise.resolve({satz:'Vorschau: Hier wird nichts gespeichert. Im Archiv steht die Verbindung jetzt im Baum.',zurueck:'paar=vorschau'})}})};
+window.fetch=function(){return Promise.resolve({json:function(){return Promise.resolve({satz:'Vorschau: Hier wird nichts gespeichert. Im Archiv steht der Name jetzt an diesem Platz, und der nächste Platz ist frei.'})}})};
 document.addEventListener('click',function(e){var a=e.target.closest&&e.target.closest('a[href^="/tresor"]');if(a&&!e.defaultPrevented){e.preventDefault();var h=document.getElementById('hinweis');h.textContent='Vorschau: „'+(a.getAttribute('aria-label')||a.textContent)+'“ öffnet im Archiv die Seite dazu.'}});
 </script>`
 	page := `<!doctype html><html lang=de><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><meta name=color-scheme content="dark light"><title>Stammbaum (Vorschau)</title><style>` +
@@ -236,7 +236,7 @@ func TestStammbaumStriche(t *testing.T) {
 			t.Errorf("%s: %v", name, f)
 		}
 	}
-	for _, want := range []string{".baum{max-width:100%;overflow-x:auto", ".baum.ganz svg{width:100%;height:auto}", "html:not(.skript) #bauen"} {
+	for _, want := range []string{".baum{max-width:100%;overflow-x:auto", "#baum-tab.ganz .baum svg{width:100%;height:auto}", "html:not(.skript) .baum-kopf"} {
 		if !strings.Contains(css+bauCSS, want) {
 			t.Fatalf("the stylesheet lacks %q", want)
 		}
@@ -336,28 +336,33 @@ func bauPost(t *testing.T, wt *webTest, form url.Values, code int) bauAntwort {
 	return a
 }
 
-// „Verbindungen bauen“ (owner 2026-11-12): a name dropped on a person and
-// one chip is one post in the background. It keeps the line in the vault
-// as the edge page does, Homes writes it, and the answer is the sentence
-// (with what the lines now make her of the person), the tab anew and
-// what takes it back; Rückgängig is the same post and leaves nothing.
-// Several names go at once; a name nobody has becomes a person by hand
-// and Rückgängig takes her back too. Only the four plain kinds; the
-// vault must be open, the person signed in, the post from this origin.
+// The editor's post (owner 2026-11-12, -13): a name at a place is one
+// post in the background. It keeps the line in the vault as the edge
+// page does, Homes writes it, and the answer is the sentence (with what
+// the lines now make her of the person), the tab anew and what takes it
+// back; Rückgängig is the same post and leaves nothing. A name nobody
+// has becomes a person by hand and Rückgängig takes her back too. Only
+// the four plain kinds, one person a post; the vault must be open, the
+// person signed in, the post from this origin. The old editor is gone
+// from the page.
 func TestStammbaumVerbinden(t *testing.T) {
 	wt, ut, homes, innen, _ := kanteBox(t)
 	vorher := len(antwortenLaden(innen))
 	page := wt.rufe("GET", "/tresor?tab=stammbaum", anna, nil).Body.String()
-	for _, want := range []string{`<section class=karte id=bauen><h2>Verbindungen bauen</h2>`, `<input id=bau-suche type=search`, `<button type=button class="bau-name du" data-id="p-anna" data-name=Du>Du</button>`,
-		`<div class=bau-gruppe><h3>Berg</h3><button type=button class=bau-name data-id="p-ben" data-name="Ben Berg" data-drin title="steht im Stammbaum">Ben Berg</button>`,
-		`data-id="p-kim" data-name="Kim Berg">Kim Berg</button>`, "fetch('" + verbindenPfad + "',{method:'POST'", "credentials:'same-origin'", "pointerdown", "'Rückgängig'"} {
+	for _, want := range []string{`<button type=button class=voll id=baum-modus>Bearbeiten</button>`, `<div class=baum id=baum-frei>`, `<div id=bau-namen hidden data-namen="[`,
+		`[&#34;p-kim&#34;,&#34;Kim Berg&#34;]`, "fetch('" + verbindenPfad + "',{method:'POST'", "credentials:'same-origin'", "'Rückgängig'", "'Fertig'", `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary>`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}
 	}
+	for _, weg := range []string{"Verbindungen bauen", "bau-suche", "bau-liste", "pointerdown", "Noch ohne Platz"} {
+		if strings.Contains(page, weg) {
+			t.Fatalf("%q is still on the page", weg)
+		}
+	}
 	a := bauPost(t, wt, url.Values{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"kind"}}, 200)
 	if a.Satz != "Kim Berg ist Kind von dir." || a.Zurueck != "paar="+url.QueryEscape(paarKey("p-kim", "p-anna")) || a.Fehler != "" ||
-		!strings.HasPrefix(a.HTML, `<div class=baum id=stammbaum>`) || !strings.Contains(a.HTML, `data-id="p-kim" data-name="Kim Berg" aria-label="Kim Berg, Kind"`) || strings.Contains(a.HTML, "<main") {
+		!strings.HasPrefix(a.HTML, `<p class=baum-kopf>`) || !strings.Contains(a.HTML, `data-id="p-kim" data-name="Kim Berg" aria-label="Kim Berg, Kind"`) || strings.Contains(a.HTML, "<main") {
 		t.Fatalf("the answer: %+v", a)
 	}
 	as := antwortenLaden(innen)
@@ -379,25 +384,14 @@ func TestStammbaumVerbinden(t *testing.T) {
 	if c := bauPost(t, wt, q, 200); c.Satz != saysBauZurueck || strings.Contains(c.HTML, "Lotte") || len(angelegtLaden(innen)) != 0 || len(antwortenLaden(innen)) != len(as) {
 		t.Fatalf("Lotte is not taken back: %+v", c)
 	}
-	// two at once, and back
-	tab, _ := tabelleLaden(innen)
-	tab.Namen["p-ria"], tab.Namen["p-sam"] = "Ria Berg", "Sam Berg"
-	jsonImTresor(innen.umfeldTabelle(), tab)
-	ut.u.laden(innen)
-	d := bauPost(t, wt, url.Values{"x": {"p-ria", "p-sam"}, "y": {"p-kim"}, "art": {"geschwister"}}, 200)
-	q, _ = url.ParseQuery(d.Zurueck)
-	if d.Satz != "2 Verbindungen gespeichert." || len(q["paar"]) != 2 || !strings.Contains(d.HTML, `aria-label="Ria Berg, Kind"`) || !strings.Contains(d.HTML, `aria-label="Sam Berg, Kind"`) {
-		t.Fatalf("two siblings: %+v", d)
-	}
-	q.Set("tu", "zurueck")
-	bauPost(t, wt, q, 200)
 	a2, _ := url.ParseQuery(a.Zurueck)
 	a2.Set("tu", "zurueck")
 	bauPost(t, wt, a2, 200)
 	if got := antwortenLaden(innen); len(got) != vorher {
 		t.Fatalf("after every Rückgängig: %d answers, not %d: %v", len(got), vorher, got)
 	}
-	for _, f := range []url.Values{{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"onkel"}}, {"y": {"p-anna"}, "art": {"kind"}}, {"x": {"p-kim"}, "art": {"kind"}}} {
+	for _, f := range []url.Values{{"x": {"p-kim"}, "y": {"p-anna"}, "art": {"onkel"}}, {"y": {"p-anna"}, "art": {"kind"}}, {"x": {"p-kim"}, "art": {"kind"}},
+		{"x": {"p-kim"}, "neu": {"Lotte Berg"}, "y": {"p-anna"}, "art": {"kind"}}, {"x": {"p-kim"}, "y": {"p-anna", ""}, "art": {"kind"}}} {
 		if e := bauPost(t, wt, f, 400); e.Fehler != saysBauOhne || e.Satz != "" {
 			t.Fatalf("%v: %+v", f, e)
 		}
@@ -436,7 +430,7 @@ func TestStammbaumAlteAntworten(t *testing.T) {
 	jsonImTresor(innen.umfeldTabelle(), tab)
 	ut.u.laden(innen)
 	for _, f := range [][3]string{{"p-hedwig", "geschwister", "p-rosi"}, {"p-ole", "eltern", "p-karl"}} { // Ole: her grandfather follows, marked „aus“
-		wt.folgen(t, wt.rufe("POST", antwortPfad, anna, url.Values{"x": {f[0]}, "y": {f[2]}, "art": {f[1]}, "festlegen": {"1"}, "zurueck": {"/tresor?tab=stammbaum"}}))
+		bauPost(t, wt, url.Values{"x": {f[0]}, "y": {f[2]}, "art": {f[1]}}, 200)
 	}
 	alt, err := os.ReadFile(innen.umfeldAntworten())
 	if err != nil {
@@ -455,7 +449,7 @@ func TestStammbaumAlteAntworten(t *testing.T) {
 	if len(n.Gegebene()) != len(roh) {
 		t.Fatalf("%d answers of %d", len(n.Gegebene()), len(roh))
 	}
-	for _, want := range []string{`aria-label="Hedwig Sommer, Onkel/Tante"`, `aria-label="Erna Lang"`, `aria-label="Lukas Sommer"`, "Erna Lang ist Mutter oder Vater von …", `aria-label="Rosi Berg, Mutter/Vater"`} {
+	for _, want := range []string{`aria-label="Hedwig Sommer, Onkel/Tante"`, `aria-label="Erna Lang"`, `aria-label="Lukas Sommer"`, `aria-label="Rosi Berg, Mutter/Vater"`} {
 		if !strings.Contains(baum, want) {
 			t.Fatalf("%q missing:\n%s", want, baum)
 		}

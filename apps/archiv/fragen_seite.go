@@ -434,9 +434,6 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		}
 		http.Redirect(rw, r, weiter(url.Values{}), http.StatusSeeOther)
 		return
-	case "weissnicht": // the Stammbaum's „weiß nicht“: only in the vault
-		w.baumWeissNicht(rw, r, innen, zurueck, key)
-		return
 	case "eintragen":
 		if err := w.eintragen(r.Context(), innen, key); err != nil {
 			w.zurueckFehler(rw, r, zurueck, http.StatusBadGateway, saysNichtEin)
@@ -451,7 +448,7 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x, y := r.PostFormValue("x"), r.PostFormValue("y")
-	if festlegen(r, zurueck) {
+	if strings.HasPrefix(zurueck, kantePfad) { // from the edge page: any pair, set as it says
 		w.kanteFestlegen(rw, r, innen, zurueck, x, y, art)
 		return
 	}
@@ -476,21 +473,6 @@ func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
 	// a refusal stays visible: the toast and the list say „noch nicht eingetragen“
 	w.eintragenMit(r.Context(), innen, key)
 	http.Redirect(rw, r, weiter(url.Values{"getan": {key}}), http.StatusSeeOther)
-}
-
-// festlegen: the answer comes from the edge page, or the Stammbaum's
-// placing (stammbaum_weitere.go): any pair, set as the edge page does.
-func festlegen(r *http.Request, zurueck string) bool {
-	return strings.HasPrefix(zurueck, kantePfad) || r.PostFormValue("festlegen") == "1"
-}
-
-// baumWeissNicht keeps the Stammbaum's „weiß nicht“ and goes back.
-func (w *Web) baumWeissNicht(rw http.ResponseWriter, r *http.Request, innen Innen, zurueck, key string) {
-	if err := w.Umfeld.BaumWeissNicht(innen, key); err != nil {
-		w.antwortFehler(rw, r, zurueck, err)
-		return
-	}
-	http.Redirect(rw, r, zurueck, http.StatusSeeOther)
 }
 
 // vergessen is Rückgängig of the answer key: out of Homes, out of the

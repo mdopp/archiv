@@ -736,8 +736,8 @@ inside the open vault; closed, there is no net, not even in memory.
   birthday and streets, the ties, the household's cards as last read),
   `verborgen.json` (who is hidden), `antworten.json` (step 2),
   `gruppen.json` and `hinweise.json` (step 5), `gruppen-modell.json`,
-  `geburtstag-hinweise.json` and `geburtstage.json` (step 8),
-  `baum-weissnicht.json` (step 7). Every round reads everything
+  `geburtstag-hinweise.json` and `geburtstage.json` (step 8). A
+  `baum-weissnicht.json` of before 2026-11-13 is no longer read. Every round reads everything
   again and rebuilds (a merge or a rename in Immich cannot drift); Immich
   out of reach keeps the last photos.
 - **When**: at the opening, then every `UMFELD_TAKT` seconds (default an
@@ -1106,14 +1106,23 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
   an answer until a line places it. A relative the lines name is a tie
   on „Steht nahe“ with that name as the reason, and no pair they name
   over more than one step is asked.
-- „Verbindungen bauen“ (owner 2026-11-12; `stammbaum_bau.go`): under the
-  tree every name, grouped by family name, one field to find one or to
-  make a person by hand of a name nobody has. Drag a name onto a person
-  or another name (a finger holds 350 ms), or tap the name, then the
-  person; four chips set the line; „Mehrere“ sends several at once. One
-  background POST to `/tresor/umfeld/verbinden` (same session, open
-  vault and origin as every form) answers JSON: the sentence, what takes
-  it back, the tab anew. Without script „+ Beziehung ergänzen“ stays.
+- Look and edit (owner 2026-11-13; `stammbaum_frei.go`,
+  `stammbaum_bau.go`): the tab shows the tree with the people in it;
+  „Bearbeiten“ shows the same tree with its empty places as dashed
+  boxes, „Fertig“ goes back. Upward, the person, her partner and their
+  ancestors have two parents' places, the unfilled ones free (nobody who
+  only married in). Every couple and every parent alone has one free
+  child, which is the free sibling of its children; the person without
+  parents has a free sibling, without a partner a free partner. A tap on
+  a place opens a sheet: what it is („Kind von Jutta und Rolf“), one name
+  field, first the relatives without a place who fit there, then the
+  names that match, then „… neu anlegen“ (a person by hand). One
+  background POST to `/tresor/umfeld/verbinden` (x or neu, art, one y
+  or, for a parent or a child, several: both parents of a couple's
+  child are set, none only derived; same session, open vault and origin
+  as every form) answers JSON: the sentence, what takes it back, the tab
+  anew, still in edit mode, with the next place free. Without script the
+  tab is the tree to look at and „+ Beziehung ergänzen“.
 - Messy data: the generations follow the confirmed lines first (a 0-1
   breadth-first walk where a derived line costs one); a line that does
   not fit — a cycle, someone two generations at once — is not drawn but
@@ -1126,14 +1135,10 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
   verwandt, answered or in a phone book, are in the tree at their
   generation. Where the drawn lines give the path (an aunt is a sibling
   of a parent), she stands there by that line; where not, on a side row
-  right of her row („Tanten und Onkel“), and „Noch ohne Platz im
-  Stammbaum“ asks once, one tap: „Hedwig ist Schwester oder Bruder von …“
-  with the ones in between (the parents) and „weiß nicht“. A tap sets
-  that pair as the edge page does (Homes writes it, Rückgängig undoes
-  it), and the tree derives the rest; „weiß nicht“ keeps her on the side
-  row, not asked again (`baum-weissnicht.json`). Without anyone in
-  between it says what is missing; Sonstige verwandt opens the edge page
-  to say how. Nothing is dropped.
+  right of her row („Tanten und Onkel“), and edit mode offers her first
+  at each place a line to one in between would give her (an aunt: the
+  free child of the grandparents). Sonstige verwandt stays on its side
+  row until the edge page says how. Nothing is dropped.
 - Asked early (owner 2026-11-11): two of the family circle with one
   family name on at least five photo days together are asked with the
   person's own questions; with both birthdays the age gap suggests the

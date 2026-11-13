@@ -24,13 +24,15 @@ import (
 
 // baumStrich is one stroke: its straight pieces (x1, y1, x2, y2), the
 // lines it stands for, or for two parents without a line the two (A, B).
-// Fest: every line it stands for is confirmed.
+// Fest: every line it stands for is confirmed. Frei: it leads to an
+// empty place of the edit tree and stands for no line.
 type baumStrich struct {
 	Art  string
 	Seg  [][4]float64
 	Fuer []baumLinie
 	A, B string
 	Fest bool
+	Frei bool
 }
 
 // baumZeichner draws the strokes of a laid-out tree.
@@ -305,17 +307,20 @@ func strichTitel(n *Netz, l baumLinie) string {
 // line a link with a wide invisible stroke to hit; one that stands for
 // several lines names them all (data-mehr: the script offers them, without
 // it the first opens and the list under the tree has the rest); the
-// boxes, each a link to the person with what she is of the person.
-func (sb Stammbaum) svg(n *Netz) string {
+// boxes, each a link to the person with what she is of the person, an
+// empty place of the edit tree its own box (baumFrei.svg).
+func (sb Stammbaum) svg(n *Netz, id string) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, `<div class=baum id=stammbaum><svg viewBox="0 0 %.0f %.0f" width="%.0f" height="%.0f" role=group aria-label="Stammbaum">`, sb.Breite, sb.Hoehe, sb.Breite, sb.Hoehe)
+	fmt.Fprintf(&b, `<div class=baum id=`+id+`><svg viewBox="0 0 %.0f %.0f" width="%.0f" height="%.0f" role=group aria-label="Stammbaum">`, sb.Breite, sb.Hoehe, sb.Breite, sb.Hoehe)
 	for _, s := range sb.Striche {
 		var d strings.Builder
 		for _, g := range s.Seg {
 			fmt.Fprintf(&d, "M%.1f %.1fL%.1f %.1f", g[0], g[1], g[2], g[3])
 		}
 		klasse := "linie " + s.Art
-		if !s.Fest {
+		if s.Frei {
+			klasse += " frei"
+		} else if !s.Fest {
 			klasse += " vermutet"
 		}
 		ziel, titel, mehr := kanteAdresse(s.A, s.B), "", ""
@@ -343,6 +348,10 @@ func (sb Stammbaum) svg(n *Netz) string {
 		fmt.Fprintf(&b, `<text x="%.1f" y="%.1f" class="k seite">%s</text>`, s.X, s.Y, esc(s.Text))
 	}
 	for _, p := range sb.Personen {
+		if f, frei := sb.Frei[p.ID]; frei {
+			f.svg(&b, n, p)
+			continue
+		}
 		vor, nach := baumName(n.Anzeige(p.Knoten))
 		wort, _, _ := strings.Cut(sb.Wer[p.ID], " (")
 		if strings.Contains(wort, " von ") {

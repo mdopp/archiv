@@ -79,13 +79,10 @@ func TestVerstorbenFragtNichts(t *testing.T) {
 
 	am := time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)
 	b := baumNetz(map[string]antwort{paarKey("h/zora", "h/uwe"): {X: "h/zora", Art: "onkel", Am: am}})
-	if len(b.Stammbaum().Fragen) != 1 {
-		t.Fatal("Zora is asked to begin with")
-	}
-	tot(b, "h/zora")
+	tot(b, "h/zora") // the dead have their place in a family tree: still offered for it
 	sb := b.Stammbaum()
-	if len(sb.Fragen) != 0 || baumPos(sb)["h/zora"].ID == "" {
-		t.Fatalf("Zora: asked %+v, in the tree %+v", sb.Fragen, baumPos(sb)["h/zora"])
+	if len(sb.Fragen) != 1 || baumPos(sb)["h/zora"].ID == "" {
+		t.Fatalf("Zora: without a place %+v, in the tree %+v", sb.Fragen, baumPos(sb)["h/zora"])
 	}
 	var s strings.Builder
 	stammbaumTab(&s, b)

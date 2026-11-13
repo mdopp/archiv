@@ -2,14 +2,7 @@ package main
 
 import (
 	"cmp"
-	"encoding/json"
-	"fmt"
-	"maps"
-	"os"
-	"path/filepath"
 	"slices"
-	"strings"
-	"time"
 )
 
 // The relatives a step away in the Stammbaum (owner 2026-11-11: „Wenn
@@ -19,14 +12,11 @@ import (
 // Schwager/Schwägerin each stand for a path over someone in between (an
 // aunt is a sibling of a parent). Where the path is drawn, the relative
 // stands at its place by it. Where it is not, the relative stands in the
-// right generation on a side row („Tanten und Onkel“), and one one-tap
-// question places it: „Hedwig ist Schwester oder Bruder von …“ with the
-// names of the ones in between (an aunt: the parents) and „weiß nicht“.
-// The answer is an ordinary answer about Hedwig and that parent, so the
-// tree derives the rest. „Sonstige verwandt“ has no path: its question is
-// the edge page, to say how. Nothing is dropped: a relative whose path
-// lacks the one in between says what is missing, and after „weiß nicht“
-// it stays on the side row, not asked again (umfeld/baum-weissnicht.json).
+// right generation on a side row („Tanten und Onkel“), and edit mode
+// (stammbaum_frei.go) offers her first for each empty place a line to
+// one in between would give her: an aunt for the free child of the
+// grandparents. „Sonstige verwandt“ has no path: it stays on its side
+// row until the edge page says how. Nothing is dropped.
 
 // baumStufe is how many generations X stands above Y for „X is Art of Y“.
 var baumStufe = map[string]int{"eltern": 1, "kind": -1, "grosseltern": 2, "enkel": -2, "onkel": 1, "neffe": -1, "schwiegereltern": 1, "schwiegerkind": -1}
@@ -54,20 +44,14 @@ var baumSeitenWort = map[string]string{"grosseltern": "Großeltern", "enkel": "E
 	"cousin": "Cousins und Cousinen", "schwiegereltern": "Schwiegereltern", "schwiegerkind": "Schwiegerkinder", "schwager": "Schwager und Schwägerinnen",
 	"verwandt": "Weitere Verwandte"}
 
-// umwegWort is an answer as the question says it: „Schwester oder Bruder“.
-var umwegWort = map[string]string{"eltern": "Mutter oder Vater", "kind": "Kind", "geschwister": "Schwester oder Bruder", "partner": "Partner/in", "onkel": "Tante oder Onkel"}
-
-// baumWahl is one button: X is Art of M.
+// baumWahl is a line that would place X: X is Art of M.
 type baumWahl struct{ M, Art string }
 
 // BaumFrage is a relative a step away the drawn lines do not place: X is
-// Art of Y; Wahl the ones in between, Fehlt what is missing when there
-// is none, Weg: the person said „weiß nicht“.
+// Art of Y; Wahl the lines to the ones in between that would.
 type BaumFrage struct {
 	X, Y, Art string
 	Wahl      []baumWahl
-	Fehlt     string
-	Weg       bool
 }
 
 // baumNahe answers who is rel of id among the drawn lines.
@@ -127,7 +111,7 @@ func (b baumNahe) von(id, rel string) (out []string) {
 
 // baumFragen are the lines a step away the drawn lines do not place,
 // each asked from the end that stands in the tree (the person's first).
-func baumFragen(weitere, linien []baumLinie, ich string, weg map[string]time.Time) (out []BaumFrage) {
+func baumFragen(weitere, linien []baumLinie, ich string) (out []BaumFrage) {
 	nahe := neueBaumNahe(linien, weitere)
 	steht := map[string]bool{}
 	for _, l := range linien {
@@ -138,7 +122,7 @@ func baumFragen(weitere, linien []baumLinie, ich string, weg map[string]time.Tim
 		if x == ich || !steht[y] && steht[x] {
 			x, y, art = y, x, cmp.Or(gegen[art], art)
 		}
-		f := BaumFrage{X: x, Y: y, Art: art, Weg: !weg[paarKey(x, y)].IsZero()}
+		f := BaumFrage{X: x, Y: y, Art: art}
 		if f.platz(nahe) {
 			continue
 		}
@@ -147,10 +131,9 @@ func baumFragen(weitere, linien []baumLinie, ich string, weg map[string]time.Tim
 	return out
 }
 
-// platz: the drawn lines place X; else the buttons that would.
+// platz: the drawn lines place X; else the lines that would.
 func (f *BaumFrage) platz(nahe baumNahe) bool {
-	wege := baumUmwege[f.Art]
-	for _, u := range wege {
+	for _, u := range baumUmwege[f.Art] {
 		for _, m := range nahe.von(f.Y, u.Ueber) {
 			if m == f.X {
 				continue
@@ -160,9 +143,6 @@ func (f *BaumFrage) platz(nahe baumNahe) bool {
 			}
 			f.Wahl = append(f.Wahl, baumWahl{M: m, Art: u.Antwort})
 		}
-	}
-	if len(f.Wahl) == 0 && len(wege) > 0 {
-		f.Fehlt = umwegWort[wege[0].Ueber]
 	}
 	return false
 }
@@ -174,115 +154,4 @@ func seitenWort(arten []string) string {
 		return baumSeitenWort[arten[0]]
 	}
 	return "Verwandte"
-}
-
-// baumFragenTab is the section under the tree (owner 2026-11-13: „das
-// ist immer noch viel … man sollte sagen können ‚nichts davon' und eine
-// andere Person nennen und anlegen können“): one relative at a time, how
-// many follow, and beside the names „Jemand anderes …“, a name field
-// that finds a person or makes a new one. After „weiß nicht“ a relative
-// stays on the side row of the tree and is not asked here again.
-func baumFragenTab(b *strings.Builder, n *Netz, fs []BaumFrage) {
-	fs = slices.DeleteFunc(slices.Clone(fs), func(f BaumFrage) bool { return f.Weg })
-	if len(fs) == 0 {
-		return
-	}
-	f := fs[0]
-	b.WriteString(`<section class=karte id=einordnen><h2>Noch ohne Platz im Stammbaum</h2>`)
-	x, _ := n.Person(f.X)
-	y, _ := n.Person(f.Y)
-	wer, von := n.Anzeige(x), "von "+n.Anzeige(y)
-	if f.Y == n.Ich() {
-		von = "von dir"
-	}
-	fmt.Fprintf(b, `<div class=einordnen><p><b>%s</b> <span class=k>%s</span></p>`, esc(wer), esc(kurzWort(f.Art)+" "+von))
-	switch {
-	case len(f.Wahl) > 0:
-		b.WriteString(baumFrageForm(n, f, wer))
-	case f.Fehlt != "":
-		fmt.Fprintf(b, `<p>%s</p>`, esc("Für den Platz fehlt noch: "+f.Fehlt+" "+von+"."))
-		if u := baumUmwege[f.Art][0].Ueber; slices.Contains(bauArten, u) {
-			b.WriteString(baumNameForm(f.Y, "", map[string]string{u: "Eintragen"}, false))
-			b.WriteString(`<p class="k ohne-skript"><a href="#dazu">Eintragen</a></p>`)
-		} else {
-			b.WriteString(`<p class=k><a href="#dazu">Eintragen</a></p>`)
-		}
-	default:
-		fmt.Fprintf(b, `<p><a class=zeile href="%s">%s</a></p>`, esc(kanteAdresse(f.X, f.Y)), esc("Wie genau ist "+wer+" verwandt?"))
-	}
-	b.WriteString(`</div>`)
-	if len(fs) > 1 {
-		fmt.Fprintf(b, `<p class=k>%s</p>`, esc(fmt.Sprintf("Danach noch %d.", len(fs)-1)))
-	}
-	b.WriteString(`</section>`)
-}
-
-// baumFrageForm is „Hedwig ist Schwester oder Bruder von …“, the names
-// as chips, „Jemand anderes …“ and „weiß nicht“; a chip sets the
-// relation as the edge page does.
-func baumFrageForm(n *Netz, f BaumFrage, wer string) string {
-	var b strings.Builder
-	eine := !slices.ContainsFunc(f.Wahl, func(w baumWahl) bool { return w.Art != f.Wahl[0].Art })
-	frage := wer + " ist …"
-	if eine {
-		frage = wer + " ist " + umwegWort[f.Wahl[0].Art] + " von …"
-	}
-	fmt.Fprintf(&b, `<p>%s</p><div class=chips>`, esc(frage))
-	knoepfe := map[string]string{}
-	for _, w := range f.Wahl {
-		m, _ := n.Person(w.M)
-		text := n.Anzeige(m)
-		if !eine {
-			text = umwegWort[w.Art] + " von " + text
-		}
-		fmt.Fprintf(&b, `<form method=post action="%s" class=sofort><input type=hidden name=x value="%s"><input type=hidden name=y value="%s"><input type=hidden name=festlegen value=1><input type=hidden name=zurueck value="/tresor?tab=stammbaum">%s</form>`,
-			antwortPfad, esc(f.X), esc(w.M), chip(w.Art, text, ""))
-		// The one named is the counterpart of X: X is w.Art of her.
-		knoepfe[cmp.Or(gegen[w.Art], w.Art)] = map[bool]string{true: "Eintragen", false: wer + " ist " + umwegWort[w.Art]}[eine]
-	}
-	b.WriteString(`<button type=button class="chip anderer">Jemand anderes …</button>`)
-	fmt.Fprintf(&b, `<form method=post action="%s" class=sofort><input type=hidden name=paar value="%s"><input type=hidden name=tu value=weissnicht><input type=hidden name=zurueck value="/tresor?tab=stammbaum"><button class="chip leise" data-laeuft="weiß nicht …">weiß nicht</button></form></div>`,
-		antwortPfad, esc(paarKey(f.X, f.Y)))
-	b.WriteString(baumNameForm(f.X, paarKey(f.X, f.Y), knoepfe, true))
-	return b.String()
-}
-
-// baumNameForm is a name field for the editor's post: the one named is
-// art of y, one button an art; erledigt the question it answers. The
-// script finds the name among the editor's names or makes a new person.
-func baumNameForm(y, erledigt string, knoepfe map[string]string, zu bool) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<form class=bau-frage data-y="%s" data-erledigt="%s"%s><label>Wer?<input name=name list=namen data-namen autocomplete=off required placeholder="Name, auch neu"></label><div class=chips>`,
-		esc(y), esc(erledigt), map[bool]string{true: " hidden"}[zu])
-	for _, art := range slices.Sorted(maps.Keys(knoepfe)) {
-		fmt.Fprintf(&b, `<button name=art value="%s" class=voll>%s</button>`, esc(art), esc(knoepfe[art]))
-	}
-	b.WriteString(`</div></form>`)
-	return b.String()
-}
-
-func (i Innen) umfeldBaumWeg() string { return filepath.Join(i.Umfeld(), "baum-weissnicht.json") }
-
-func baumWegLaden(innen Innen) map[string]time.Time {
-	out := map[string]time.Time{}
-	if b, err := os.ReadFile(innen.umfeldBaumWeg()); err == nil {
-		json.Unmarshal(b, &out)
-	}
-	return out
-}
-
-// BaumWeissNicht keeps „weiß nicht“ for the relative of the pair key: it
-// stays on the side row, not asked again.
-func (u *Umfeld) BaumWeissNicht(innen Innen, key string) error {
-	u.halt.Lock()
-	defer u.halt.Unlock()
-	n := u.Netz()
-	if n == nil {
-		return errUmfeldZu
-	}
-	n.mu.Lock()
-	n.baumWeg[key] = n.now()
-	alle := maps.Clone(n.baumWeg)
-	n.mu.Unlock()
-	return jsonImTresor(innen.umfeldBaumWeg(), alle)
 }

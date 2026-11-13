@@ -31,6 +31,7 @@ import (
 // confirmed lines first (a 0-1 breadth-first walk, a derived line costs
 // one), and a line that does not fit is listed under the tree as a
 // question („Passt nicht in den Stammbaum“), its edge page saying why.
+// „Bearbeiten“ shows the same tree with its empty places (stammbaum_frei.go).
 
 const (
 	baumBreite  = 96.0  // a person's box
@@ -78,6 +79,8 @@ type Stammbaum struct {
 	// of the person by the lines known (verwandt.go)
 	Striche []baumStrich
 	Wer     map[string]string
+	// Frei: the edit tree's empty places by their box's id (stammbaum_frei.go)
+	Frei map[string]baumFrei
 }
 
 // baumSeite is a side row's label and where it stands.
@@ -142,19 +145,19 @@ func (n *Netz) baumLinien() (out []baumLinie) {
 	return out
 }
 
-// Stammbaum lays the tree out.
-func (n *Netz) Stammbaum() Stammbaum {
+// Stammbaeume lays the tree out twice: as it is, and with its empty
+// places for edit mode (no person: none).
+func (n *Netz) Stammbaeume() (sb, frei Stammbaum) {
 	if n == nil {
-		return Stammbaum{}
+		return sb, frei
 	}
 	n.mu.Lock()
 	linien := n.baumLinien()
-	weg := maps.Clone(n.baumWeg)
-	knoten := map[string]Knoten{}
+	ich := n.ich
+	knoten, selbst := map[string]Knoten{}, n.knoten[ich]
 	for _, l := range linien {
 		knoten[l.A], knoten[l.B] = n.knoten[l.A], n.knoten[l.B]
 	}
-	ich := n.ich
 	geb := map[string]string{}
 	for id := range knoten {
 		if g := n.merkmale[id].geb; !g.IsZero() {
@@ -163,10 +166,10 @@ func (n *Netz) Stammbaum() Stammbaum {
 	}
 	wer := n.verwandte(ich, true)
 	n.mu.Unlock()
-	sb := baumLegen(linien, knoten, geb, ich)
+	sb = baumLegen(linien, knoten, geb, ich)
 	sb.Wer = wer
-	sb.Fragen = slices.DeleteFunc(baumFragen(sb.Weitere, sb.Linien, ich, weg), func(f BaumFrage) bool { return knoten[f.X].Tot || knoten[f.Y].Tot })
-	return sb
+	sb.Fragen = baumFragen(sb.Weitere, sb.Linien, ich)
+	return sb, sb.zumBearbeiten(linien, knoten, geb, selbst)
 }
 
 // baumLegen places the boxes and splits the lines into drawn and broken.
@@ -355,23 +358,28 @@ func stammbaumTab(b *strings.Builder, n *Netz) {
 	b.WriteString(`<div id=baum-tab>` + stammbaumInhalt(n) + `</div>`)
 }
 
-// stammbaumInhalt is the tab: the tree in its box, „Verbindungen bauen“,
-// the lines and who is who as lists (the screen reader's way and the
-// small screen's), the relatives without a place, the lines that did
-// not fit, and „Beziehung ergänzen“.
+// stammbaumInhalt is the tab. To look at (nur-zeigen): the tree in its
+// box, the lines and who is who as lists (the screen reader's way and
+// the small screen's), the lines that did not fit, and „Beziehung
+// ergänzen“. To edit (nur-bearbeiten, the script's „Bearbeiten“ shows
+// the one and hides the other): the tree with its empty places, and the
+// names the sheet of a place offers.
 func stammbaumInhalt(n *Netz) string {
 	b := &strings.Builder{}
-	sb := n.Stammbaum()
+	sb, frei := n.Stammbaeume()
+	if len(frei.Personen) > 0 {
+		b.WriteString(`<p class=baum-kopf><button type=button class=voll id=baum-modus>Bearbeiten</button><button type=button class=leise id=baum-ganz>Ganzen Baum zeigen</button></p>`)
+		b.WriteString(frei.svg(n, "baum-frei"))
+		fmt.Fprintf(b, `<p class="k nur-bearbeiten">%s</p>%s`, esc(saysBauErklaert), bauNamen(n))
+	}
+	b.WriteString(`<div class=nur-zeigen>`)
 	if len(sb.Personen) == 0 {
 		fmt.Fprintf(b, `<p class=ruhig><span class="punkt grau"></span>%s</p>`, esc(saysStammbaumLeer))
-		bauAbschnitt(b, n, sb)
 	} else {
-		b.WriteString(sb.svg(n))
-		b.WriteString(`<p class=k>Tipp auf eine Person: ihre Verbindungen. Tipp auf eine Linie: was die beiden verbindet, und dort nachbessern. Gestrichelt ist abgeleitet und noch nicht bestätigt. <button type=button class=leise id=baum-ganz>Ganzen Baum zeigen</button></p>`)
-		bauAbschnitt(b, n, sb)
+		b.WriteString(sb.svg(n, "stammbaum"))
+		b.WriteString(`<p class=k>Tipp auf eine Person: ihre Verbindungen. Tipp auf eine Linie: was die beiden verbindet, und dort nachbessern. Gestrichelt ist abgeleitet und noch nicht bestätigt.</p>`)
 		sb.liste(b, n)
 	}
-	baumFragenTab(b, n, sb.Fragen)
 	if len(sb.Brueche) > 0 {
 		b.WriteString(`<section class=karte><h2>Passt nicht in den Stammbaum</h2><ul class=nahe>`)
 		for _, l := range sb.Brueche {
@@ -379,7 +387,7 @@ func stammbaumInhalt(n *Netz) string {
 		}
 		b.WriteString(`</ul></section>`)
 	}
-	fmt.Fprintf(b, `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary><form method=get action="%s" class=feld><input type=hidden name=zurueck value="/tresor?tab=stammbaum"><label>Wer?%s</label><label>Zu wem?%s</label><button>Weiter</button></form>%s</details>`,
+	fmt.Fprintf(b, `<details class=karte id=dazu><summary>+ Beziehung ergänzen</summary><form method=get action="%s" class=feld><input type=hidden name=zurueck value="/tresor?tab=stammbaum"><label>Wer?%s</label><label>Zu wem?%s</label><button>Weiter</button></form>%s</details></div>`,
 		kantePfad, namenFeld("von", "Du"), namenFeld("wer", ""), namenListe(n))
 	return b.String()
 }
