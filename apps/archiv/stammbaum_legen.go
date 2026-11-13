@@ -16,9 +16,12 @@ import (
 // hangs from the bar. So a row is ordered to keep families together
 // (baumOrdnung: the children of one family side by side, two families a
 // couple ties end to end, in sweeps down and up each such chain where
-// its parents or its children stand on average), and the columns
-// are pushed right until parents stand over their children and children
-// under their parents. Nothing here draws; stammbaum_striche.go does.
+// its parents or its children stand on average; siblings keep the order
+// a sweep found when the next one has nothing to say), and each row is
+// moved, left or right, so that parents stand over their children and
+// children under their parents as near as the rows allow (ruecken; owner
+// 2026-11-13: half the picture empty between two branches).
+// Nothing here draws; stammbaum_striche.go does.
 
 // baumFamilie are the children of one set of parents. A sibling without
 // parents of its own hangs on its sibling's bar; siblings who all have
@@ -281,7 +284,9 @@ func (r *baumReihe) glied(h *baumFamilie, vor, nach string, ort func(string) flo
 		}
 		return 1
 	}
-	slices.SortStableFunc(wer, func(a, b string) int { return cmp.Or(cmp.Compare(rang(a), rang(b)), cmp.Compare(ort(a), ort(b))) })
+	slices.SortStableFunc(wer, func(a, b string) int {
+		return cmp.Or(cmp.Compare(rang(a), rang(b)), cmp.Compare(ort(a), ort(b)), cmp.Compare(r.o.pos[a], r.o.pos[b]))
+	})
 	for j, id := range wer {
 		an := r.anhang[id]
 		switch m := len(an) / 2; {
@@ -439,85 +444,96 @@ func (o *baumOrdnung) abstand(a, b string) float64 {
 	return baumSpalte + baumLuft
 }
 
-// schieben moves row g's boxes right by schub, a couple by the most one
-// of it asks, each at least its gap from the one before; true when one
-// moved.
-func (o *baumOrdnung) schieben(g int, x, schub map[string]float64) (bewegt bool) {
-	for _, b := range o.bloecke(g) { // a couple moves as one
-		d := 0.0
-		for _, m := range b {
-			d = max(d, schub[m])
-		}
-		for _, m := range b {
-			if d > 0 {
-				schub[m] = d
-			}
-		}
+// ruecken moves row g's boxes as far as schub asks (who is not asked
+// stays if she can), in the row's order and never nearer than their
+// gaps, a couple as one: of all such places the ones nearest to what is
+// asked (least squares, pool adjacent violators). It moves left as well
+// as right, so no room is left that no line needs.
+func (o *baumOrdnung) ruecken(g int, x, schub map[string]float64) {
+	type teil struct {
+		y, w float64 // where it would stand with all before it packed left; how many ask
+		n    int
 	}
-	for i, id := range o.reihen[g] {
-		soll := x[id] + schub[id]
+	ids := o.reihen[g]
+	ab := make([]float64, len(ids)) // the row packed left
+	var ts []teil
+	for i, id := range ids {
+		paar := false
 		if i > 0 {
-			v := o.reihen[g][i-1]
-			soll = max(soll, x[v]+o.abstand(v, id))
+			ab[i] = ab[i-1] + o.abstand(ids[i-1], id)
+			paar = o.abstand(ids[i-1], id) == baumSpalte
 		}
-		bewegt = bewegt || soll > x[id]+0.5
-		x[id] = soll
+		t := teil{y: x[id] - ab[i], w: 0.01, n: 1} // nobody asks: she would rather stay
+		if d, da := schub[id]; da {
+			t.y, t.w = t.y+d, 1
+		}
+		for ts = append(ts, t); len(ts) > 1; paar = false {
+			a, b := ts[len(ts)-2], ts[len(ts)-1]
+			if !paar && a.y <= b.y {
+				break
+			}
+			ts = append(ts[:len(ts)-2], teil{y: (a.y*a.w + b.y*b.w) / (a.w + b.w), w: a.w + b.w, n: a.n + b.n})
+		}
 	}
-	return bewegt
+	i := 0
+	for _, t := range ts {
+		for range t.n {
+			x[ids[i]] = t.y + ab[i]
+			i++
+		}
+	}
 }
 
-// unter is how far each child of row g must move right to stand under
-// its parents' middle.
+// unter is how far each child of row g would move to stand under its
+// parents' middle; free parents stand over the child, they do not move her.
 func (o *baumOrdnung) unter(g int, x map[string]float64, gen map[string]int) map[string]float64 {
 	schub := map[string]float64{}
 	for _, f := range o.fams {
-		if d := f.anker(x) - f.mitte(x); len(f.Eltern) > 0 && !istFrei(f.Eltern[0]) && gen[f.Kinder[0]] == g && d > 0.5 { // free parents stand over the child, they do not move her
+		if len(f.Eltern) > 0 && !istFrei(f.Eltern[0]) && gen[f.Kinder[0]] == g {
 			for _, k := range f.Kinder {
-				schub[k] = d
+				schub[k] = f.anker(x) - f.mitte(x)
 			}
 		}
 	}
 	return schub
 }
 
-// ueber is how far each couple of row g must move right to stand over
-// its children's middle: with several families as far as the first of
-// them asks, so none of them is passed.
-func (o *baumOrdnung) ueber(g int, x map[string]float64) map[string]float64 {
-	schub := map[string]float64{}
-	for _, b := range o.bloecke(g) {
-		d := math.Inf(1)
-		for _, f := range o.fams {
-			if len(f.Eltern) > 0 && slices.Contains(b, f.Eltern[0]) {
-				d = min(d, f.mitte(x)-f.anker(x))
+// ueber is how far each parent of row g would move to stand over the
+// middle of her children, of several families between them.
+func (o *baumOrdnung) ueber(g int, x map[string]float64, gen map[string]int) map[string]float64 {
+	schub, zahl := map[string]float64{}, map[string]float64{}
+	for _, f := range o.fams {
+		for _, e := range f.Eltern {
+			if gen[e] == g {
+				schub[e], zahl[e] = schub[e]+f.mitte(x)-f.anker(x), zahl[e]+1
 			}
 		}
-		if d > 0.5 && !math.IsInf(d, 1) {
-			schub[b[0]] = d
-		}
+	}
+	for e := range schub {
+		schub[e] /= zahl[e]
 	}
 	return schub
 }
 
 // setzen gives the component's boxes their columns in x, from start on,
-// and answers the right end: the rows as ordered, then pushed right
-// until the children stand under their parents' middle and each couple
-// over its children's, a bounded number of times.
+// and answers the right end: each row packed left in its order, then
+// moved, a bounded number of times, so that the children stand under
+// their parents' middle and each couple over its children's, as near as
+// the rows allow.
 func (o *baumOrdnung) setzen(x map[string]float64, start float64) float64 {
 	gen := map[string]int{}
 	for g, ids := range o.reihen {
-		o.schieben(g, x, map[string]float64{})
 		for _, id := range ids {
-			gen[id] = g
+			gen[id], x[id] = g, 0
 		}
+		o.ruecken(g, x, nil)
 	}
-	for bewegt, runde := true, 0; bewegt && runde < 12; runde++ {
-		bewegt = false
+	for range 8 {
 		for g := 1; g <= o.hoch; g++ {
-			bewegt = o.schieben(g, x, o.unter(g, x, gen)) || bewegt
+			o.ruecken(g, x, o.unter(g, x, gen))
 		}
 		for g := o.hoch - 1; g >= 0; g-- {
-			bewegt = o.schieben(g, x, o.ueber(g, x)) || bewegt
+			o.ruecken(g, x, o.ueber(g, x, gen))
 		}
 	}
 	links, rechts := math.Inf(1), start

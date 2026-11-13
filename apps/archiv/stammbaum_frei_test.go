@@ -37,19 +37,23 @@ func alleinNetz(as map[string]antwort) *Netz {
 // upward, she, her partner and their ancestors have two parents' places,
 // the ones nobody stands at free (Jutta one, beside Ilse; the
 // grandparents and the parents-in-law two each); nobody who married in
-// has any (Uli, Nele, Lea). Every couple and every parent alone has one
-// free child, no more. Mara has parents and a partner: no free sibling
-// of her own (her parents' free child is it), no free partner. Hanna,
+// has any (Uli, Nele, Lea). Every couple and everyone else alone has one
+// free child, no more, and everyone without a partner a free partner
+// (the cousins' generation and the children as the others; not Ilse,
+// beside whom the place of Jutta's other parent is free). Mara has
+// parents and a partner: no free sibling of her own (her parents' free
+// child is it), no free partner. Hanna,
 // the aunt no line places, is offered first where a line would place
 // her: as a child of either pair of grandparents. The tree to look at
 // has none of it, and the edit tree is as clean a picture: nobody on
 // another, no stroke through a box, none on another.
 func TestStammbaumFrei(t *testing.T) {
 	n := sippeNetz(nil)
-	want := []string{"Kind von Dieter und Karin", "Kind von Emil und Greta ← s/hanna", "Kind von Heidi und Uli", "Kind von Ilse ← s/hanna", "Kind von Jonas und Lea",
-		"Kind von Jutta und Rolf", "Kind von Nele und Tim", "Kind von dir und Sven",
+	want := []string{"Kind von Ben", "Kind von Dieter und Karin", "Kind von Emil und Greta ← s/hanna", "Kind von Heidi und Uli", "Kind von Ilse ← s/hanna", "Kind von Jonas und Lea",
+		"Kind von Jutta und Rolf", "Kind von Kurt", "Kind von Mia", "Kind von Nele und Tim", "Kind von Paul", "Kind von Pia", "Kind von dir und Sven",
 		"Mutter oder Vater von Dieter", "Mutter oder Vater von Dieter", "Mutter oder Vater von Emil", "Mutter oder Vater von Emil", "Mutter oder Vater von Greta", "Mutter oder Vater von Greta",
-		"Mutter oder Vater von Ilse", "Mutter oder Vater von Ilse", "Mutter oder Vater von Jutta", "Mutter oder Vater von Karin", "Mutter oder Vater von Karin"}
+		"Mutter oder Vater von Ilse", "Mutter oder Vater von Ilse", "Mutter oder Vater von Jutta", "Mutter oder Vater von Karin", "Mutter oder Vater von Karin",
+		"Partner/in von Ben", "Partner/in von Kurt", "Partner/in von Mia", "Partner/in von Paul", "Partner/in von Pia"}
 	if got := freiVon(n); !slices.Equal(got, want) {
 		t.Fatalf("the empty places:\n%s\nnot\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
@@ -79,8 +83,8 @@ func TestStammbaumFrei(t *testing.T) {
 			t.Fatalf("%s and %s changed sides", q.Name, p.Name)
 		}
 	}
-	if eb.Breite > sb.Breite+3*baumSpalte {
-		t.Fatalf("the edit tree is %v wide, the tree %v", eb.Breite, sb.Breite)
+	if l := baumLuecke(eb); l > baumSpalte+baumLuft {
+		t.Fatalf("the edit tree has %v of empty width", l)
 	}
 	for _, s := range eb.Striche { // the line up to parents nobody stands at is dashed, also over Emil and Kurt, siblings without parents
 		if g := s.Seg[0]; s.Art == "stamm" && g[1] < wo["s/greta"].Y && s.Fest {
@@ -114,6 +118,8 @@ func TestStammbaumFrei(t *testing.T) {
 // other parent's place stays free, the new one has her own parents'
 // places, and Mara's free sibling is now that parent's free child. A
 // partner named: no free partner, and the free child is the couple's.
+// Her child has a free partner and a free child of her own; her parents,
+// who have her together, have no free partner.
 func TestStammbaumFreiWaechst(t *testing.T) {
 	am := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
 	as := map[string]antwort{}
@@ -132,18 +138,19 @@ func TestStammbaumFreiWaechst(t *testing.T) {
 		t.Fatalf("alone, the tab:\n%s", b.String())
 	}
 	as[paarKey("s/mia", "s/mara")] = antwort{X: "s/mia", Art: "kind", Am: am}
+	want = []string{"Geschwister von dir", "Kind von Mia", "Kind von dir", "Mutter oder Vater von dir", "Mutter oder Vater von dir", "Partner/in von Mia", "Partner/in von dir"}
 	if got := freiVon(alleinNetz(as)); !slices.Equal(got, want) {
 		t.Fatalf("with a child: %v", got)
 	}
 	as[paarKey("s/jutta", "s/mara")] = antwort{X: "s/jutta", Art: "eltern", Am: am}
-	want = []string{"Kind von Jutta", "Kind von dir", "Mutter oder Vater von Jutta", "Mutter oder Vater von Jutta", "Mutter oder Vater von dir", "Partner/in von dir"}
+	want = []string{"Kind von Jutta", "Kind von Mia", "Kind von dir", "Mutter oder Vater von Jutta", "Mutter oder Vater von Jutta", "Mutter oder Vater von dir", "Partner/in von Mia", "Partner/in von dir"}
 	if got := freiVon(alleinNetz(as)); !slices.Equal(got, want) {
 		t.Fatalf("with a mother: %v", got)
 	}
 	as[paarKey("s/rolf", "s/mara")] = antwort{X: "s/rolf", Art: "eltern", Am: am}
 	as[paarKey("s/sven", "s/mara")] = antwort{X: "s/sven", Art: "partner", Am: am}
-	want = []string{"Kind von Jutta und Rolf", "Kind von dir und Sven", "Mutter oder Vater von Jutta", "Mutter oder Vater von Jutta", "Mutter oder Vater von Rolf", "Mutter oder Vater von Rolf",
-		"Mutter oder Vater von Sven", "Mutter oder Vater von Sven"}
+	want = []string{"Kind von Jutta und Rolf", "Kind von Mia", "Kind von dir und Sven", "Mutter oder Vater von Jutta", "Mutter oder Vater von Jutta", "Mutter oder Vater von Rolf", "Mutter oder Vater von Rolf",
+		"Mutter oder Vater von Sven", "Mutter oder Vater von Sven", "Partner/in von Mia"}
 	n = alleinNetz(as)
 	if got := freiVon(n); !slices.Equal(got, want) {
 		t.Fatalf("with both parents and a partner: %v", got)

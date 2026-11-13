@@ -21,11 +21,13 @@ import (
 //     there is a parent of every child of that family. Who married in
 //     further away (an aunt's husband) gets none.
 //   - one child more: every couple (two parents of a child, or two
-//     partners; not two who parted) and every parent alone has one free
-//     child, which is the free sibling of its children. The person has
-//     one also without a partner or a child.
-//   - the person without parents has a free sibling beside her; without
-//     a partner a free partner.
+//     partners; not two who parted) and everyone else in the tree alone
+//     has one free child, which is the free sibling of its children.
+//   - a partner: everyone in the tree without one has a free partner
+//     (owner 2026-11-13: „beim Bearbeiten sollte die Generation wie alle
+//     anderen auch ein Partner und Kind anbieten“), but not who has a
+//     child with someone, or the place of her child's other parent free.
+//   - the person without parents has a free sibling beside her.
 //
 // A place is not stored: it is a box and lines only the edit tree's
 // layout knows, and filling it sets ordinary lines (stammbaum_bau.go),
@@ -105,12 +107,23 @@ func baumFreie(sb Stammbaum) ([]baumFrei, []baumLinie) {
 			kind(f.Eltern, dazu[f], f.Kinder)
 		}
 	}
-	if !hat[ich] {
-		kind([]string{ich}, nil, nil)
+	alle, zuzweit := []string{ich}, map[string]bool{} // zuzweit: her child has another parent, or that one's place is free already
+	for _, l := range sb.Linien {
+		alle = append(alle, l.A, l.B)
 	}
-	if len(nahe.partner[ich]) == 0 {
-		id := fb.platz(baumFrei{Art: "partner", Y: []string{ich}}, nil, nil)
-		fb.linien = append(fb.linien, baumLinie{A: ich, B: id, Art: "partner"})
+	for _, f := range fams {
+		if len(f.Eltern) > 0 && len(f.Eltern) < 3 && len(f.Eltern)+len(dazu[f]) > 1 && !getrennt[paarKey(f.Eltern[0], f.Eltern[len(f.Eltern)-1])] {
+			zuzweit[f.Eltern[0]], zuzweit[f.Eltern[len(f.Eltern)-1]] = true, true
+		}
+	}
+	for _, p := range slices.Compact(slices.Sorted(slices.Values(alle))) {
+		if !hat[p] {
+			kind([]string{p}, nil, nil)
+		}
+		if len(nahe.partner[p]) == 0 && !zuzweit[p] {
+			id := fb.platz(baumFrei{Art: "partner", Y: []string{p}}, nil, nil)
+			fb.linien = append(fb.linien, baumLinie{A: p, B: id, Art: "partner"})
+		}
 	}
 	return fb.frei, fb.linien
 }
@@ -211,6 +224,11 @@ func (sb Stammbaum) freiOrt(frei []baumFrei) map[string]float64 {
 		for _, c := range nahe.kinder[k] {
 			ps = append(ps, nahe.eltern[c]...)
 		}
+		for _, l := range sb.Linien {
+			if l.Art == "expartner" && (l.A == k || l.B == k) {
+				ps = append(ps, l.A, l.B)
+			}
+		}
 		return slices.ContainsFunc(ps, func(p string) bool { return (ort[p]-ort[k])*seite > 0 })
 	}
 	for i, f := range frei {
@@ -219,6 +237,8 @@ func (sb Stammbaum) freiOrt(frei []baumFrei) map[string]float64 {
 		switch es := nahe.eltern[f.Y[0]]; {
 		case f.Art == "eltern" && len(es) > 0:
 			x = ort[es[0]]
+		case f.Art == "partner" && paar(f.Y[0], 1): // not between her and the one she has a child with, or parted from
+			d = -d
 		case f.Art == "kind" && len(ks) > 0 && !paar(ks[len(ks)-1], 1):
 			x = ort[ks[len(ks)-1]]
 		case f.Art == "kind" && len(ks) > 0 && !paar(ks[0], -1):

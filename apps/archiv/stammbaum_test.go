@@ -106,7 +106,7 @@ func TestStammbaumSVG(t *testing.T) {
 		"/tresor/kante?a=h%2Fsilke&amp;b=h%2Flena\tSilke und Lena: Mutter/Vater und Kind (abgeleitet, noch nicht bestätigt)\"><path class=treffer",
 		`class="linie kind vermutet"`, `aria-label="Hedwig und Du: Mutter/Vater und Kind"><path class=treffer d="M`, `class="linie kind" d="M`, `<path class="linie stamm" d="M`,
 		`class="linie partner"`, `class="linie expartner"`, `aria-label="Bruno und Du: Geschwister"`, "Alle Linien als Liste (6)", "Silke ist Mutter/Vater · abgeleitet, noch nicht bestätigt",
-		`<text x="296.0" y="229.0" class="k wer">Partner/in</text>`, `<summary>Wer ist wer für dich (4)</summary>`, `id=baum-ganz>Ganzen Baum zeigen</button>`} {
+		`<text x="420.0" y="229.0" class="k wer">Partner/in</text>`, `<summary>Wer ist wer für dich (4)</summary>`, `id=baum-ganz>Ganzen Baum zeigen</button>`} {
 		if !strings.Contains(page, want) {
 			t.Fatalf("%q missing:\n%s", want, page)
 		}

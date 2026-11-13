@@ -1111,9 +1111,11 @@ Nachrichten und Bilder kommen … und diese Kante schnell nachbessern“).
   „Bearbeiten“ shows the same tree with its empty places as dashed
   boxes, „Fertig“ goes back. Upward, the person, her partner and their
   ancestors have two parents' places, the unfilled ones free (nobody who
-  only married in). Every couple and every parent alone has one free
-  child, which is the free sibling of its children; the person without
-  parents has a free sibling, without a partner a free partner. A tap on
+  only married in). Every couple and everyone else in the tree alone
+  has one free child, which is the free sibling of its children;
+  everyone without a partner has a free partner (not who has a child
+  with someone, or the place of her child's other parent free); the
+  person without parents has a free sibling. A tap on
   a place opens a sheet: what it is („Kind von Jutta und Rolf“), one name
   field, first the relatives without a place who fit there, then the
   names that match, then „… neu anlegen“ (a person by hand). One

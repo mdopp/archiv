@@ -26,4 +26,9 @@
 # the name list with drag and drop went): apps/ at 25,454, the minimum; the owner's request
 # (2026-11-13, after the preview: the same order in edit mode as in view mode, the partner does
 # not switch sides) is the yes.
-25455 apps
+# 25491: raised 2026-11-13 with the tree packed (rows move left as well as right, least squares
+# in stammbaum_legen.go, +8) and a free partner and child for everyone in the edit tree
+# (stammbaum_frei.go, +28): apps/ at 25,490, the minimum; the owner's two messages after the
+# release (2026-11-13, „Du siehst die Lücke, oder?“ and „beim Bearbeiten sollte die Generation
+# wie alle anderen auch ein Partner und Kind anbieten“) are the yes.
+25491 apps
