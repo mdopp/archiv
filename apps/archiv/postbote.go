@@ -19,7 +19,7 @@ import (
 )
 
 // The Postbote brings into msgvault, while the vault is open, what waits:
-// Signal backups from the inbox (decrypted by signalbackup-tools into a
+// Signal backups from the inbox (age-decrypted, then decrypted by signalbackup-tools into a
 // folder in the vault's work folder, handed to msgvault's import-signal,
 // the folder removed on every path), WhatsApp's newest database, the
 // phone's SMS files, and the Briefkasten's packets: oldest first, each decrypted with the private key from
@@ -42,6 +42,7 @@ const (
 	saysAnderesPaket       = "Das Paket %s hat ein Format, das dieses Archiv noch nicht kennt. Es bleibt im Briefkasten."
 	saysSignalFalsch       = "Die Signal-Passphrase passt nicht zu dieser Sicherung. Gib sie neu ein."
 	saysSignalUnlesbar     = "Die Signal-Sicherung %s ließ sich nicht lesen. Sie bleibt im Eingang; sag dem Admin Bescheid."
+	saysAgeUnlesbar        = "Die %s %s ließ sich mit dem Schlüssel deines Archivs nicht öffnen. Sie bleibt im Eingang; die Homes-App schickt die nächste Sicherung neu verschlüsselt."
 	saysSignalNummer       = "Die Signal-Sicherung gehört zu einer anderen Handynummer als der eingetragenen. Prüf deine Nummer bei Signal und gib sie noch einmal ein."
 )
 
@@ -295,9 +296,14 @@ func (p *Postbote) whatsappZustellen(ctx context.Context, innen Innen, d Datei, 
 	}
 	key := strings.TrimSpace(string(roh))
 	nullen(roh)
+	crypt15, weg, err := ausAge(innen, d, "whatsapp-crypt15")
+	defer weg()
+	if err != nil {
+		return fehler(fmt.Sprintf(saysAgeUnlesbar, "WhatsApp-Sicherung", d.Rel), err)
+	}
 	db := filepath.Join(innen.Arbeit(), "whatsapp-"+zufall()+".db")
 	defer os.Remove(db)
-	a, err := p.Run.Run(ctx, wadecrypt(key, d.Pfad, db))
+	a, err := p.Run.Run(ctx, wadecrypt(key, crypt15, db))
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -411,6 +417,11 @@ func (p *Postbote) SignalZustellen(ctx context.Context, innen Innen, d Datei, pa
 		return grund
 	}
 
+	backup, weg, err := ausAge(innen, d, "signal-backup")
+	defer weg()
+	if err != nil {
+		return fehler(fmt.Sprintf(saysAgeUnlesbar, "Signal-Sicherung", d.Rel), err)
+	}
 	dir := filepath.Join(innen.Arbeit(), "signal-"+zufall())
 	defer os.RemoveAll(dir)
 	if err := os.Mkdir(dir, 0o700); err != nil { // existing and empty: see signalEntpacken
@@ -420,7 +431,7 @@ func (p *Postbote) SignalZustellen(ctx context.Context, innen Innen, d Datei, pa
 	if bin == "" {
 		bin = "signalbackup-tools"
 	}
-	a, err := p.Run.Run(ctx, signalEntpacken(bin, d.Pfad, dir, pass))
+	a, err := p.Run.Run(ctx, signalEntpacken(bin, backup, dir, pass))
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -607,6 +618,28 @@ func (p *Postbote) SMSZustellen(ctx context.Context, innen Innen, id age.Identit
 	log.Printf("archiv: SMS %s eingelesen: %d SMS, %d MMS, %d Anrufe", d.Rel, z.SMS, z.MMS, z.Anrufe)
 	p.Protokoll.Eingelesen("sms", d.Rel, z, p.now())
 	return nil
+}
+
+// ausAge is the messenger's own file of d: d itself when Homes took it as
+// the phone wrote it (before archiv#64), else — it came age-encrypted from
+// the phone to this archive's key — its decryption into a new file in the
+// vault's work folder, which weg removes (on every path: the caller defers
+// it). The messenger's file is still encrypted by the messenger; its key
+// is in the vault too.
+func ausAge(innen Innen, d Datei, name string) (pfad string, weg func(), err error) {
+	if !d.alsAge() {
+		return d.Pfad, func() {}, nil
+	}
+	id, err := identitaetLesen(innen.Identitaet())
+	if err != nil {
+		return "", func() {}, err
+	}
+	nach := filepath.Join(innen.Arbeit(), name+"-"+zufall())
+	if err := ageAuspacken(d.Pfad, nach, id); err != nil {
+		os.Remove(nach)
+		return "", func() {}, err
+	}
+	return nach, func() { os.Remove(nach) }, nil
 }
 
 // ageAuspacken decrypts an age file into a new 0600 file.

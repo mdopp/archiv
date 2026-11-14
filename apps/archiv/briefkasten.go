@@ -274,21 +274,16 @@ func letzteBehalten(letzte, quelle string, d Datei, name string) error {
 
 // whatsapp keeps the newest database in letzte/ (a link: the inbox copy
 // waits for the WhatsApp import, which is not there yet) and moves every
-// stable media file there age-encrypted: WhatsApp's media are plaintext.
+// stable media file there. Since archiv#64 both come age-encrypted from
+// the phone (<name>.age) and are kept as they came; a medium Homes took
+// as plaintext before is encrypted here, as it was.
 func (b *Briefkasten) whatsapp(ctx context.Context, empf age.Recipient) {
 	db, err := b.Eingang.Stabil("whatsapp")
 	if err != nil {
 		log.Printf("archiv: Eingang whatsapp: %v", err)
 	}
 	if len(db) > 0 {
-		neueste := db[len(db)-1] // oldest first
-		ziel := filepath.Join(b.Letzte, "whatsapp", "Databases", "msgstore.db.crypt15")
-		if fi, err := os.Stat(ziel); err != nil || neueste.Mtime.After(fi.ModTime()) {
-			if err := verlinken(neueste.Pfad, ziel); err != nil {
-				log.Printf("archiv: letzte whatsapp: %v", err)
-				b.Protokoll.Fehlschlag(Fehler{Am: b.now(), Quelle: "whatsapp", Datei: neueste.Rel, Satz: saysLetzteFehler})
-			}
-		}
+		b.whatsappDatenbank(db[len(db)-1]) // oldest first
 	}
 	medien, err := b.Eingang.StabilMedien()
 	if err != nil {
@@ -298,13 +293,58 @@ func (b *Briefkasten) whatsapp(ctx context.Context, empf age.Recipient) {
 		if ctx.Err() != nil {
 			return
 		}
-		ziel := filepath.Join(b.Letzte, "whatsapp", "Media", filepath.FromSlash(m.Rel)+".age")
-		if err := verschluesseln(m.Pfad, ziel, empf); err != nil {
-			log.Printf("archiv: Medium %s: %v", m.Rel, err)
-			continue
+		ziel := filepath.Join(b.Letzte, "whatsapp", "Media", filepath.FromSlash(m.Rel))
+		switch {
+		case strings.HasSuffix(m.Rel, ".age"):
+			err = verschieben(m.Pfad, ziel)
+		case m.alsAge():
+			continue // an older copy Homes kept beside a medium: never encrypted twice
+		default:
+			err = verschluesseln(m.Pfad, ziel+".age", empf)
+			if err == nil {
+				os.Remove(m.Pfad) // only the encrypted copy stays
+			}
 		}
-		os.Remove(m.Pfad) // only the encrypted copy stays
+		if err != nil {
+			log.Printf("archiv: Medium %s: %v", m.Rel, err)
+		}
 	}
+}
+
+// whatsappDatenbank keeps neueste in letzte/ as msgstore.db.crypt15.age (or,
+// taken before archiv#64, msgstore.db.crypt15), the other name removed: a
+// new phone gets one database.
+func (b *Briefkasten) whatsappDatenbank(neueste Datei) {
+	namen := [2]string{"msgstore.db.crypt15", "msgstore.db.crypt15.age"}
+	if neueste.alsAge() {
+		namen[0], namen[1] = namen[1], namen[0]
+	}
+	dir := filepath.Join(b.Letzte, "whatsapp", "Databases")
+	ziel := filepath.Join(dir, namen[0])
+	if fi, err := os.Stat(ziel); err == nil && !neueste.Mtime.After(fi.ModTime()) {
+		return
+	}
+	if err := verlinken(neueste.Pfad, ziel); err != nil {
+		log.Printf("archiv: letzte whatsapp: %v", err)
+		b.Protokoll.Fehlschlag(Fehler{Am: b.now(), Quelle: "whatsapp", Datei: neueste.Rel, Satz: saysLetzteFehler})
+		return
+	}
+	os.Remove(filepath.Join(dir, namen[1]))
+}
+
+// verschieben moves src to ziel (the inbox and letzte/ are one file
+// system; else a copy, then src goes).
+func verschieben(src, ziel string) error {
+	if err := os.MkdirAll(filepath.Dir(ziel), 0o755); err != nil {
+		return err
+	}
+	if err := os.Rename(src, ziel); err == nil {
+		return nil
+	}
+	if err := verlinken(src, ziel); err != nil {
+		return err
+	}
+	return os.Remove(src)
 }
 
 // verlinken puts a hard link (or, across file systems, a copy) of src at

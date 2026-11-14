@@ -58,6 +58,7 @@ const (
 	saysAdminLiest      = "Solange dein Archiv offen ist, kann der Admin der Box es lesen. Abgeschlossen sieht niemand etwas, auch nicht in den Sicherungen der Box."
 	saysMailPreis       = "Dafür liegt das App-Passwort auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit deine Mails lesen. Du kannst das App-Passwort bei deinem Anbieter jederzeit widerrufen; dann holt das Archiv nichts mehr ab."
 	saysSignalHinweis   = "Signal-Sicherungen liest das Archiv, während es offen ist; bis dahin warten sie verschlüsselt im Eingang. Deine Signal-Passphrase liegt im Tresor: Ist das Archiv abgeschlossen, kann sie niemand lesen, auch der Admin nicht."
+	saysVomHandy        = "Die Homes-App verschlüsselt deine Sicherung schon auf dem Handy für dein Archiv; Homes reicht sie nur weiter und kann sie nicht lesen."
 	saysSignalZu        = "Die Signal-Passphrase trägst du bei offenem Archiv ein. Sie liegt im Tresor; deshalb liest das Archiv Signal nur, wenn es offen ist."
 )
 
@@ -807,9 +808,10 @@ func (w *Web) signalKarte(b *strings.Builder, offen bool, qa quelleAuf) {
 	quelleKopf(b, qa, "signal", "Signal", zeile)
 	w.imAchiv(b, "signal", "Nachricht", "Nachrichten")
 	if n := wartende(w.Eingang)["signal"].Wartend; n > 0 {
-		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung wartet", "Sicherungen warten")))
+		fmt.Fprintf(b, `<p>%s im Eingang, verschlüsselt für dein Archiv.</p>`, esc(anzahl(n, "Sicherung wartet", "Sicherungen warten")))
 	}
 	w.fehlerVon(b, "signal")
+	fmt.Fprintf(b, `<p class=k>%s</p>`, saysVomHandy)
 	zugang := []string{}
 	switch {
 	case !offen || !auf:
@@ -980,9 +982,10 @@ func (w *Web) whatsappKarte(b *strings.Builder, qa quelleAuf) {
 	quelleKopf(b, qa, "whatsapp", "WhatsApp", fehltZeile(w.letzteZeile("whatsapp", "neue Nachricht", "neue Nachrichten"), auf && !hat, "Schlüssel fehlt"))
 	w.imAchiv(b, "whatsapp", "neue Nachricht", "neue Nachrichten")
 	if n := wartende(w.Eingang)["whatsapp"].Wartend; n > 0 {
-		fmt.Fprintf(b, `<p>%s im Eingang.</p>`, esc(anzahl(n, "Sicherung liegt", "Sicherungen liegen")))
+		fmt.Fprintf(b, `<p>%s im Eingang, verschlüsselt für dein Archiv.</p>`, esc(anzahl(n, "Sicherung liegt", "Sicherungen liegen")))
 	}
 	w.fehlerVon(b, "whatsapp")
+	fmt.Fprintf(b, `<p class=k>%s</p>`, saysVomHandy)
 	if !auf {
 		b.WriteString(`<p class=k>Den Schlüssel trägst du bei offenem Archiv ein. Er liegt im Tresor; deshalb liest das Archiv WhatsApp nur, wenn es offen ist.</p>` + quelleEnde)
 		return

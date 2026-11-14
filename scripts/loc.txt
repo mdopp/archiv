@@ -31,4 +31,9 @@
 # (stammbaum_frei.go, +28): apps/ at 25,490, the minimum; the owner's two messages after the
 # release (2026-11-13, „Du siehst die Lücke, oder?“ and „beim Bearbeiten sollte die Generation
 # wie alle anderen auch ein Partner und Kind anbieten“) are the yes.
-25491 apps
+# 25585: raised 2026-11-14 with the phone's WhatsApp and Signal backups age-encrypted for the
+# archive (archiv#64, archiv#65, +94: eingang.go alsAge, postbote.go ausAge, briefkasten.go keeping
+# the age files as they came, intern.go /intern/letzte/): apps/ at 25,584, the minimum; the owner's
+# request (2026-11-14, „Build the sealed-archive path for the phone's WhatsApp and Signal backups“)
+# is the yes.
+25585 apps

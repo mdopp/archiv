@@ -26,12 +26,16 @@ type fakeSignalImport struct {
 	pb        *Postbote
 	cancel    func() // called during the decrypt (the vault closes)
 	gross     int64  // the size of one attachment file
+	vorher    func(Befehl)
 }
 
 func (f *fakeSignalImport) Run(ctx context.Context, b Befehl) (Ausgabe, error) {
 	f.mu.Lock()
 	f.befehle = append(f.befehle, b)
 	f.mu.Unlock()
+	if f.vorher != nil {
+		f.vorher(b)
+	}
 	switch b.Args[0] {
 	case "import-signal":
 		dir := b.Args[1]

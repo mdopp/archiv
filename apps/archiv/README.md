@@ -145,6 +145,21 @@ every dot-entry and `letzte/` are never read as inbox. A file counts once
 its size and mtime stayed the same for a minute (as this process saw it —
 Homes sets the phone's mtime).
 
+**Every backup is encrypted for this archive on the phone** (archiv#64,
+owner: messages live in the person's sealed archive, and Homes only relays
+bytes it cannot read). The Homes app age-encrypts each file to the
+Briefkasten's public key before it leaves the phone — WhatsApp's database
+and media, Signal's backup, the SMS and calls, a Facebook or LinkedIn
+export — and uploads it as `<the phone's name>.age`; Homes refuses any
+other file. WhatsApp's `msgstore.db.crypt15.age` and Signal's
+`signal-*.backup.age` are unwrapped only while the vault is open, into the
+vault's work folder (removed on every path), and there read as below; the
+messenger's own encryption is then opened with the key the person entered
+on the page, inside the vault. A file this archive's key does not open
+stays in the inbox, and the page says so („… ließ sich mit dem Schlüssel
+deines Archivs nicht öffnen“). A WhatsApp database or Signal backup without
+`.age` is one Homes took before archiv#64 and is read as it is.
+
 ### Signal: read while open, by msgvault's import-signal
 
 Since 2026-11-02 (owner's decision; before, signalbackup-tools exported an
@@ -152,9 +167,10 @@ SMS Backup & Restore XML into a named pipe while the vault was closed, and
 the messages went in as packets under msgvault's SMS account). msgvault's
 `import-signal` reads the decrypted backup as a folder — its SQLite
 database and the attachment files — and that plaintext may exist only
-inside the vault. So Signal backups wait, still encrypted by Signal, in
-the inbox until the vault is open. Then the Postbote takes each stable
-`signal/**/signal-*.backup`, **oldest first** (by mtime), once the Signal
+inside the vault. So Signal backups wait, encrypted for the archive and by
+Signal, in the inbox until the vault is open. Then the Postbote takes each
+stable `signal/**/signal-*.backup.age`, **oldest first** (by mtime),
+unwraps it into the vault's work folder, once the Signal
 passphrase (inside the vault, `/run/tresor/signal-passphrase`, entered on
 the page while open) and the person's number are stored:
 
@@ -229,14 +245,21 @@ then a packet of the same messages: still no duplicates.
 
 | source | in `/eingang/letzte/` |
 |---|---|
-| Signal | the newest imported `signal-*.backup`, as the phone wrote it (encrypted by Signal) |
-| WhatsApp | `whatsapp/Databases/msgstore.db.crypt15`: the newest database, as the phone wrote it (encrypted by WhatsApp; a hard link — the inbox copies wait for the WhatsApp import), and `whatsapp/Media/<path>.age`: **every** media file, age-encrypted to the person's key — on the phone they are plaintext, so the plaintext leaves the inbox as soon as it is encrypted |
+| Signal | the newest imported `signal-*.backup.age`, as it came from the phone (age around Signal's own encryption) |
+| WhatsApp | `whatsapp/Databases/msgstore.db.crypt15.age`: the newest database, as it came (a hard link — the inbox copies wait for the WhatsApp import), and `whatsapp/Media/<path>.age`: **every** media file, as it came, moved out of the inbox |
 
-Homes serves the database files straight from its own mount of the inbox.
-Media need the private key: Homes asks the archive,
-`GET /intern/whatsapp/medien/<path>` with `X-Archiv-Homes:
-<ARCHIV_HOMES_SECRET>`, answered only while the vault is open (423 while
-closed). `GET /intern/empfaenger` gives Homes the public key.
+Each keeps one name: a Signal backup or WhatsApp database without `.age`
+(taken before archiv#64) is removed when the next one is kept; a medium
+Homes took as plaintext before is encrypted here as it was.
+
+Everything there needs the private key: Homes asks the archive,
+`GET /intern/letzte/<signal|whatsapp>/<path>` (the path without `.age`)
+with `X-Archiv-Homes: <ARCHIV_HOMES_SECRET>`, answered only while the vault
+is open (423 while closed), with Range. What it gives is the messenger's
+own file: Signal's backup and WhatsApp's database still encrypted by the
+messenger, the media as the phone had them. Homes serves a file without
+`.age` (before archiv#64) straight from its own mount of the inbox.
+`GET /intern/empfaenger` gives Homes the public key.
 
 ### Mail: fetched every hour, vault closed or open
 
@@ -432,12 +455,13 @@ the data is never attached. So there is nothing to forward to
 The person enters the 64-digit key of their WhatsApp backup on the page
 while the vault is open; it is stored inside the vault
 (`whatsapp-schluessel`), as the Signal passphrase is. WhatsApp's
-`msgstore.db.crypt15` holds the whole history every day and stays in the
+`msgstore.db.crypt15` (arriving as `msgstore.db.crypt15.age`, see the
+inbox) holds the whole history every day and stays in the
 inbox anyway (it is also the newest backup for a new phone), so nothing is
 lost by waiting for the opening, and the key is never readable on a closed
 box. On opening, and whenever a newer database arrives while open, the
-Postbote decrypts the newest one with `wadecrypt` into the vault's work
-folder, runs `msgvault import-whatsapp --phone <number>` and removes the
+Postbote unwraps the newest one with the archive's private key and decrypts
+it with `wadecrypt`, both into the vault's work folder, runs `msgvault import-whatsapp --phone <number>` and removes the
 plaintext; `whatsapp-stand` notes which database went in. msgvault keeps
 one of each message, so the daily database adds only what is new. A wrong
 key is said on the page and tried again once a new key is entered. Media
