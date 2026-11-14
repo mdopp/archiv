@@ -488,10 +488,14 @@ func TestThePhonesSMSAndCallsComeInEncryptedAndAreImportedWhenOpen(t *testing.T)
 type fakeWA struct {
 	befehle []Befehl
 	falsch  bool
+	vorher  func(Befehl)
 }
 
 func (f *fakeWA) Run(ctx context.Context, b Befehl) (Ausgabe, error) {
 	f.befehle = append(f.befehle, b)
+	if f.vorher != nil {
+		f.vorher(b)
+	}
 	if b.Pfad == "wadecrypt" {
 		if f.falsch {
 			return Ausgabe{Code: 1, Text: "Error: wrong key " + b.Args[0]}, nil

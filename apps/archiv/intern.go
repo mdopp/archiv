@@ -17,15 +17,18 @@ import (
 // Homes' internal way in (ARCHIV_HOMES_SECRET in X-Archiv-Homes):
 //
 //	GET /intern/empfaenger                 the person's public key (age), for a packet made elsewhere
-//	GET /intern/whatsapp/medien/<pfad>     one WhatsApp media file from letzte/, decrypted — only
-//	                                       while the vault is open (the private key is inside);
-//	                                       with Range, so a phone resumes a large video
+//	GET /intern/letzte/<quelle>/<pfad>     one file of the newest backup in letzte/<quelle>/<pfad>.age
+//	                                       (quelle signal or whatsapp), age-decrypted — only while
+//	                                       the vault is open (the private key is inside); with
+//	                                       Range, so a phone resumes a large backup or video
 //	GET /intern/aufgaben                   how many things wait for the person, counts only (aufgaben.go)
 //
-// The signal and WhatsApp database backups in letzte/ are encrypted by
-// the messengers themselves; Homes serves those straight from the inbox
-// mount. WhatsApp's media are plaintext on the phone, so the archive
-// keeps them only age-encrypted, and only it can give them back.
+// Every backup comes from the phone age-encrypted to this archive (archiv#64),
+// and letzte/ keeps it so, so only the open archive can give it back for a
+// new phone. What it gives is the messenger's own file: Signal's backup and
+// WhatsApp's database still encrypted by the messenger, WhatsApp's media as
+// the phone had them. A file in letzte/ without .age (taken before
+// archiv#64) Homes serves from the inbox mount itself.
 
 const (
 	homesHeader = "X-Archiv-Homes"
@@ -80,14 +83,16 @@ func (w *Web) intern(rw http.ResponseWriter, r *http.Request) {
 		rw.Write(b)
 	case r.URL.Path == "/intern/aufgaben":
 		w.aufgaben(rw)
-	case strings.HasPrefix(r.URL.Path, "/intern/whatsapp/medien/"):
-		w.medium(rw, r, strings.TrimPrefix(r.URL.Path, "/intern/whatsapp/medien/"))
+	case strings.HasPrefix(r.URL.Path, "/intern/letzte/signal/"):
+		w.letzteDatei(rw, r, "signal", strings.TrimPrefix(r.URL.Path, "/intern/letzte/signal/"))
+	case strings.HasPrefix(r.URL.Path, "/intern/letzte/whatsapp/"):
+		w.letzteDatei(rw, r, "whatsapp", strings.TrimPrefix(r.URL.Path, "/intern/letzte/whatsapp/"))
 	default:
 		jsonFehler(rw, http.StatusNotFound, "Gibt es nicht.")
 	}
 }
 
-func (w *Web) medium(rw http.ResponseWriter, r *http.Request, rel string) {
+func (w *Web) letzteDatei(rw http.ResponseWriter, r *http.Request, quelle, rel string) {
 	rel = path.Clean("/" + rel)[1:]
 	if rel == "" || rel == "." {
 		jsonFehler(rw, http.StatusNotFound, "Gibt es nicht.")
@@ -95,16 +100,16 @@ func (w *Web) medium(rw http.ResponseWriter, r *http.Request, rel string) {
 	}
 	innen, offen := w.Tresor.Innen()
 	if !offen {
-		jsonFehler(rw, http.StatusLocked, "Das Archiv ist abgeschlossen. Öffne es, dann lassen sich die WhatsApp-Bilder und -Videos zurückholen.")
+		jsonFehler(rw, http.StatusLocked, "Das Archiv ist abgeschlossen. Öffne es, dann lässt sich die Sicherung zurückholen.")
 		return
 	}
 	id, err := identitaetLesen(innen.Identitaet())
 	if err != nil {
-		log.Printf("archiv: Medium: %v", err)
+		log.Printf("archiv: letzte %s: %v", quelle, err)
 		jsonFehler(rw, http.StatusServiceUnavailable, saysStartet)
 		return
 	}
-	f, err := os.OpenInRoot(filepath.Join(w.Letzte, "whatsapp", "Media"), filepath.FromSlash(rel)+".age")
+	f, err := os.OpenInRoot(filepath.Join(w.Letzte, quelle), filepath.FromSlash(rel)+".age")
 	if err != nil {
 		jsonFehler(rw, http.StatusNotFound, "Diese Datei gibt es nicht.")
 		return
@@ -116,11 +121,11 @@ func (w *Web) medium(rw http.ResponseWriter, r *http.Request, rel string) {
 		return
 	}
 	// decrypted chunk by chunk where it is read: a Range (a phone resuming a
-	// large video) costs only the chunks it touches, and the plaintext's
+	// large backup or video) costs only the chunks it touches, and the plaintext's
 	// length is known before the first byte (Content-Length)
 	klar, groesse, err := age.DecryptReaderAt(f, fi.Size(), id)
 	if err != nil {
-		log.Printf("archiv: Medium %s: %v", rel, err)
+		log.Printf("archiv: letzte %s/%s: %v", quelle, rel, err)
 		jsonFehler(rw, http.StatusInternalServerError, "Diese Datei ließ sich nicht entschlüsseln. Sag dem Admin Bescheid.")
 		return
 	}

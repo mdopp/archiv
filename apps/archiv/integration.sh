@@ -191,8 +191,8 @@ sudo test -f "$D/eingang/letzte/whatsapp/Databases/msgstore.db.crypt15" || fail 
 sudo test -f "$D/eingang/letzte/whatsapp/Media/WhatsApp Images/IMG-1.jpg.age" || fail "the media file was not encrypted into letzte/"
 [ ! -e "$D/eingang/whatsapp/Media/WhatsApp Images/IMG-1.jpg" ] || fail "the plaintext media stayed in the inbox"
 if sudo grep -rq KLARTEXT-BILD "$D/eingang"; then fail "plaintext media somewhere in the inbox"; fi
-[ "$(curl -fsS -H 'X-Archiv-Homes: homes' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = KLARTEXT-BILD-VOM-HANDY ] || fail "Homes does not get the media back"
-[ "$(curl -s -o /dev/null -w '%{http_code}' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = 401 ] || fail "the media without Homes' secret"
+[ "$(curl -fsS -H 'X-Archiv-Homes: homes' "$U/intern/letzte/whatsapp/Media/WhatsApp%20Images/IMG-1.jpg")" = KLARTEXT-BILD-VOM-HANDY ] || fail "Homes does not get the media back"
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$U/intern/letzte/whatsapp/Media/WhatsApp%20Images/IMG-1.jpg")" = 401 ] || fail "the media without Homes' secret"
 
 code=$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -X POST "$U/tresor/abschliessen")
 [ "$code" = 303 ] || fail "abschließen: $code"
@@ -201,7 +201,7 @@ if docker exec archiv grep -q " /run/tresor " /proc/self/mounts; then fail "stil
 [ -z "$(docker exec archiv ls -A /run/tresor)" ] || fail "the mount point shows files while closed"
 [ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer x' "$U/api/v1/stats")" = 423 ] || fail "a bearer while closed is not 423"
 
-[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Archiv-Homes: homes' "$U/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg")" = 423 ] || fail "media while closed is not 423"
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'X-Archiv-Homes: homes' "$U/intern/letzte/whatsapp/Media/WhatsApp%20Images/IMG-1.jpg")" = 423 ] || fail "media while closed is not 423"
 if sudo grep -rqF "$PASSPHRASE" "$D/data"; then fail "the Signal passphrase readable outside the closed vault"; fi
 
 echo "a passphrase left in the old outside store (before 2026-11-02) moves into the vault on the next opening"

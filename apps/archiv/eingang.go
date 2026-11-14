@@ -13,11 +13,16 @@ import (
 )
 
 // The inbox (ADR 0029 §4): Homes writes the person's phone backups into
-// /eingang/<quelle>/…, still encrypted by the messenger, its partials in
+// /eingang/<quelle>/…, its partials in
 // /eingang/.teil/. A dot-entry is never a backup. A file is imported only
 // when it is stable: the same size and mtime for Ruhe, as seen by this
 // process (Homes sets the phone's mtime, so the mtime alone says nothing
 // about when the file arrived).
+//
+// Since archiv#64 every backup arrives age-encrypted on the phone to this
+// archive's public key (`<name>.age`): Homes relays only bytes it cannot
+// read. A WhatsApp database or Signal backup without .age is one Homes
+// took before that; it is still read, as before.
 
 // Quellen are the inbox folders, in the order the page shows them. The
 // archive's own letzte/ (the newest backups, for a new phone) lies beside
@@ -32,9 +37,9 @@ var quellenName = map[string]string{"signal": "Signal", "sms": "SMS", "whatsapp"
 func istSicherung(quelle, rel string) bool {
 	name := path.Base(rel)
 	switch quelle {
-	case "signal":
-		return strings.HasPrefix(name, "signal-") && strings.HasSuffix(name, ".backup")
-	case "whatsapp": // Databases/msgstore.db.crypt15 and the copies Homes keeps beside it (.crypt15.<YYYYMMDD-HHMMSS>); not Media/
+	case "signal": // signal-….backup.age (age on the phone, archiv#64) or, from before, signal-….backup
+		return strings.HasPrefix(name, "signal-") && (strings.HasSuffix(name, ".backup") || strings.HasSuffix(name, ".backup.age"))
+	case "whatsapp": // Databases/msgstore.db.crypt15.age (or, from before, .crypt15) and the copies Homes keeps beside it (.<YYYYMMDD-HHMMSS>); not Media/
 		return !strings.HasPrefix(rel, "Media/") && strings.HasPrefix(name, "msgstore") && strings.Contains(name, ".crypt15")
 	case "discord":
 		return strings.HasSuffix(strings.ToLower(name), ".zip")
@@ -57,6 +62,14 @@ type Datei struct {
 }
 
 func (d Datei) schluessel() string { return d.Pfad }
+
+// alsAge says whether the backup came age-encrypted from the phone: its
+// name is <messenger's name>.age, or, kept beside a newer one by Homes,
+// <…>.age.<YYYYMMDD-HHMMSS>.
+func (d Datei) alsAge() bool {
+	name := path.Base(d.Rel)
+	return strings.HasSuffix(name, ".age") || strings.Contains(name, ".age.")
+}
 
 type beobachtung struct {
 	groesse int64

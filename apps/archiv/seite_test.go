@@ -417,7 +417,7 @@ func TestStatusSaysOneBackupInTheSingular(t *testing.T) {
 
 // Homes' way to the restore files: only with its secret; media only while
 // open (they are age-encrypted in letzte/, the private key is in the vault).
-func TestHomesGetsMediaOnlyWhileOpen(t *testing.T) {
+func TestHomesGetsTheNewestBackupOnlyWhileOpen(t *testing.T) {
 	wt := neuesWeb(t)
 	homes := map[string]string{homesHeader: "homes-geheim"}
 	if rec := wt.rufe("GET", "/intern/empfaenger", nil, nil); rec.Code != http.StatusUnauthorized {
@@ -443,7 +443,7 @@ func TestHomesGetsMediaOnlyWhileOpen(t *testing.T) {
 	if err := verschluesseln(src, filepath.Join(wt.w.Letzte, "whatsapp", "Media", "WhatsApp Images", "IMG-1.jpg.age"), empf); err != nil {
 		t.Fatal(err)
 	}
-	rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", homes, nil)
+	rec = wt.rufe("GET", "/intern/letzte/whatsapp/Media/WhatsApp%20Images/IMG-1.jpg", homes, nil)
 	if rec.Code != 200 || rec.Body.String() != "BILD-INHALT" || rec.Header().Get("Content-Type") != "image/jpeg" {
 		t.Fatalf("medium: %d %q %s", rec.Code, rec.Body, rec.Header().Get("Content-Type"))
 	}
@@ -457,20 +457,32 @@ func TestHomesGetsMediaOnlyWhileOpen(t *testing.T) {
 	if err := verschluesseln(src, filepath.Join(wt.w.Letzte, "whatsapp", "Media", "WhatsApp Video", "VID-1.mp4.age"), empf); err != nil {
 		t.Fatal(err)
 	}
-	rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Video/VID-1.mp4", map[string]string{homesHeader: "homes-geheim", "Range": "bytes=65000-"}, nil)
+	rec = wt.rufe("GET", "/intern/letzte/whatsapp/Media/WhatsApp%20Video/VID-1.mp4", map[string]string{homesHeader: "homes-geheim", "Range": "bytes=65000-"}, nil)
 	if rec.Code != http.StatusPartialContent || !bytes.Equal(rec.Body.Bytes(), video[65000:]) || rec.Header().Get("Content-Range") != "bytes 65000-199999/200000" {
 		t.Fatalf("range: %d %d bytes %q", rec.Code, rec.Body.Len(), rec.Header().Get("Content-Range"))
 	}
-	if rec = wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Video/VID-1.mp4", homes, nil); rec.Header().Get("Content-Length") != "200000" || !bytes.Equal(rec.Body.Bytes(), video) {
+	if rec = wt.rufe("GET", "/intern/letzte/whatsapp/Media/WhatsApp%20Video/VID-1.mp4", homes, nil); rec.Header().Get("Content-Length") != "200000" || !bytes.Equal(rec.Body.Bytes(), video) {
 		t.Fatalf("whole: %q %d bytes", rec.Header().Get("Content-Length"), rec.Body.Len())
 	}
-	for _, p := range []string{"/intern/whatsapp/medien/../../../tresor/gocryptfs.conf", "/intern/whatsapp/medien/%2e%2e/%2e%2e/x"} {
+	// Signal's backup and WhatsApp's database came age-encrypted from the
+	// phone (archiv#64): what comes back is the messenger's own file
+	os.WriteFile(src, []byte("SIGNAL-VERSCHLUESSELT"), 0o644)
+	verschluesseln(src, filepath.Join(wt.w.Letzte, "signal", "signal-2026-11-01.backup.age"), empf)
+	os.WriteFile(src, []byte("WHATSAPP-VERSCHLUESSELT"), 0o644)
+	verschluesseln(src, filepath.Join(wt.w.Letzte, "whatsapp", "Databases", "msgstore.db.crypt15.age"), empf)
+	if rec := wt.rufe("GET", "/intern/letzte/signal/signal-2026-11-01.backup", homes, nil); rec.Code != 200 || rec.Body.String() != "SIGNAL-VERSCHLUESSELT" {
+		t.Fatalf("signal: %d %q", rec.Code, rec.Body)
+	}
+	if rec := wt.rufe("GET", "/intern/letzte/whatsapp/Databases/msgstore.db.crypt15", homes, nil); rec.Code != 200 || rec.Body.String() != "WHATSAPP-VERSCHLUESSELT" {
+		t.Fatalf("whatsapp database: %d %q", rec.Code, rec.Body)
+	}
+	for _, p := range []string{"/intern/letzte/whatsapp/../../../tresor/gocryptfs.conf", "/intern/letzte/whatsapp/%2e%2e/%2e%2e/x", "/intern/letzte/sms/x", "/intern/letzte/whatsapp/../signal/signal-2026-11-01.backup"} {
 		if rec := wt.rufe("GET", p, homes, nil); rec.Code == 200 {
 			t.Fatalf("%s: %d", p, rec.Code)
 		}
 	}
 	wt.tt.Abschliessen(context.Background(), "t")
-	if rec := wt.rufe("GET", "/intern/whatsapp/medien/WhatsApp%20Images/IMG-1.jpg", homes, nil); rec.Code != http.StatusLocked {
+	if rec := wt.rufe("GET", "/intern/letzte/whatsapp/Media/WhatsApp%20Images/IMG-1.jpg", homes, nil); rec.Code != http.StatusLocked {
 		t.Fatalf("closed: %d", rec.Code)
 	}
 }
