@@ -77,6 +77,73 @@ inside), then the outside file is overwritten with zeros and removed, and
 one log line says so, without the secret. Nothing there: nothing happens.
 On an error the outside file stays and the next opening tries again.
 
+### Areas, sessions, keys and the protocol (archiv#68, ADR 0001)
+
+The vault is its own package, `tresor/`, and the archive's features reach
+it only through it (docs/adr/0001-the-vault-is-a-building-block.md, step 1:
+the features still run in this process).
+
+- **Areas.** Every name in the vault belongs to one area
+  (`tresor/bereiche.go`): **Nachrichten** (msgvault's home, the work
+  folder, the large attachments, the Briefkasten's private key, the
+  messengers' keys, `whatsapp-stand`, `mail-aufraeumen.json`), **Kontakte**
+  (the contact store, the calendars, the relay's password and mark,
+  `umfeld/sozial.json`), **Beziehungen** (the rest of `umfeld/`: the net,
+  the answers, groups, pairs, birthdays, origins, the model's hints, the
+  persons by hand), **Fotos** (the person's Immich key), **Notizen** (the
+  Datenpfleger's „Passt so“). Tasks are no area: they leave the vault to
+  Homes (ADR 0001 §4). A name in no area is the vault's own and no key
+  reaches it (its protocol); msgvault's home is handed out only whole, as
+  a folder for a msgvault process, and only for writing, so its API key
+  is never a file a key can read.
+- **Programs** (`programme.go`), each with the areas it asks for:
+  *Importe* (Postbote, Abgleich, relay, Aufräumer, the sources' keys,
+  `/intern/letzte/`: Nachrichten and Kontakte, read and write),
+  *Nachrichten* (msgvault's own pages, the search, „Ist das dieselbe
+  Person?“: Nachrichten read and write, Kontakte read), *Umfeld und
+  Stammbaum* (the net, its questions, the Stammbaum, the edge and person
+  pages: Beziehungen and Fotos read and write, Kontakte and Nachrichten
+  read), *Datenpfleger* (Notizen read and write, Kontakte and Beziehungen
+  read). Each feature holds only its program's `Innen`; `innen.go` reads
+  and writes a `Fach` (area and name) through the program's key. The net
+  the Umfeld keeps in memory reaches the Datenpfleger only as a read of
+  Beziehungen with the Datenpfleger's key (`Umfeld.NetzFuer`).
+- **Session.** Opening (password or passkey) starts a session with what
+  the person ticked in „Freigaben“ above the opening form: per program,
+  per area, read and write. A form without the boxes (Homes' button)
+  grants the last choice, which stays outside the vault in
+  `/data/freigaben.json` (which program may which area; no data of hers);
+  the first opening grants every program what it asks for. A form cannot
+  grant more than a program asks for. Other grants need a new session:
+  lock and open again. The session ends with „Abschließen“, the idle
+  close, the container's stop, or 12 hours after the unlock (`SITZUNG`).
+- **Keys.** A program gets a key for its grant, at most 15 minutes long
+  (`SCHLUESSEL`) and never past the session; its handle takes a new one
+  within the grant when the old one nears its end. Every access checks the
+  key against the session open now: the lock voids every key at once,
+  before anything stops, and a key of one session never opens the next.
+  An access that passed its check finishes before the vault unmounts.
+- **Protocol.** Every access, allowed or refused, is one line in
+  `zugriffe.jsonl` inside the vault: when, the session (its first
+  characters), the program, the area, the right and the file's name —
+  never what was read or written. The older half moves to
+  `zugriffe.1.jsonl` at 8 MB. `/tresor/freigaben` shows the open session's
+  grants, the counts per program and area, and the last 50 accesses; a
+  quiet line on the workplace leads there.
+- **Proof.** `tresor/sitzung_test.go`: a key without the area, with a read
+  grant for a write, with a name of another area or a path out of the
+  vault is refused and the refusal is in the protocol; the lock voids keys
+  and a reopening does not revive them; keys expire, the session ends.
+  `freigaben_test.go`: the opening grants what is ticked and no more, the
+  lock voids the programs' keys through the page, and a probe fails when a
+  feature file names the mount point, makes a program's handle or an
+  `Innen` of its own. Every test vault fails its test when one of today's
+  programs, granted all it asks for, was refused an access
+  (`fakes_test.go keineAblehnung`): a feature that reaches outside its
+  program's areas turns the suite red. `integration.sh` checks that the
+  person's request is in the protocol inside the real gocryptfs vault and
+  that no protocol name lies in the cipher folder.
+
 ### Opening with a passkey
 
 A passkey can open the vault instead of the typed password (WebAuthn's PRF
@@ -132,11 +199,17 @@ page says so).
   of `/`, its assets and a bearer still reach it). The supervisor adds
   `X-API-Key` itself; Caddy's headers and Authelia's cookie stay behind.
   While closed, other GETs redirect to `/tresor`.
-- An agent (`/p/<person>/…`, the prefix stripped by Caddy, past Authelia):
-  `Authorization: Bearer <msgvault's key>` goes to msgvault unchanged while
-  open; while closed, 423 `{"fehler": "Das Archiv ist abgeschlossen. …"}`.
-  A forged `Remote-User` on this way gets no key. How the agent learns the
-  key (it is in the vault) is laib#986's question.
+- An agent or a program outside (`/p/<person>/…`, the prefix stripped by
+  Caddy, past Authelia): `Authorization: Bearer <a key from the vault>`
+  (archiv#68): while open, a live key whose program holds Nachrichten for
+  what the request does (GET, HEAD and `/api/v1/query` read; anything else
+  writes) goes to msgvault, which gets msgvault's own key from the vault
+  instead of the bearer; msgvault's key never leaves the vault. Closed:
+  423 `{"fehler": "Das Archiv ist abgeschlossen. …"}`; an unknown, expired
+  or voided key: 401; an area not granted: 403. A forged `Remote-User` on
+  this way gets no key. How a program outside obtains its key is the next
+  step of ADR 0001 (a program moving out); today only the archive's own
+  programs hold keys.
 
 ## The inbox
 

@@ -137,7 +137,7 @@ func TestGruppeEinTipp(t *testing.T) {
 	}
 	tab.Gespraeche = []netzGespraech{{ID: "9", Art: gespraechChat, Titel: "Familie Berg", Groesse: 3, Nachrichten: 40, Zuletzt: ut.jetzt.Add(-48 * time.Hour),
 		Wer: []string{"haushalt/a", "haushalt/b", "privat/urn:uuid:k2"}}}
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)

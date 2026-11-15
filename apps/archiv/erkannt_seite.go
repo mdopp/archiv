@@ -64,7 +64,7 @@ func (w *Web) erkanntGet(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Web) erkanntSeite(rw http.ResponseWriter, r *http.Request, code int, meldung, fehler string) {
-	if _, auf := w.Tresor.Innen(); !auf {
+	if _, auf := w.P.Stammbaum.offen(); !auf {
 		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
 		return
 	}
@@ -173,7 +173,7 @@ func gebGrund(g GebVorschlag) string {
 
 // erkanntGeburtstag takes „Stimmt“, „Stimmt nicht“ or „Vergessen“ of a birthday.
 func (w *Web) erkanntGeburtstag(rw http.ResponseWriter, r *http.Request) {
-	innen, ok := w.Tresor.Innen()
+	innen, ok := w.P.Stammbaum.offen()
 	if !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
@@ -270,7 +270,7 @@ func (u *Umfeld) GruppeSetzen(innen Innen, id, kat, eigen string) error {
 	if err != nil {
 		return err
 	}
-	return jsonImTresor(innen.umfeldGruppen(), alle)
+	return innen.jsonSchreiben(fachGruppen, alle)
 }
 
 // modellDa: the box gave the archive its model.
@@ -314,7 +314,7 @@ func herkunftAbschnitt(b *strings.Builder, hs, bestaetigt []HerkunftZeile) {
 
 // erkanntHerkunft takes „Stimmt“, „Stimmt nicht“ or „Vergessen“ of a town or an employer.
 func (w *Web) erkanntHerkunft(rw http.ResponseWriter, r *http.Request) {
-	innen, ok := w.Tresor.Innen()
+	innen, ok := w.P.Stammbaum.offen()
 	if !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
@@ -330,7 +330,7 @@ func (w *Web) erkanntHerkunft(rw http.ResponseWriter, r *http.Request) {
 
 // erkanntPaar takes „Stimmt nicht“ of a couple.
 func (w *Web) erkanntPaar(rw http.ResponseWriter, r *http.Request) {
-	innen, ok := w.Tresor.Innen()
+	innen, ok := w.P.Stammbaum.offen()
 	if !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return

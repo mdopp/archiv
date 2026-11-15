@@ -7,7 +7,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 )
@@ -68,7 +67,7 @@ func kanteFertig(von string) string {
 // „+ Beziehung“), it finds the person first: one goes straight to the
 // page, several are offered, none says so.
 func (w *Web) kanteGet(rw http.ResponseWriter, r *http.Request) {
-	if _, auf := w.Tresor.Innen(); !auf {
+	if _, auf := w.P.Stammbaum.offen(); !auf {
 		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
 		return
 	}
@@ -481,13 +480,13 @@ func namenListe(n *Netz) string {
 // person's key from the vault for this one answer; nothing is kept on the
 // box (the browser may keep it, private, an hour).
 func (w *Web) kanteBild(rw http.ResponseWriter, r *http.Request) {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Stammbaum.offen()
 	id := r.URL.Query().Get("id")
 	if !auf || w.Umfeld == nil || !w.Umfeld.Netz().HatFoto(id) || !immichID(id) {
 		http.NotFound(rw, r)
 		return
 	}
-	key, err := os.ReadFile(innen.ImmichSchluessel())
+	key, err := innen.lesen(fachImmichSchluessel)
 	if err != nil || len(trimNL(key)) == 0 {
 		http.NotFound(rw, r)
 		return

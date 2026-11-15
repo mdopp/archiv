@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // ablauf records what happened, in order, from every fake.
@@ -119,12 +122,48 @@ func (u *uhr) vor(d time.Duration) {
 
 type testTresor struct {
 	*Tresor
-	dir      string
-	ereignis *ablauf
-	mounter  *fakeMounter
-	dienst   *fakeDienst
-	uhr      *uhr
-	lauf     chan Innen
+	dir        string
+	mnt        string // where the fake mounts the plain side: the test plays the disk
+	Empfaenger string // the Briefkasten's public key, outside the vault
+	ereignis   *ablauf
+	mounter    *fakeMounter
+	dienst     *fakeDienst
+	uhr        *uhr
+	lauf       chan Innen
+	P          Programme
+	// ablehnungErwartet: this test provokes a refusal on purpose
+	ablehnungErwartet bool
+	alles             Innen // a test program the person granted every area
+}
+
+// The tests have a program of their own, granted every area: it plays the
+// disk (innen_test.go). Every other program is today's, with what it asks.
+func init() {
+	r := tresor.Rechte{}
+	for _, b := range tresor.Bereiche {
+		r[b] = tresor.Lesen | tresor.Schreiben
+	}
+	programme = append(programme, programm{id: "test", name: "Test", wozu: "legt in den Tests die Dateien hin", will: r})
+}
+
+func testFreigaben() tresor.Freigaben { return alleWuensche() }
+
+// keineAblehnung fails t when a program of today's, granted all it asks
+// for, was refused an access: then a feature reached outside its program's
+// areas. A test that provokes a refusal sets tt.ablehnungErwartet.
+func (tt *testTresor) keineAblehnung(t *testing.T) {
+	for _, d := range []string{tt.mnt, filepath.Join(tt.dir, "tresor", "klar")} {
+		b, err := os.ReadFile(filepath.Join(d, "zugriffe.jsonl"))
+		if err != nil {
+			continue
+		}
+		for _, z := range strings.Split(strings.TrimSpace(string(b)), "\n") {
+			var e tresor.Zugriff
+			if json.Unmarshal([]byte(z), &e) == nil && e.Verweigert != "" && e.Verweigert != "Schlüssel gilt nicht" && e.Programm != "test" && !tt.ablehnungErwartet {
+				t.Errorf("the program %s was refused %s %s %q (%s): a feature reached outside its areas", e.Programm, e.Bereich, e.Recht, e.Was, e.Verweigert)
+			}
+		}
+	}
 }
 
 func neuerTresor(t *testing.T) *testTresor {
@@ -134,16 +173,44 @@ func neuerTresor(t *testing.T) *testTresor {
 	m := &fakeMounter{ereignis: ev}
 	d := &fakeDienst{ereignis: ev}
 	u := &uhr{t: time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)}
-	tt := &testTresor{dir: dir, ereignis: ev, mounter: m, dienst: d, uhr: u, lauf: make(chan Innen, 10)}
-	tt.Tresor = &Tresor{Cipher: filepath.Join(dir, "tresor"), Mnt: filepath.Join(dir, "mnt"), Port: 18890,
-		Mounter: m, Dienst: d, Leerlauf: 2 * time.Hour, Now: u.Now}
-	tt.Tresor.Lauf = func(ctx context.Context, innen Innen) {
-		tt.lauf <- innen
+	tt := &testTresor{dir: dir, mnt: filepath.Join(dir, "mnt"), Empfaenger: filepath.Join(dir, "briefkasten.pub"), ereignis: ev, mounter: m, dienst: d, uhr: u, lauf: make(chan Innen, 10)}
+	tt.Tresor = tresor.Neu(tresor.Konfig{Cipher: filepath.Join(dir, "tresor"), Mnt: tt.mnt, Port: 18890, Empfaenger: tt.Empfaenger,
+		Mounter: m, Dienst: d, Leerlauf: 2 * time.Hour, MsgvaultConfig: msgvaultConfig})
+	tt.Now = u.Now
+	tt.P = neueProgramme(tt.Tresor)
+	tt.alles = Innen{tt.Programm("test")}
+	for _, i := range []Innen{tt.P.Importe, tt.P.Nachrichten, tt.P.Stammbaum, tt.P.Datenpfleger, tt.alles} {
+		testWurzeln.Store(i.p, tt.mnt)
+	}
+	tt.Tresor.Lauf = func(ctx context.Context) {
+		tt.lauf <- tt.alles
 		<-ctx.Done()
 		m.note("lauf-ende")
 	}
 	tt.Erkennen()
+	t.Cleanup(func() { tt.keineAblehnung(t) })
 	return tt
+}
+
+// Anlegen and Oeffnen grant what testFreigaben grants.
+func (tt *testTresor) Anlegen(ctx context.Context, pw []byte) error {
+	return tt.Tresor.Anlegen(ctx, pw, testFreigaben())
+}
+
+func (tt *testTresor) Oeffnen(ctx context.Context, pw []byte) error {
+	return tt.Tresor.Oeffnen(ctx, pw, testFreigaben())
+}
+
+// Innen is the test program's way in, and whether the vault is open.
+func (tt *testTresor) Innen() (Innen, bool) { return tt.alles, tt.Stand().Zustand == Offen }
+
+// APIKey is msgvault's key as the vault keeps it, "" while it is not answering.
+func (tt *testTresor) APIKey() string {
+	if !tt.Stand().Bereit {
+		return ""
+	}
+	b, _ := os.ReadFile(filepath.Join(tt.mnt, "msgvault", "api-key"))
+	return string(trimNL(b))
 }
 
 // bereit waits until msgvault "answers" (the background start ran).
@@ -157,5 +224,3 @@ func (tt *testTresor) bereit(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
-
-func (tt *testTresor) ereignisse() string { return tt.ereignis.String() }

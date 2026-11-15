@@ -432,7 +432,7 @@ func TestStammbaumAlteAntworten(t *testing.T) {
 	schauFamilie(t, ut, innen)
 	tab, _ := tabelleLaden(innen)
 	tab.Namen["p-ole"] = "Ole Berg"
-	jsonImTresor(innen.umfeldTabelle(), tab)
+	innen.jsonSchreiben(fachNetz, tab)
 	ut.u.laden(innen)
 	for _, f := range [][3]string{{"p-hedwig", "geschwister", "p-rosi"}, {"p-ole", "eltern", "p-karl"}} { // Ole: her grandfather follows, marked „aus“
 		bauPost(t, wt, url.Values{"x": {f[0]}, "y": {f[2]}, "art": {f[1]}}, 200)

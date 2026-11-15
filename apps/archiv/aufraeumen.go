@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/mail"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -88,8 +87,6 @@ type Aufraeumen struct {
 	Probe    *Durchlauf `json:"probe,omitempty"`    // the dry run the page asks with
 	Letzter  *Durchlauf `json:"letzter,omitempty"`  // the last deletion
 }
-
-func (i Innen) MailAufraeumen() string { return filepath.Join(i.Wurzel, "mail-aufraeumen.json") }
 
 // ArchivBeleg says what msgvault holds: for each Message-ID (without its
 // angle brackets), the content ids of its messages. An error means:
@@ -168,7 +165,7 @@ func (a *Aufraeumer) Laeuft() string {
 
 func aufrLaden(innen Innen) (map[string]*Aufraeumen, error) {
 	out := map[string]*Aufraeumen{}
-	b, err := os.ReadFile(innen.MailAufraeumen())
+	b, err := innen.lesen(fachMailAufraeumen)
 	if errors.Is(err, os.ErrNotExist) {
 		return out, nil
 	}
@@ -183,7 +180,7 @@ func aufrLaden(innen Innen) (map[string]*Aufraeumen, error) {
 
 func aufrSpeichern(innen Innen, s map[string]*Aufraeumen) error {
 	b, _ := json.MarshalIndent(s, "", "  ")
-	return schreibenAtomar(innen.MailAufraeumen(), b, 0o600)
+	return innen.schreiben(fachMailAufraeumen, b)
 }
 
 // Einstellungen are every mailbox's settings (open vault only).

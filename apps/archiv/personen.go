@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // „Ist das dieselbe Person?“ — msgvault's identity suggestions, put to the
@@ -291,7 +293,7 @@ func (w *Web) zusammenFormular(b *strings.Builder) {
 
 // geloeschteKarten: the cards deleted on the phone, by UID (from the vault).
 func (w *Web) geloeschteKarten() map[string]time.Time {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Nachrichten.offen()
 	if !auf {
 		return nil
 	}
@@ -308,7 +310,7 @@ func personName(p Person) string {
 // --- the handlers
 
 func (w *Web) personenBereit(rw http.ResponseWriter, r *http.Request) bool {
-	if w.Personen == nil || w.Tresor.APIKey() == "" {
+	if w.Personen == nil || !w.Tresor.Stand().Bereit || !w.P.Nachrichten.darf(tresor.Nachrichten, tresor.Schreiben) {
 		w.antwort(rw, r, http.StatusLocked, "", saysNichtBereit)
 		return false
 	}
@@ -479,7 +481,7 @@ func (w *Web) zusammen(rw http.ResponseWriter, r *http.Request) {
 
 // abgleichJetzt: „Jetzt abgleichen“ on the page.
 func (w *Web) abgleichJetzt(rw http.ResponseWriter, r *http.Request) {
-	if _, auf := w.Tresor.Innen(); !auf || !w.Abgleich.Eingerichtet() {
+	if _, auf := w.P.Importe.offen(); !auf || !w.Abgleich.Eingerichtet() {
 		w.antwort(rw, r, http.StatusLocked, "", saysNichtBereit)
 		return
 	}

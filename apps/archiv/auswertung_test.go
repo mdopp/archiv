@@ -222,7 +222,7 @@ func TestGruppenTab(t *testing.T) {
 	}
 	tab.Gespraeche = []netzGespraech{{ID: "9", Art: gespraechChat, Titel: "Skatrunde", Groesse: 4, Nachrichten: 40, Zuletzt: ut.jetzt.Add(-48 * time.Hour),
 		Wer: []string{"haushalt/a", "haushalt/b", "privat/urn:uuid:k2"}}}
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)
@@ -269,7 +269,7 @@ func TestErkannt(t *testing.T) {
 		t.Fatal(err)
 	}
 	tab.Kontakte = append(tab.Kontakte, netzKontakt{Key: "privat/s", Name: "Mama von Lena"})
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)

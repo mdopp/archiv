@@ -1,11 +1,8 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -18,20 +15,16 @@ import (
 
 const verstorbenZeichen = " †"
 
-func (i Innen) umfeldVerstorben() string { return filepath.Join(i.Umfeld(), "verstorben.json") }
-
 // markeLaden is a mark of nodes kept in the vault (ruhen, verstorben).
-func markeLaden(pfad string) map[string]time.Time {
+func markeLaden(innen Innen, d Fach) map[string]time.Time {
 	out := map[string]time.Time{}
-	if b, err := os.ReadFile(pfad); err == nil {
-		json.Unmarshal(b, &out)
-	}
+	innen.jsonLesen(d, &out)
 	return out
 }
 
 // marke sets (an) or clears id in the mark feld names and keeps the mark
-// in the open vault at pfad.
-func (u *Umfeld) marke(pfad, id string, an bool, feld func(*Netz) *map[string]time.Time) error {
+// in the open vault as d.
+func (u *Umfeld) marke(innen Innen, d Fach, id string, an bool, feld func(*Netz) *map[string]time.Time) error {
 	u.halt.Lock()
 	defer u.halt.Unlock()
 	n := u.Netz()
@@ -51,12 +44,12 @@ func (u *Umfeld) marke(pfad, id string, an bool, feld func(*Netz) *map[string]ti
 	alle := maps.Clone(*m)
 	n.totMarken()
 	n.mu.Unlock()
-	return jsonImTresor(pfad, alle)
+	return innen.jsonSchreiben(d, alle)
 }
 
 // Verstorben keeps in the open vault that id has died (an), or not.
 func (u *Umfeld) Verstorben(innen Innen, id string, an bool) error {
-	return u.marke(innen.umfeldVerstorben(), id, an, func(n *Netz) *map[string]time.Time { return &n.verstorben })
+	return u.marke(innen, fachVerstorben, id, an, func(n *Netz) *map[string]time.Time { return &n.verstorben })
 }
 
 // totMarken sets each node's Tot by verstorben; n.mu is held or n is new.

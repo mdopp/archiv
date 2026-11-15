@@ -81,7 +81,7 @@ func neuesMsgvaultHinweise(t *testing.T) (*fakeMsgvaultHinweise, *MsgvaultAPI) {
 	t.Cleanup(f.Close)
 	u, _ := url.Parse(f.URL)
 	port, _ := strconv.Atoi(u.Port())
-	return f, &MsgvaultAPI{Port: port, Key: func() string { return "vault-key" }}
+	return f, &MsgvaultAPI{Port: port, Key: festerKey("vault-key")}
 }
 
 func (f *fakeMsgvaultHinweise) setzen(z ...[]any) {

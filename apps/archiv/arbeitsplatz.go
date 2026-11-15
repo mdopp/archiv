@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"slices"
 	"strings"
 )
@@ -96,7 +95,7 @@ func neuerBesuch(r *http.Request) bool {
 // umfeldFehlt says why there is no net yet, and what to do.
 func (w *Web) umfeldFehlt(b *strings.Builder) {
 	u := w.Umfeld
-	innen, _ := w.Tresor.Innen()
+	innen, _ := w.P.Stammbaum.offen()
 	_, hat := HatImmichSchluessel(innen)
 	switch {
 	case !u.Eingerichtet():
@@ -157,7 +156,7 @@ func msgvaultSuche(q string) string {
 // then the search in every message, in the other spelling too.
 func (w *Web) suche(rw http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	innen, offen := w.Tresor.Innen()
+	innen, offen := w.P.Nachrichten.offen()
 	if q == "" || !offen {
 		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
 		return
@@ -193,7 +192,7 @@ func ausgeschrieben(q string) string {
 // kontakteFinden are the names of the contacts in the open vault that
 // hold every word of q (klar: umlauts, spelled out or not, and case alike).
 func kontakteFinden(innen Innen, q string, hoechstens int) (out []string) {
-	k, err := kontakteLaden(kontakteDatei(innen))
+	k, err := kontakteLaden(innen)
 	if err != nil {
 		return nil
 	}
@@ -280,7 +279,7 @@ func (w *Web) quellenProbleme(offen bool) (p []string) {
 		}
 	}
 	if u := w.Umfeld; offen && u.Eingerichtet() && u.Stand().Fehler != "" {
-		if innen, auf := w.Tresor.Innen(); auf {
+		if innen, auf := w.P.Stammbaum.offen(); auf {
 			if _, hat := HatImmichSchluessel(innen); hat {
 				p = append(p, "Fotos: Umfeld gestört")
 			}
@@ -299,17 +298,19 @@ func (w *Web) fehlendeSchluessel(offen bool) (p []string) {
 	if w.fehlenSignalSchluessel() {
 		p = append(p, "Signal: Schlüssel fehlt")
 	}
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Importe.offen()
 	if !offen || !auf {
 		return p
 	}
 	if wartende(w.Eingang)["whatsapp"].Wartend > 0 {
-		if _, err := os.Stat(innen.WhatsAppSchluessel()); err != nil {
+		if _, hat := innen.seit(fachWhatsAppSchluessel); !hat {
 			p = append(p, "WhatsApp: Schlüssel fehlt")
 		}
 	}
-	if _, hat := HatImmichSchluessel(innen); w.Umfeld.Eingerichtet() && !hat {
-		p = append(p, "Fotos: Immich-Schlüssel fehlt")
+	if st := w.P.Stammbaum; w.Umfeld.Eingerichtet() && st.auf() {
+		if _, hat := HatImmichSchluessel(st); !hat {
+			p = append(p, "Fotos: Immich-Schlüssel fehlt")
+		}
 	}
 	return p
 }

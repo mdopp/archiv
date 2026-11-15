@@ -232,7 +232,7 @@ func (w *Web) oeffnenPasskey(rw http.ResponseWriter, r *http.Request) {
 		w.antwort(rw, r, http.StatusForbidden, "", saysPasskeyFalsch)
 		return
 	}
-	switch err := w.Tresor.Oeffnen(r.Context(), pw); {
+	switch err := w.Tresor.Oeffnen(r.Context(), pw, w.Freigaben.ausFormular(r)); {
 	case err == nil:
 		http.Redirect(rw, r, "/tresor?m=offen", http.StatusSeeOther)
 	case errors.Is(err, ErrFalschesPasswort):
@@ -244,7 +244,7 @@ func (w *Web) oeffnenPasskey(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *Web) passkeyWeg(rw http.ResponseWriter, r *http.Request) {
-	if _, ok := w.Tresor.Innen(); !ok {
+	if w.Tresor.Stand().Zustand != Offen {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
 	}

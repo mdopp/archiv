@@ -165,7 +165,7 @@ func (ut *umfeldTest) knoten(t *testing.T, name string) Knoten {
 // „Passt so“ (owner 2026-11-12): a finding the person left never returns;
 // an aggregate comes back only with a new part, and then only with it.
 func TestPasstSoKommtNichtWieder(t *testing.T) {
-	innen := Innen{t.TempDir()}
+	innen := testInnen(t)
 	jetzt := time.Date(2026, 11, 12, 9, 0, 0, 0, time.UTC)
 	eins := Befund{ID: "ohne-name:x.vcf", Titel: "Ein Kontakt ohne Namen"}
 	fotos := Befund{ID: "fotos-ohne-ort", Teile: []string{"a1", "a2"}, Bilder: true}
@@ -197,9 +197,9 @@ func TestPasstSoKommtNichtWieder(t *testing.T) {
 func TestAufraeumenSeite(t *testing.T) {
 	wt, ut, _, innen := eintragenBox(t)
 	wt.w.Aufgaben = &Aufgaben{Datei: filepath.Join(wt.data, "aufgaben.json")}
-	k, _ := kontakteLaden(kontakteDatei(innen))
+	k, _ := kontakteLaden(innen)
 	k.Einmischen([]QuellKarte{{Href: "leer.vcf", Daten: karteMit("leer", "", "TEL:0171 1111111\r\n")}}, *ut.jetzt)
-	k.speichern(kontakteDatei(innen))
+	k.speichern(innen)
 	alle := Befunde(innen, ut.u.Netz())
 	if len(alle) < 3 || alle[0].ID != "ohne-name:leer.vcf" {
 		t.Fatalf("findings: %v", befundIDs(alle))

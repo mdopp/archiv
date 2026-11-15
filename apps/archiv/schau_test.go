@@ -80,7 +80,7 @@ func schauLeute(t *testing.T, ut *umfeldTest, innen Innen, viele int) {
 			tab.Fotos = append(tab.Fotos, netzFoto{ID: fmt.Sprintf("v%d-%d", i, d), T: time.Date(2020+d%6, time.Month(1+i%12), 1+d, 12, 0, 0, 0, time.UTC), Wer: []string{"p-anna", id}})
 		}
 	}
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)
@@ -103,10 +103,10 @@ func schauFamilie(t *testing.T, ut *umfeldTest, innen Innen) {
 		tab.Fotos = append(tab.Fotos, netzFoto{ID: fmt.Sprintf("f%d", i), T: time.Date(2021, 6, 1+i, 12, 0, 0, 0, time.UTC), Wer: []string{"p-anna", p[0]}})
 		as[paarKey(p[0], "p-anna")] = antwort{X: p[0], Art: p[2], Am: am}
 	}
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
-	if err := jsonImTresor(innen.umfeldAntworten(), as); err != nil {
+	if err := innen.jsonSchreiben(fachAntworten, as); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)
@@ -171,7 +171,7 @@ func schauNetz(t *testing.T, ut *umfeldTest, innen Innen) {
 		t.Fatal(err)
 	}
 	tab.Gespraeche = append(tab.Gespraeche, gs...)
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)

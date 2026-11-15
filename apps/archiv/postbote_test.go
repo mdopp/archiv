@@ -94,7 +94,7 @@ func neuerSignalTest(t *testing.T) *sigTest {
 	t.Helper()
 	bt := neuerBriefkasten(t)
 	bt.b.Eingang.Ruhe = 0
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	os.WriteFile(innen.SignalPassphrase(), []byte(passphrase), 0o600)

@@ -73,7 +73,7 @@ type bauAntwort struct {
 // several; or tu=zurueck with what the answer before gave.
 func (w *Web) umfeldVerbinden(rw http.ResponseWriter, r *http.Request) {
 	a, code := bauAntwort{Fehler: saysZu}, http.StatusLocked
-	if innen, ok := w.Tresor.Innen(); ok && w.Umfeld.Netz() != nil {
+	if innen, ok := w.P.Stammbaum.offen(); ok && w.Umfeld.Netz() != nil {
 		if r.PostFormValue("tu") == "zurueck" {
 			a, code = w.bauZurueck(r, innen)
 		} else {

@@ -3,7 +3,6 @@ package main
 import (
 	"cmp"
 	"math"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -164,12 +163,10 @@ func gespraechUndFotos(k Kante) (out []string) {
 	return out[:min(2, len(out))]
 }
 
-func (i Innen) umfeldRuhen() string { return filepath.Join(i.Umfeld(), "ruhen.json") }
-
-func ruhenLaden(innen Innen) map[string]time.Time { return markeLaden(innen.umfeldRuhen()) }
+func ruhenLaden(innen Innen) map[string]time.Time { return markeLaden(innen, fachRuhen) }
 
 // Ruhen keeps in the open vault that „Lange nichts gehört“ no longer
 // names id (an), or names it again.
 func (u *Umfeld) Ruhen(innen Innen, id string, an bool) error {
-	return u.marke(innen.umfeldRuhen(), id, an, func(n *Netz) *map[string]time.Time { return &n.ruhen })
+	return u.marke(innen, fachRuhen, id, an, func(n *Netz) *map[string]time.Time { return &n.ruhen })
 }

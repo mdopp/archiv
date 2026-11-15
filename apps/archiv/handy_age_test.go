@@ -150,7 +150,7 @@ func TestAnAgeWhatsAppDatabaseIsUnwrappedInsideTheVault(t *testing.T) {
 	vomHandy(t, inbox, "whatsapp/Databases/msgstore.db.crypt15.age", bt.id.Recipient(), []byte("CRYPT15-BYTES"), time.Now().Add(-time.Hour))
 	e := &Eingang{Dir: inbox}
 	e.Stabil("whatsapp")
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	os.WriteFile(innen.WhatsAppSchluessel(), []byte(strings.Repeat("0123456789abcdef", 4)), 0o600)

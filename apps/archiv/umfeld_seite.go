@@ -34,7 +34,7 @@ const (
 // umfeldKarte is the card on the open vault page.
 func (w *Web) umfeldKarte(b *strings.Builder, qa quelleAuf) {
 	u := w.Umfeld
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Stammbaum.offen()
 	am, hat := HatImmichSchluessel(innen)
 	st := u.Stand()
 	zeile := "aus " + anzahlT(st.Fotos, "Foto", "Fotos") + " gerechnet"
@@ -110,7 +110,7 @@ func umfeldStandText(b *strings.Builder, st UmfeldStand, hat bool) {
 
 // umfeldSchluessel checks the key against Immich and stores it in the vault.
 func (w *Web) umfeldSchluessel(rw http.ResponseWriter, r *http.Request) {
-	innen, ok := w.Tresor.Innen()
+	innen, ok := w.P.Stammbaum.offen()
 	if !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
@@ -139,7 +139,7 @@ func (w *Web) umfeldSchluessel(rw http.ResponseWriter, r *http.Request) {
 		w.antwort(rw, r, http.StatusBadRequest, "", saysRechteFehlen(fehlen))
 		return
 	}
-	if err := schreibenAtomar(innen.ImmichSchluessel(), k, 0o600); err != nil {
+	if err := innen.schreiben(fachImmichSchluessel, k); err != nil {
 		log.Printf("archiv: Immich-Schlüssel speichern: %v", err)
 		w.antwort(rw, r, http.StatusInternalServerError, "", saysSpeichernFehler)
 		return
@@ -153,7 +153,7 @@ func (w *Web) umfeldSchluessel(rw http.ResponseWriter, r *http.Request) {
 
 // umfeldVerbergen takes a row's Ausblenden, Nicht berechnen or Zurückholen.
 func (w *Web) umfeldVerbergen(rw http.ResponseWriter, r *http.Request) {
-	innen, ok := w.Tresor.Innen()
+	innen, ok := w.P.Stammbaum.offen()
 	if !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
@@ -195,7 +195,7 @@ func verbergenToast(id, satz string) string {
 
 func (w *Web) umfeldGet(rw http.ResponseWriter, r *http.Request) {
 	if q := strings.TrimSpace(r.URL.Query().Get("suche")); q != "" && w.Umfeld.Netz() != nil {
-		if _, auf := w.Tresor.Innen(); auf {
+		if _, auf := w.P.Stammbaum.offen(); auf {
 			w.personenSuche(rw, r, w.Umfeld.Netz(), q)
 			return
 		}
@@ -211,7 +211,7 @@ func (w *Web) umfeldSeite(rw http.ResponseWriter, r *http.Request, code int, mit
 
 // umfeldSeiteMit is umfeldSeite with a toast (Ausblenden's Rückgängig).
 func (w *Web) umfeldSeiteMit(rw http.ResponseWriter, r *http.Request, code int, mitte, meldung, fehler, toast string) {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Stammbaum.offen()
 	if !auf {
 		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
 		return

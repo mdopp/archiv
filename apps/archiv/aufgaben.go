@@ -88,8 +88,8 @@ func (w *Web) aufgabenZaehlen(st Stand) {
 	if n := w.Umfeld.Netz(); n != nil {
 		s.Fragen = len(n.Fragen()) + n.Erkannt(w.Umfeld.Stand(), w.Umfeld.modellDa()).Vorschlaege()
 	}
-	if innen, auf := w.Tresor.Innen(); auf {
-		s.Aufraeumen = w.pflege.zaehlen(innen, w.Umfeld.Netz(), w.jetzt(), false)
+	if innen, auf := w.P.Datenpfleger.offen(); auf {
+		s.Aufraeumen = w.pflege.zaehlen(innen, w.Umfeld.NetzFuer(innen), w.jetzt(), false)
 	}
 	w.Aufgaben.Gezaehlt(s, w.jetzt())
 }

@@ -8,11 +8,12 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // Umfeld (archiv#27, step 1; owner 2026-11-10, homes ADR 0002): the
@@ -41,12 +42,6 @@ const (
 )
 
 var errUmfeldZu = errors.New("Umfeld: kein Netz, der Tresor ist zu oder es ist noch nichts gerechnet")
-
-func (i Innen) ImmichSchluessel() string { return filepath.Join(i.Wurzel, "immich-schluessel") } // the person's Immich API key, only inside
-func (i Innen) Umfeld() string           { return filepath.Join(i.Wurzel, "umfeld") }            // the photos, the phone books' ties, who is hidden
-func (i Innen) umfeldTabelle() string    { return filepath.Join(i.Umfeld(), "netz.json") }
-func (i Innen) umfeldVerborgen() string  { return filepath.Join(i.Umfeld(), "verborgen.json") }
-func (i Innen) umfeldAntworten() string  { return filepath.Join(i.Umfeld(), "antworten.json") } // „Wie steht X zu Y?“, fragen.go
 
 // UmfeldStand is what the page shows of the rounds.
 type UmfeldStand struct {
@@ -140,6 +135,16 @@ func (u *Umfeld) Netz() *Netz {
 	return u.netz
 }
 
+// NetzFuer is the net for another program than the Umfeld's own: a read
+// of Beziehungen with that program's key, in the vault's protocol; nil
+// when the person did not grant it.
+func (u *Umfeld) NetzFuer(innen Innen) *Netz {
+	if innen.p == nil || innen.p.Pruefen(tresor.Beziehungen, tresor.Lesen, fachNetz.name) != nil {
+		return nil
+	}
+	return u.Netz()
+}
+
 func (u *Umfeld) setzen(f func(*UmfeldStand)) {
 	u.mu.Lock()
 	f(&u.stand)
@@ -162,13 +167,7 @@ func (u *Umfeld) Jetzt() {
 }
 
 // HatImmichSchluessel says when the key was stored in the open vault.
-func HatImmichSchluessel(innen Innen) (time.Time, bool) {
-	fi, err := os.Stat(innen.ImmichSchluessel())
-	if err != nil || fi.Size() == 0 {
-		return time.Time{}, false
-	}
-	return fi.ModTime(), true
-}
+func HatImmichSchluessel(innen Innen) (time.Time, bool) { return innen.seit(fachImmichSchluessel) }
 
 // Lauf runs while the vault is open: the kept net at once, a round, then
 // one every Takt or when asked. It ends with the vault and forgets the net.
@@ -239,14 +238,14 @@ func (u *Umfeld) netzBauen(innen Innen, tab netzTabelle) *Netz {
 	n.sozialSetzen(sozialLaden(innen))
 	n.angelegtSetzen(angelegtLaden(innen))
 	n.ruhen = ruhenLaden(innen)
-	n.verstorben = markeLaden(innen.umfeldVerstorben())
+	n.verstorben = markeLaden(innen, fachVerstorben)
 	n.totMarken()
 	return n
 }
 
 func tabelleLaden(innen Innen) (netzTabelle, error) {
 	var tab netzTabelle
-	b, err := os.ReadFile(innen.umfeldTabelle())
+	b, err := innen.lesen(fachNetz)
 	if err != nil {
 		return tab, err
 	}
@@ -261,7 +260,7 @@ func tabelleLaden(innen Innen) (netzTabelle, error) {
 
 func verborgenLaden(innen Innen) map[string]string {
 	out := map[string]string{}
-	if b, err := os.ReadFile(innen.umfeldVerborgen()); err == nil {
+	if b, err := innen.lesen(fachVerborgen); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -269,28 +268,17 @@ func verborgenLaden(innen Innen) map[string]string {
 
 func antwortenLaden(innen Innen) map[string]antwort {
 	out := map[string]antwort{}
-	if b, err := os.ReadFile(innen.umfeldAntworten()); err == nil {
+	if b, err := innen.lesen(fachAntworten); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
-}
-
-func jsonImTresor(pfad string, v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(pfad), 0o700); err != nil {
-		return err
-	}
-	return schreibenAtomar(pfad, b, 0o600)
 }
 
 // Runde reads Immich and the phone books again whole and rebuilds the
 // net from them (never changed in place: a merge, a rename or a deletion
 // in Immich cannot drift). Immich out of reach: its photos as before.
 func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
-	key, err := os.ReadFile(innen.ImmichSchluessel())
+	key, err := innen.lesen(fachImmichSchluessel)
 	if err != nil || len(trimNL(key)) == 0 {
 		return
 	}
@@ -359,7 +347,7 @@ func (u *Umfeld) Runde(ctx context.Context, innen Innen) {
 	if tab.Namen == nil {
 		tab.Namen = map[string]string{}
 	}
-	if serr := jsonImTresor(innen.umfeldTabelle(), tab); serr != nil {
+	if serr := innen.jsonSchreiben(fachNetz, tab); serr != nil {
 		log.Printf("archiv: Umfeld speichern: %v", serr)
 		fehler = cmp.Or(fehler, saysUmfeldSpeichern)
 	}
@@ -424,7 +412,7 @@ func (u *Umfeld) telefonbuch(innen Innen, tab *netzTabelle, email string) []buch
 	for _, text := range tab.Haushalt {
 		ks = append(ks, kartenLesen("haushalt/", text)...)
 	}
-	if store, err := kontakteLaden(kontakteDatei(innen)); err == nil {
+	if store, err := kontakteLaden(innen); err == nil {
 		for _, c := range store.Sortiert() {
 			if c.GeloeschtAm == nil { // the phone's book as it is now
 				ks = append(ks, kartenLesen("privat/", c.Daten)...)
@@ -520,7 +508,7 @@ func (u *Umfeld) Verbergen(innen Innen, id, art string) error {
 	if n == nil {
 		return errUmfeldZu
 	}
-	return jsonImTresor(innen.umfeldVerborgen(), n.Verbergen(id, art))
+	return innen.jsonSchreiben(fachVerborgen, n.Verbergen(id, art))
 }
 
 // Beantworten keeps the answer about x and y in the open vault (fragen.go).
@@ -535,7 +523,7 @@ func (u *Umfeld) Beantworten(innen Innen, x, y, art string) (Frage, error) {
 	if err != nil {
 		return f, err
 	}
-	return f, jsonImTresor(innen.umfeldAntworten(), alle)
+	return f, innen.jsonSchreiben(fachAntworten, alle)
 }
 
 // Eintragen keeps in the open vault what Homes wrote of the answer key.
@@ -550,7 +538,7 @@ func (u *Umfeld) Eintragen(innen Innen, key string, e *Eingetragen) error {
 	if err != nil {
 		return err
 	}
-	return jsonImTresor(innen.umfeldAntworten(), alle)
+	return innen.jsonSchreiben(fachAntworten, alle)
 }
 
 // Vergessen drops the answer about the pair key from the open vault.
@@ -565,7 +553,7 @@ func (u *Umfeld) Vergessen(innen Innen, key string) error {
 	if err != nil {
 		return err
 	}
-	return jsonImTresor(innen.umfeldAntworten(), alle)
+	return innen.jsonSchreiben(fachAntworten, alle)
 }
 
 // Einordnen keeps the person's category of the group id in the open vault (gruppen.go).
@@ -580,7 +568,7 @@ func (u *Umfeld) Einordnen(innen Innen, id, kat string) (Frage, error) {
 	if err != nil {
 		return f, err
 	}
-	return f, jsonImTresor(innen.umfeldGruppen(), alle)
+	return f, innen.jsonSchreiben(fachGruppen, alle)
 }
 
 // Ausordnen drops the category of the group id from the open vault.
@@ -595,7 +583,7 @@ func (u *Umfeld) Ausordnen(innen Innen, id string) error {
 	if err != nil {
 		return err
 	}
-	return jsonImTresor(innen.umfeldGruppen(), alle)
+	return innen.jsonSchreiben(fachGruppen, alle)
 }
 
 // Angelegt keeps in the open vault what f did to the persons made by hand
@@ -611,10 +599,10 @@ func (u *Umfeld) Angelegt(innen Innen, f func(n *Netz) (map[string]antwort, map[
 	if err != nil {
 		return err
 	}
-	if err := jsonImTresor(innen.umfeldAntworten(), alle); err != nil {
+	if err := innen.jsonSchreiben(fachAntworten, alle); err != nil {
 		return err
 	}
-	return jsonImTresor(innen.umfeldAngelegt(), ps)
+	return innen.jsonSchreiben(fachAngelegt, ps)
 }
 
 // Festlegen keeps the relation of x and y the edge page set, asked or not (kante.go).
@@ -629,5 +617,5 @@ func (u *Umfeld) Festlegen(innen Innen, x, y, art string) (Frage, error) {
 	if err != nil {
 		return f, err
 	}
-	return f, jsonImTresor(innen.umfeldAntworten(), alle)
+	return f, innen.jsonSchreiben(fachAntworten, alle)
 }

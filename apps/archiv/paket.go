@@ -578,9 +578,9 @@ func empfaengerLesen(datei string) (*age.X25519Recipient, error) {
 	return age.ParseX25519Recipient(strings.TrimSpace(string(b)))
 }
 
-// identitaetLesen reads the private key (inside the open vault).
-func identitaetLesen(datei string) (*age.X25519Identity, error) {
-	b, err := os.ReadFile(datei)
+// identitaetAus reads the Briefkasten's private key from the open vault.
+func identitaetAus(innen Innen) (*age.X25519Identity, error) {
+	b, err := innen.lesen(fachIdentitaet)
 	if err != nil {
 		return nil, err
 	}

@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 func env(name, def string) string {
@@ -68,48 +70,56 @@ func main() {
 	eingang := &Eingang{Dir: eingangDir, Ruhe: sekunden("EINGANG_RUHE", time.Minute)}
 	empfaenger := filepath.Join(data, "briefkasten.pub")
 	schluessel := Schluessel{Dir: filepath.Join(data, "schluessel")}
-	tresor := &Tresor{
-		Cipher:     filepath.Join(data, "tresor"),
-		Mnt:        env("TRESOR_MOUNT", "/run/tresor"),
-		Port:       port,
-		Empfaenger: empfaenger,
-		Mounter:    &Gocryptfs{Bin: env("GOCRYPTFS", "gocryptfs"), Fusermount: env("FUSERMOUNT", "fusermount3"), Run: run},
-		Dienst:     &Msgvault{Bin: env("MSGVAULT", "msgvault"), Port: port},
-		Leerlauf:   sekunden("LEERLAUF", 2*time.Hour),
-	}
-	tresor.Einziehen = schluessel.SignalEinziehen
+	cipher := filepath.Join(data, "tresor")
+	vault := tresor.Neu(tresor.Konfig{
+		Cipher:         cipher,
+		Mnt:            env("TRESOR_MOUNT", "/run/tresor"),
+		Port:           port,
+		Empfaenger:     empfaenger,
+		Mounter:        &Gocryptfs{Bin: env("GOCRYPTFS", "gocryptfs"), Fusermount: env("FUSERMOUNT", "fusermount3"), Run: run},
+		Dienst:         &Msgvault{Bin: env("MSGVAULT", "msgvault"), Port: port},
+		Leerlauf:       sekunden("LEERLAUF", 2*time.Hour),
+		Sitzung:        sekunden("SITZUNG", tresor.SitzungStandard),
+		Schluessel:     sekunden("SCHLUESSEL", tresor.SchluesselStandard),
+		MsgvaultConfig: msgvaultConfig,
+	})
+	prog := neueProgramme(vault)
+	vault.Einziehen = func() error { return schluessel.SignalEinziehen(prog.Importe) }
 	takt := sekunden("IMPORT_TAKT", 20*time.Second)
 	bk := &Briefkasten{Eingang: eingang, Letzte: filepath.Join(eingangDir, "letzte"), Post: filepath.Join(data, "briefkasten"),
 		Empfaenger: empfaenger, Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Protokoll: prot, Takt: takt}
 	mh := &Mailholer{Post: bk.Post, Empfaenger: empfaenger, Gesehen: bk.Gesehen, Schluessel: schluessel, Protokoll: prot,
 		Takt: sekunden("MAIL_TAKT", time.Hour), Dokumente: DokumentenpostfachAus(person, os.Getenv)}
 	pb := &Postbote{Post: bk.Post, Eingang: eingang, Letzte: bk.Letzte, Schluessel: schluessel, Protokoll: prot, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
-		SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"), Takt: takt, Arbeit: tresor.Arbeit}
+		SignalBin: env("SIGNALBACKUP_TOOLS", "signalbackup-tools"), Takt: takt, Arbeit: vault.Arbeit}
 	rad, radErr := RadicaleAusUmgebung(person)
 	if radErr != nil {
 		log.Printf("archiv: Kontakte und Kalender aus: %v", radErr)
 	}
-	api := &MsgvaultAPI{Port: port, Key: tresor.APIKey}
-	aufr := &Aufraeumer{Schluessel: schluessel, Beleg: api, Takt: sekunden("AUFRAEUMEN_TAKT", time.Hour)}
-	ab := &Abgleich{Radicale: rad, Konfig: radErr, API: api, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
-		Takt: sekunden("KONTAKTE_TAKT", 3*time.Hour), Arbeit: tresor.Arbeit}
+	// msgvault for each program, with its own key
+	apiImporte := &MsgvaultAPI{Port: port, Key: prog.Importe.msgvaultSchluessel}
+	apiNachrichten := &MsgvaultAPI{Port: port, Key: prog.Nachrichten.msgvaultSchluessel}
+	apiStammbaum := &MsgvaultAPI{Port: port, Key: prog.Stammbaum.msgvaultSchluessel}
+	aufr := &Aufraeumer{Schluessel: schluessel, Beleg: apiImporte, Takt: sekunden("AUFRAEUMEN_TAKT", time.Hour)}
+	ab := &Abgleich{Radicale: rad, Konfig: radErr, API: apiImporte, Run: run, Msgvault: env("MSGVAULT", "msgvault"),
+		Takt: sekunden("KONTAKTE_TAKT", 3*time.Hour), Arbeit: vault.Arbeit}
 	if rad != nil {
 		relaisPort, _ := strconv.Atoi(env("KONTAKTE_RELAIS_PORT", "18443"))
 		ab.Relais = &Relais{Person: person, Port: relaisPort}
 	}
-	tresor.Vorbereiten = ab.Vorbereiten
-	um := &Umfeld{URL: immichURL(), Oeffentlich: immichOeffentlich(os.Getenv), Radicale: rad, Msgvault: api, Modell: modellAus(os.Getenv), Schluessel: schluessel, Takt: sekunden("UMFELD_TAKT", time.Hour)}
-	pb.SozialNeu = um.SozialNeu
+	vault.Vorbereiten = func() error { return ab.Vorbereiten(prog.Importe) }
+	um := &Umfeld{URL: immichURL(), Oeffentlich: immichOeffentlich(os.Getenv), Radicale: rad, Msgvault: apiStammbaum, Modell: modellAus(os.Getenv), Schluessel: schluessel, Takt: sekunden("UMFELD_TAKT", time.Hour)}
+	pb.SozialNeu = func(Innen) { um.SozialNeu(prog.Stammbaum) } // the net reads it with its own key
 	if os.Getenv("IMMICH_URL") != "" && um.URL == "" {
 		log.Printf("archiv: IMMICH_URL %q ist keine http(s)-Adresse: Umfeld aus", os.Getenv("IMMICH_URL"))
 	}
 	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HomesSecret: homesSecret(os.Getenv), HomesIntern: homesIntern(os.Getenv),
-		Tresor: tresor, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
-		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: api}, Umfeld: um, Aufraeumer: aufr,
+		Tresor: vault, P: prog, Freigaben: &Freigabenwahl{Datei: filepath.Join(data, "freigaben.json")}, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
+		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: apiNachrichten}, Umfeld: um, Aufraeumer: aufr,
 		Aufgaben: &Aufgaben{Datei: filepath.Join(data, "aufgaben.json")}}
 
 	status := func() {
-		st := tresor.Stand()
+		st := vault.Stand()
 		if st.Zustand == Verschlossen && !st.ZuSeit.IsZero() {
 			if _, _, zu := prot.Kopie(); zu == nil || !zu.Equal(st.ZuSeit) {
 				prot.Zu(st.ZuSeit)
@@ -119,21 +129,12 @@ func main() {
 		web.aufgabenZaehlen(st)
 		web.Puls.Senden()
 	}
-	tresor.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert, ab.Geaendert, um.Geaendert = status, status, status, status, status, status, status
+	vault.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert, ab.Geaendert, um.Geaendert = status, status, status, status, status, status, status
 	aufr.Geaendert = status
-	tresor.Lauf = func(ctx context.Context, innen Innen) { // the import, the Abgleich and the Umfeld, side by side, all ending with the vault
-		fertig, umfeldFertig := make(chan struct{}), make(chan struct{})
-		go func() { defer close(fertig); ab.Lauf(ctx, innen) }()
-		go func() { defer close(umfeldFertig); um.Lauf(ctx, innen) }()
-		aufrFertig := make(chan struct{}) // old mail at the provider: only while open, it needs msgvault's proof
-		go func() { defer close(aufrFertig); aufr.Lauf(ctx, innen) }()
-		pb.Lauf(ctx, innen)
-		<-fertig
-		<-umfeldFertig
-		<-aufrFertig
-	}
-	tresor.Erkennen()
-	if _, _, zu := prot.Kopie(); zu == nil && tresor.Stand().Zustand == Verschlossen {
+	// the import, the Abgleich, the Umfeld and old mail at the provider (it needs msgvault's proof)
+	vault.Lauf = laufen(lauf{prog.Importe, pb.Lauf}, lauf{prog.Importe, ab.Lauf}, lauf{prog.Stammbaum, um.Lauf}, lauf{prog.Importe, aufr.Lauf})
+	vault.Erkennen()
+	if _, _, zu := prot.Kopie(); zu == nil && vault.Stand().Zustand == Verschlossen {
 		prot.Zu(time.Now()) // closed since at least now: a restart closes it
 	}
 	if os.Getenv("PROXY_SECRET") == "" {
@@ -154,7 +155,7 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				tresor.Pruefen(ctx)
+				vault.Pruefen(ctx)
 				status()
 			}
 		}
@@ -163,7 +164,7 @@ func main() {
 	srv := &http.Server{Addr: env("LISTEN", ":8080"), Handler: web, ReadHeaderTimeout: 20 * time.Second}
 	srv.RegisterOnShutdown(web.Puls.Schluss) // live pages end their stream at once
 	go func() {
-		log.Printf("archiv für %s hört auf %s (Tresor %s, Zustand %s)", person, srv.Addr, tresor.Cipher, tresor.Stand().Zustand)
+		log.Printf("archiv für %s hört auf %s (Tresor %s, Zustand %s)", person, srv.Addr, cipher, vault.Stand().Zustand)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal(err)
 		}
@@ -173,7 +174,7 @@ func main() {
 	ende, fertig := context.WithTimeout(context.Background(), 60*time.Second)
 	defer fertig()
 	srv.Shutdown(ende)
-	if err := tresor.Abschliessen(ende, "Container hält an"); err != nil {
+	if err := vault.Abschliessen(ende, "Container hält an"); err != nil {
 		log.Printf("archiv: abschließen beim Anhalten: %v", err)
 	}
 	status()

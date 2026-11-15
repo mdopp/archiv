@@ -104,7 +104,7 @@ func TestAngelegtDieselbe(t *testing.T) {
 			t.Fatal(err)
 		}
 		tab.Kontakte = append(tab.Kontakte, netzKontakt{Key: "privat/w", Name: "Wilma Wolf"})
-		if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+		if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 			t.Fatal(err)
 		}
 		ut.u.laden(innen)

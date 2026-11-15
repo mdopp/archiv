@@ -10,10 +10,11 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // The pages, German and phone first, as Homes and Gesundheit: every
@@ -39,27 +40,28 @@ import (
 const proxyHeader = "X-Archiv-Proxy" // the header laib renders for the route's proxySecret
 
 const (
-	saysNichtAngemeldet = "Diese Seite gibt es nur nach der Anmeldung über die Startseite des Hauses."
-	saysNichtDeins      = "Dieses Archiv gehört jemand anderem. Dein eigenes erreichst du über die Startseite des Hauses."
-	saysAbgeschlossen   = "Das Archiv ist abgeschlossen. Die Person, der es gehört, muss es erst mit ihrem Archiv-Passwort öffnen."
-	saysStartet         = "Das Archiv startet gerade. Versuch es in einer Minute noch einmal."
-	saysPasswortFalsch  = "Das Archiv-Passwort stimmt nicht. Versuch es noch einmal."
-	saysPasswortKurz    = "Das Archiv-Passwort braucht mindestens 10 Zeichen."
-	saysPasswortAnders  = "Die beiden Passwörter sind verschieden. Gib es zweimal gleich ein."
-	saysSchonAngelegt   = "Der Tresor ist schon angelegt."
-	saysAnlegenFehler   = "Der Tresor ließ sich nicht anlegen. Sag dem Admin Bescheid."
-	saysOeffnenFehler   = "Das Archiv ließ sich nicht öffnen. Sag dem Admin Bescheid."
-	saysSchliessenFehl  = "Das Archiv ließ sich nicht abschließen. Versuch es noch einmal; hilft das nicht, sag dem Admin Bescheid."
-	saysSpeichernFehler = "Das ließ sich auf der Box nicht speichern. Sag dem Admin Bescheid."
-	saysFremdeSeite     = "Diese Anfrage kam von einer fremden Seite und wurde nicht ausgeführt."
-	saysArchivWeg       = "Das Archiv-Programm antwortet gerade nicht. Lade die Seite gleich neu."
-	saysVerloren        = "Wenn du das Archiv-Passwort verlierst, ist dein Archiv verloren. Niemand kann es wiederherstellen, auch der Admin nicht. Leg es deshalb gleich in Vaultwarden ab."
-	saysWAFormat        = "Der WhatsApp-Schlüssel hat 64 Zeichen, Ziffern und die Buchstaben a bis f. Leerzeichen dürfen dazwischen stehen."
-	saysAdminLiest      = "Solange dein Archiv offen ist, kann der Admin der Box es lesen. Abgeschlossen sieht niemand etwas, auch nicht in den Sicherungen der Box."
-	saysMailPreis       = "Dafür liegt das App-Passwort auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit deine Mails lesen. Du kannst das App-Passwort bei deinem Anbieter jederzeit widerrufen; dann holt das Archiv nichts mehr ab."
-	saysSignalHinweis   = "Signal-Sicherungen liest das Archiv, während es offen ist; bis dahin warten sie verschlüsselt im Eingang. Deine Signal-Passphrase liegt im Tresor: Ist das Archiv abgeschlossen, kann sie niemand lesen, auch der Admin nicht."
-	saysVomHandy        = "Die Homes-App verschlüsselt deine Sicherung schon auf dem Handy für dein Archiv; Homes reicht sie nur weiter und kann sie nicht lesen."
-	saysSignalZu        = "Die Signal-Passphrase trägst du bei offenem Archiv ein. Sie liegt im Tresor; deshalb liest das Archiv Signal nur, wenn es offen ist."
+	saysNichtAngemeldet     = "Diese Seite gibt es nur nach der Anmeldung über die Startseite des Hauses."
+	saysNichtDeins          = "Dieses Archiv gehört jemand anderem. Dein eigenes erreichst du über die Startseite des Hauses."
+	saysAbgeschlossen       = "Das Archiv ist abgeschlossen. Die Person, der es gehört, muss es erst mit ihrem Archiv-Passwort öffnen."
+	saysStartet             = "Das Archiv startet gerade. Versuch es in einer Minute noch einmal."
+	saysPasswortFalsch      = "Das Archiv-Passwort stimmt nicht. Versuch es noch einmal."
+	saysPasswortKurz        = "Das Archiv-Passwort braucht mindestens 10 Zeichen."
+	saysPasswortAnders      = "Die beiden Passwörter sind verschieden. Gib es zweimal gleich ein."
+	saysSchonAngelegt       = "Der Tresor ist schon angelegt."
+	saysAnlegenFehler       = "Der Tresor ließ sich nicht anlegen. Sag dem Admin Bescheid."
+	saysOeffnenFehler       = "Das Archiv ließ sich nicht öffnen. Sag dem Admin Bescheid."
+	saysSchliessenFehl      = "Das Archiv ließ sich nicht abschließen. Versuch es noch einmal; hilft das nicht, sag dem Admin Bescheid."
+	saysSpeichernFehler     = "Das ließ sich auf der Box nicht speichern. Sag dem Admin Bescheid."
+	saysFremdeSeite         = "Diese Anfrage kam von einer fremden Seite und wurde nicht ausgeführt."
+	saysArchivWeg           = "Das Archiv-Programm antwortet gerade nicht. Lade die Seite gleich neu."
+	saysVerloren            = "Wenn du das Archiv-Passwort verlierst, ist dein Archiv verloren. Niemand kann es wiederherstellen, auch der Admin nicht. Leg es deshalb gleich in Vaultwarden ab."
+	saysWAFormat            = "Der WhatsApp-Schlüssel hat 64 Zeichen, Ziffern und die Buchstaben a bis f. Leerzeichen dürfen dazwischen stehen."
+	saysAdminLiest          = "Solange dein Archiv offen ist, kann der Admin der Box es lesen. Abgeschlossen sieht niemand etwas, auch nicht in den Sicherungen der Box."
+	saysMailPreis           = "Dafür liegt das App-Passwort auf der Box, außerhalb des Tresors. Wer Root auf der Box hat, kann damit deine Mails lesen. Du kannst das App-Passwort bei deinem Anbieter jederzeit widerrufen; dann holt das Archiv nichts mehr ab."
+	saysSignalHinweis       = "Signal-Sicherungen liest das Archiv, während es offen ist; bis dahin warten sie verschlüsselt im Eingang. Deine Signal-Passphrase liegt im Tresor: Ist das Archiv abgeschlossen, kann sie niemand lesen, auch der Admin nicht."
+	saysVomHandy            = "Die Homes-App verschlüsselt deine Sicherung schon auf dem Handy für dein Archiv; Homes reicht sie nur weiter und kann sie nicht lesen."
+	saysSchluesselUngueltig = "Dieser Schlüssel gilt nicht, oder nicht mehr: Ein Schlüssel des Archivs gilt nur in der Sitzung, in der die Person ihn erlaubt hat."
+	saysSignalZu            = "Die Signal-Passphrase trägst du bei offenem Archiv ein. Sie liegt im Tresor; deshalb liest das Archiv Signal nur, wenn es offen ist."
 )
 
 var meldungen = map[string]string{
@@ -103,6 +105,8 @@ type Web struct {
 	Secret      string
 	PublicURL   string
 	Tresor      *Tresor
+	P           Programme      // the programs' ways into the vault (programme.go): a page reaches it only through one
+	Freigaben   *Freigabenwahl // what the person grants at the opening
 	Briefkasten *Briefkasten
 	Mailholer   *Mailholer
 	Aufraeumer  *Aufraeumer // old mail deleted at the provider, on the person's word (aufraeumen.go)
@@ -246,7 +250,16 @@ func (w *Web) archivOderTuer(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st := w.Tresor.Stand()
-	if key := w.Tresor.APIKey(); key != "" {
+	pfad := r.URL.Path
+	if pfad == msgvaultEingang {
+		pfad = "/"
+	}
+	key, err := w.P.Nachrichten.msgvaultSchluessel(msgvaultRecht(r.Method, pfad), pfad)
+	if errors.Is(err, tresor.ErrNichtFreigegeben) {
+		seite(rw, http.StatusForbidden, "Nicht freigegeben", "<p>"+saysNichtFreigegeben+`</p><p><a href="/tresor">Zum Archiv</a></p>`, "")
+		return
+	}
+	if err == nil {
 		r = r.WithContext(context.WithValue(r.Context(), schluesselKontext{}, key))
 		if r.URL.Path == msgvaultEingang {
 			r.URL.Path, r.URL.RawPath = "/", ""
@@ -269,22 +282,35 @@ func (w *Web) archivOderTuer(rw http.ResponseWriter, r *http.Request) {
 	seite(rw, http.StatusLocked, "Archiv abgeschlossen", "<p>"+saysAbgeschlossen+`</p><p><a href="/tresor">Archiv öffnen</a></p>`, "")
 }
 
-// agent: a bearer goes to msgvault unchanged (msgvault checks the key)
-// while open; else 423 with the sentence, as JSON.
+// agent: a bearer is a program's key from the vault (archiv ADR 0001):
+// while open, a live key with Nachrichten for what the request does goes
+// to msgvault with msgvault's own key added by the vault; msgvault's key
+// itself never leaves it. Closed: 423; an unknown or void key: 401; an
+// area not granted: 403. Every request is in the vault's protocol.
 func (w *Web) agent(rw http.ResponseWriter, r *http.Request) {
 	st := w.Tresor.Stand()
 	if st.Zustand != Offen {
 		jsonFehler(rw, http.StatusLocked, saysAbgeschlossen)
 		return
 	}
-	if w.Tresor.APIKey() == "" {
+	z, err := w.Tresor.Vorgezeigt(strings.TrimSpace(r.Header.Get("Authorization")[len("Bearer "):]))
+	if err != nil {
+		jsonFehler(rw, http.StatusUnauthorized, saysSchluesselUngueltig)
+		return
+	}
+	key, err := z.MsgvaultSchluessel(msgvaultRecht(r.Method, r.URL.Path), r.URL.Path)
+	switch {
+	case errors.Is(err, tresor.ErrNichtFreigegeben):
+		jsonFehler(rw, http.StatusForbidden, saysNichtFreigegeben)
+		return
+	case err != nil:
 		jsonFehler(rw, http.StatusServiceUnavailable, saysStartet)
 		return
 	}
 	if zaehltAlsNutzung(r) {
 		w.Tresor.Aktiv()
 	}
-	w.Archiv.ServeHTTP(rw, r)
+	w.Archiv.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), schluesselKontext{}, key)))
 }
 
 func jsonFehler(rw http.ResponseWriter, code int, satz string) {
@@ -304,6 +330,7 @@ func (w *Web) seiten() *http.ServeMux {
 	})
 	mux.HandleFunc("GET /tresor/suche", w.suche)
 	mux.HandleFunc("GET /tresor/stand", w.stand)
+	mux.HandleFunc("GET "+freigabenPfad, w.freigabenSeite)
 	mux.HandleFunc("GET /tresor/live", w.live)
 	mux.HandleFunc("POST /tresor/anlegen", w.anlegen)
 	mux.HandleFunc("POST /tresor/oeffnen", w.oeffnen)
@@ -362,7 +389,7 @@ func (w *Web) fehlenSignalSchluessel() bool {
 		return false
 	}
 	_, t := w.Schluessel.Hinterlegt(SchluesselTelefon)
-	if innen, auf := w.Tresor.Innen(); auf {
+	if innen, auf := w.P.Importe.offen(); auf {
 		if _, p := signalHinterlegt(innen); !p {
 			return true
 		}
@@ -371,13 +398,7 @@ func (w *Web) fehlenSignalSchluessel() bool {
 }
 
 // signalHinterlegt says when the passphrase was stored in the open vault.
-func signalHinterlegt(innen Innen) (time.Time, bool) {
-	fi, err := os.Stat(innen.SignalPassphrase())
-	if err != nil || fi.Size() == 0 {
-		return time.Time{}, false
-	}
-	return fi.ModTime(), true
-}
+func signalHinterlegt(innen Innen) (time.Time, bool) { return innen.seit(fachSignalPassphrase) }
 
 // packt names what becomes a packet now: the mail.
 func (w *Web) packt() string {
@@ -414,7 +435,7 @@ func (w *Web) anlegen(rw http.ResponseWriter, r *http.Request) {
 		w.antwort(rw, r, http.StatusBadRequest, "", saysPasswortAnders)
 		return
 	}
-	err := w.Tresor.Anlegen(r.Context(), pw1)
+	err := w.Tresor.Anlegen(r.Context(), pw1, w.Freigaben.Letzte())
 	switch {
 	case err == nil:
 		http.Redirect(rw, r, "/tresor?m=angelegt", http.StatusSeeOther)
@@ -434,7 +455,7 @@ func (w *Web) oeffnen(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	warZu := w.Tresor.Stand().Zustand == Verschlossen
-	err := w.Tresor.Oeffnen(r.Context(), pw)
+	err := w.Tresor.Oeffnen(r.Context(), pw, w.Freigaben.ausFormular(r))
 	switch {
 	case err == nil && warZu && r.PostFormValue("pk_id") != "":
 		// the password opened a closed vault: it is the right one to keep for the passkey
@@ -464,7 +485,7 @@ func (w *Web) abschliessen(rw http.ResponseWriter, r *http.Request) {
 // offenesFach is the key folder (outside the vault), but only while the
 // vault is open: that is how only the person can set a key.
 func (w *Web) offenesFach(rw http.ResponseWriter, r *http.Request) (Schluessel, bool) {
-	if _, ok := w.Tresor.Innen(); !ok {
+	if w.Tresor.Stand().Zustand != Offen {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return Schluessel{}, false
 	}
@@ -478,7 +499,7 @@ func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Importe.offen()
 	if !auf {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
@@ -505,7 +526,7 @@ func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if p != nil {
-		err = schreibenAtomar(innen.SignalPassphrase(), p, 0o600)
+		err = innen.schreiben(fachSignalPassphrase, p)
 	}
 	if err == nil && t != "" {
 		err = sch.Speichern(SchluesselTelefon, []byte(t))
@@ -526,7 +547,7 @@ func (w *Web) signal(rw http.ResponseWriter, r *http.Request) {
 // WhatsApp's database holds the whole history every day, so it can wait
 // for the opening, and the key then is never readable on a closed box.
 func (w *Web) whatsapp(rw http.ResponseWriter, r *http.Request) {
-	innen, ok := w.Tresor.Innen()
+	innen, ok := w.P.Importe.offen()
 	if !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return
@@ -537,7 +558,7 @@ func (w *Web) whatsapp(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer nullen(k)
-	if err := os.WriteFile(innen.WhatsAppSchluessel(), k, 0o600); err != nil {
+	if err := innen.schreiben(fachWhatsAppSchluessel, k); err != nil {
 		log.Printf("archiv: WhatsApp-Schlüssel speichern: %v", err)
 		w.antwort(rw, r, http.StatusInternalServerError, "", saysSpeichernFehler)
 		return
@@ -598,6 +619,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 		b.WriteString(oben("Dein Archiv", ""))
 		meldungenText(&b, meldung, fehler)
 		b.WriteString(`<section class=karte><h2>Abgeschlossen</h2><div class=flaeche>`)
+		w.freigabenWahl(&b)
 		if len(w.Passkeys.Liste()) > 0 {
 			b.WriteString(`<form method=post action="/tresor/oeffnen-passkey" id=mit-passkey hidden><input type=hidden name=id><input type=hidden name=prf>` + knopf("Mit Passkey öffnen", "Öffne das Archiv …", "voll") + `</form><p class=k id=oder-passwort hidden>oder mit dem Archiv-Passwort:</p>`)
 		}
@@ -636,6 +658,7 @@ func (w *Web) tresorSeite(rw http.ResponseWriter, r *http.Request, code int, mel
 			w.pflegeZeile(&b)
 		}
 		w.quellenZeile(&b, true)
+		freigabenZeile(&b)
 		// what the page must say about the open vault, after the work (owner 2026-11-11: the work first)
 		b.WriteString(`<p class="ruhig klein" id=schliesst data-live>`)
 		if !st.ZuUm.IsZero() {
@@ -789,7 +812,7 @@ func (w *Web) imAchiv(b *strings.Builder, quelle, eins, mehr string) {
 
 func (w *Web) signalKarte(b *strings.Builder, offen bool, qa quelleAuf) {
 	sch := w.Schluessel
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Importe.offen()
 	pt, pOK := time.Time{}, false
 	if auf {
 		pt, pOK = signalHinterlegt(innen)
@@ -974,10 +997,10 @@ func (w *Web) kontakteKarte(b *strings.Builder, offen bool, qa quelleAuf) {
 }
 
 func (w *Web) whatsappKarte(b *strings.Builder, qa quelleAuf) {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Importe.offen()
 	hat, am := false, time.Time{}
-	if fi, err := os.Stat(innen.WhatsAppSchluessel()); auf && err == nil {
-		hat, am = true, fi.ModTime()
+	if auf {
+		am, hat = innen.seit(fachWhatsAppSchluessel)
 	}
 	quelleKopf(b, qa, "whatsapp", "WhatsApp", fehltZeile(w.letzteZeile("whatsapp", "neue Nachricht", "neue Nachrichten"), auf && !hat, "Schlüssel fehlt"))
 	w.imAchiv(b, "whatsapp", "neue Nachricht", "neue Nachrichten")
@@ -1104,7 +1127,7 @@ return navigator.credentials.get({publicKey:{rpId:o.rpId,challenge:ab(o.challeng
 var mp=document.getElementById('mit-passkey');
 if(mp)mp.addEventListener('submit',function(e){if(mp.dataset.fertig)return;e.preventDefault();e.stopImmediatePropagation();
 optionen().then(function(o){var by={};o.credentials.forEach(function(c){by[c.id]={first:ab(c.salt)}});
-return navigator.credentials.get({publicKey:{rpId:o.rpId,challenge:ab(o.challenge),allowCredentials:o.credentials.map(function(c){return {type:'public-key',id:ab(c.id)}}),userVerification:'required',extensions:{prf:{evalByCredential:by}}}})}).then(function(a){var r=a.getClientExtensionResults().prf;if(!r||!r.results||!r.results.first)throw 0;mp.elements.namedItem('id').value=a.id;mp.elements.namedItem('prf').value=b64(r.results.first);mp.dataset.fertig=1;mp.submit()}).catch(function(){sag(mp,'Das hat nicht geklappt. Öffne das Archiv mit deinem Archiv-Passwort.')})});
+return navigator.credentials.get({publicKey:{rpId:o.rpId,challenge:ab(o.challenge),allowCredentials:o.credentials.map(function(c){return {type:'public-key',id:ab(c.id)}}),userVerification:'required',extensions:{prf:{evalByCredential:by}}}})}).then(function(a){var r=a.getClientExtensionResults().prf;if(!r||!r.results||!r.results.first)throw 0;mp.elements.namedItem('id').value=a.id;mp.elements.namedItem('prf').value=b64(r.results.first);[].forEach.call(document.querySelectorAll('[form=mit-passwort]'),function(i){if(i.type==='checkbox'&&!i.checked)return;var h=document.createElement('input');h.type='hidden';h.name=i.name;h.value=i.value;mp.appendChild(h)});mp.dataset.fertig=1;mp.submit()}).catch(function(){sag(mp,'Das hat nicht geklappt. Öffne das Archiv mit deinem Archiv-Passwort.')})});
 });
 document.addEventListener('DOMContentLoaded',function(){
 if(!window.EventSource||!window.fetch||!window.DOMParser)return;

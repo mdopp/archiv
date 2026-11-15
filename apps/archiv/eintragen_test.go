@@ -72,7 +72,7 @@ func eintragenBox(t *testing.T) (*webTest, *umfeldTest, *fakeHomes, Innen) {
 	wt.oeffnen(t)
 	innen, _ := wt.tt.Innen()
 	for _, d := range []string{"umfeld", "kontakte"} {
-		os.MkdirAll(filepath.Join(innen.Wurzel, d), 0o700)
+		os.MkdirAll(filepath.Join(innen.wurzel(), d), 0o700)
 	}
 	for _, p := range [][2]string{{ut.innen.umfeldTabelle(), innen.umfeldTabelle()}, {kontakteDatei(ut.innen), kontakteDatei(innen)}, {ut.innen.ImmichSchluessel(), innen.ImmichSchluessel()}} {
 		b, _ := os.ReadFile(p[0])
@@ -379,10 +379,10 @@ func TestArbeitsplatz(t *testing.T) {
 // messages too. The contact match of a re-keyed card does the same.
 func TestJuergenIstJuergen(t *testing.T) {
 	wt, _, _, innen := eintragenBox(t)
-	k, _ := kontakteLaden(kontakteDatei(innen))
+	k, _ := kontakteLaden(innen)
 	k.Einmischen([]QuellKarte{{Href: "j1.vcf", Daten: karteMit("j1", "Juergen Burger", "TEL:+4915112345678\r\n")},
 		{Href: "j2.vcf", Daten: karteMit("j2", "Jürgen Weiß", "TEL:+4915187654321\r\n")}}, time.Now())
-	if err := k.speichern(kontakteDatei(innen)); err != nil {
+	if err := k.speichern(innen); err != nil {
 		t.Fatal(err)
 	}
 	for q, want := range map[string][]string{
@@ -417,7 +417,7 @@ func TestKetteEinTipp(t *testing.T) {
 			{Key: "haushalt/s", Name: "Silke Kranz"}, {Key: "privat/l", Name: "Lena Kranz"}},
 		Fest: []festBand{{A: "haushalt/u", B: "haushalt/s", Art: bandBeziehung, Wie: beziehungsWort("Ehefrau")}, {A: "haushalt/u", B: "privat/l", Art: bandBeziehung, Wie: beziehungsWort("Tochter")},
 			{A: "haushalt/h", B: "haushalt/u", Art: bandAdresse}}}
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)

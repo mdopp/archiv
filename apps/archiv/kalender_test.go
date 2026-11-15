@@ -92,11 +92,11 @@ func TestCalendarStoreOnlyGrows(t *testing.T) {
 }
 
 func TestCalendarFileRoundTripAndNames(t *testing.T) {
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	k := neueAblage()
 	k.Anzeige = "Arbeit"
 	k.Einmischen([]byte(ics(vevent("a", "", "A", "x"))), t0)
-	if err := k.speichern(kalenderDatei(innen, k.Name)); err != nil {
+	if err := k.speichern(innen, kalenderDatei(k.Name)); err != nil {
 		t.Fatal(err)
 	}
 	zahlen, err := kalenderZahlen(innen)

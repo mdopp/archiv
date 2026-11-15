@@ -1,11 +1,10 @@
-package main
+package tresor
 
 import (
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -15,62 +14,52 @@ func TestAnlegenOpensAndFurnishesTheVault(t *testing.T) {
 	if tt.Stand().Zustand != Uneingerichtet {
 		t.Fatalf("fresh: %v", tt.Stand().Zustand)
 	}
-	if err := tt.Oeffnen(context.Background(), []byte("irgendwas-langes")); !errors.Is(err, ErrZustand) {
+	if err := tt.Oeffnen(context.Background(), []byte("irgendwas-langes"), nil); !errors.Is(err, ErrZustand) {
 		t.Fatalf("open before anlegen: %v", err)
 	}
-	if err := tt.Anlegen(context.Background(), []byte("richtig-langes-pw")); err != nil {
-		t.Fatal(err)
-	}
-	tt.bereit(t)
-	innen := <-tt.lauf
-	if innen.Wurzel != tt.Mnt || tt.Stand().Zustand != Offen {
-		t.Fatalf("after anlegen: %+v %v", innen, tt.Stand())
-	}
-	key, err := os.ReadFile(innen.APIKey())
+	tt.offen(t, alles("p"))
+	key, err := os.ReadFile(filepath.Join(tt.mnt, "msgvault", "api-key"))
 	if err != nil || len(key) != 64 {
 		t.Fatalf("api key: %q %v", key, err)
 	}
-	if fi, _ := os.Stat(innen.APIKey()); fi.Mode().Perm() != 0o600 {
+	if fi, _ := os.Stat(filepath.Join(tt.mnt, "msgvault", "api-key")); fi.Mode().Perm() != 0o600 {
 		t.Fatalf("api key mode %v (msgvault refuses anything but owner-only)", fi.Mode())
 	}
-	if tt.APIKey() != string(key) {
-		t.Fatalf("the proxy's key %q is not the file's", tt.APIKey())
+	z, _ := tt.Schluessel("p")
+	if got, _ := z.MsgvaultSchluessel(Lesen, "/api/v1/stats"); got != string(key) {
+		t.Fatalf("the key a program gets %q is not the file's", got)
 	}
-	cfg, _ := os.ReadFile(filepath.Join(innen.Home(), "config.toml"))
-	for _, want := range []string{`bind_addr = "127.0.0.1"`, "api_port = 18890", `api_key_file = "api-key"`, "daemon_auto_start = false", "[telemetry]\nenabled = false"} {
-		if !strings.Contains(string(cfg), want) {
-			t.Fatalf("config.toml lacks %q:\n%s", want, cfg)
-		}
+	if cfg, _ := os.ReadFile(filepath.Join(tt.mnt, "msgvault", "config.toml")); string(cfg) != "port = 18890\n" {
+		t.Fatalf("config.toml: %q", cfg)
 	}
-	if tt.dienst.home != innen.Home() {
-		t.Fatalf("msgvault home %q, want inside the vault %q", tt.dienst.home, innen.Home())
+	if tt.dienst.home != filepath.Join(tt.mnt, "msgvault") {
+		t.Fatalf("msgvault home %q, want inside the vault", tt.dienst.home)
 	}
-	if err := tt.Anlegen(context.Background(), []byte("richtig-langes-pw")); !errors.Is(err, ErrZustand) {
+	if _, err := os.Stat(filepath.Join(tt.mnt, "age-identitaet")); err != nil {
+		t.Fatalf("no key pair: %v", err)
+	}
+	if err := tt.Anlegen(context.Background(), []byte(pw), nil); !errors.Is(err, ErrZustand) {
 		t.Fatalf("second anlegen: %v", err)
 	}
 }
 
-func TestAbschliessenStopsTheImportThenMsgvaultThenUnmounts(t *testing.T) {
+func TestAbschliessenStopsTheProgramsThenMsgvaultThenUnmounts(t *testing.T) {
 	tt := neuerTresor(t)
-	if err := tt.Anlegen(context.Background(), []byte("richtig-langes-pw")); err != nil {
-		t.Fatal(err)
-	}
-	tt.bereit(t)
-	<-tt.lauf
+	tt.offen(t, alles("p"))
 	if err := tt.Abschliessen(context.Background(), "test"); err != nil {
 		t.Fatal(err)
 	}
-	if got := tt.ereignisse(); got != "init,mount,start,lauf-ende,stop,unmount" {
+	if got := tt.ereignis.String(); got != "init,mount,start,lauf-ende,stop,unmount" {
 		t.Fatalf("order: %s", got)
 	}
 	st := tt.Stand()
-	if st.Zustand != Verschlossen || st.Bereit || tt.APIKey() != "" || st.ZuSeit.IsZero() {
-		t.Fatalf("after close: %+v key %q", st, tt.APIKey())
+	if st.Zustand != Verschlossen || st.Bereit || st.ZuSeit.IsZero() {
+		t.Fatalf("after close: %+v", st)
 	}
-	if _, ok := tt.Innen(); ok {
-		t.Fatal("Innen says open after close")
+	if _, ok := tt.Sitzung(); ok {
+		t.Fatal("a session after close")
 	}
-	if e, _ := os.ReadDir(tt.Mnt); len(e) != 0 {
+	if e, _ := os.ReadDir(tt.mnt); len(e) != 0 {
 		t.Fatalf("the mount point still shows %d entries", len(e))
 	}
 	if err := tt.Abschliessen(context.Background(), "nochmal"); err != nil {
@@ -80,35 +69,32 @@ func TestAbschliessenStopsTheImportThenMsgvaultThenUnmounts(t *testing.T) {
 
 func TestOeffnenWithTheWrongPasswordStaysClosed(t *testing.T) {
 	tt := neuerTresor(t)
-	tt.Anlegen(context.Background(), []byte("richtig-langes-pw"))
-	tt.bereit(t)
-	<-tt.lauf
-	key := tt.APIKey()
+	tt.offen(t, alles("p"))
+	key, _ := os.ReadFile(filepath.Join(tt.mnt, "msgvault", "api-key"))
 	tt.Abschliessen(context.Background(), "test")
-
-	if err := tt.Oeffnen(context.Background(), []byte("falsch-falsch-falsch")); !errors.Is(err, ErrFalschesPasswort) {
+	if err := tt.Oeffnen(context.Background(), []byte("falsch-falsch-falsch"), alles("p")); !errors.Is(err, ErrFalschesPasswort) {
 		t.Fatalf("wrong password: %v", err)
 	}
 	if tt.Stand().Zustand != Verschlossen {
 		t.Fatalf("after a wrong password: %v", tt.Stand().Zustand)
 	}
-	if err := tt.Oeffnen(context.Background(), []byte("richtig-langes-pw")); err != nil {
+	if _, err := tt.Schluessel("p"); !errors.Is(err, ErrAbgeschlossen) {
+		t.Fatalf("a key after a wrong password: %v", err)
+	}
+	if err := tt.Oeffnen(context.Background(), []byte(pw), alles("p")); err != nil {
 		t.Fatal(err)
 	}
 	tt.bereit(t)
-	<-tt.lauf
-	if tt.APIKey() != key {
-		t.Fatal("reopening made a new API key: agents would lose access")
+	if again, _ := os.ReadFile(filepath.Join(tt.mnt, "msgvault", "api-key")); string(again) != string(key) {
+		t.Fatal("reopening made a new msgvault key")
 	}
 }
 
 func TestErkennenFindsAnExistingVaultClosed(t *testing.T) {
 	tt := neuerTresor(t)
-	tt.Anlegen(context.Background(), []byte("richtig-langes-pw"))
-	tt.bereit(t)
-	<-tt.lauf
+	tt.offen(t, alles("p"))
 	tt.Abschliessen(context.Background(), "test")
-	again := &Tresor{Cipher: tt.Cipher, Mnt: tt.Mnt}
+	again := Neu(Konfig{Cipher: filepath.Join(tt.dir, "tresor"), Mnt: tt.mnt})
 	again.Erkennen()
 	if again.Stand().Zustand != Verschlossen {
 		t.Fatalf("restart: %v", again.Stand().Zustand)
@@ -117,23 +103,19 @@ func TestErkennenFindsAnExistingVaultClosed(t *testing.T) {
 
 func TestIdleCloseAfterLeerlaufButNotDuringAnImport(t *testing.T) {
 	tt := neuerTresor(t)
-	tt.Anlegen(context.Background(), []byte("richtig-langes-pw"))
-	tt.bereit(t)
-	<-tt.lauf
-
+	tt.offen(t, alles("p"))
 	tt.uhr.vor(119 * time.Minute)
 	tt.Pruefen(context.Background())
 	if tt.Stand().Zustand != Offen {
 		t.Fatal("closed before two hours")
 	}
-	tt.Aktiv() // a use starts the clock again
+	tt.Aktiv()
 	tt.uhr.vor(119 * time.Minute)
 	tt.Pruefen(context.Background())
 	if tt.Stand().Zustand != Offen {
 		t.Fatal("a use did not keep it open")
 	}
-
-	fertig := tt.Arbeit() // an import runs
+	fertig := tt.Arbeit()
 	tt.uhr.vor(5 * time.Hour)
 	tt.Pruefen(context.Background())
 	if tt.Stand().Zustand != Offen {
@@ -149,15 +131,12 @@ func TestIdleCloseAfterLeerlaufButNotDuringAnImport(t *testing.T) {
 
 func TestOpeningDeletesPlaintextLeftByACrash(t *testing.T) {
 	tt := neuerTresor(t)
-	tt.Anlegen(context.Background(), []byte("richtig-langes-pw"))
-	tt.bereit(t)
-	innen := <-tt.lauf
-	rest := filepath.Join(innen.Arbeit(), "signal-abc.xml")
+	tt.offen(t, alles("p"))
+	rest := filepath.Join(tt.mnt, "arbeit", "signal-abc.xml")
 	os.WriteFile(rest, []byte("<smses>klartext</smses>"), 0o600)
 	tt.Abschliessen(context.Background(), "test")
-	tt.Oeffnen(context.Background(), []byte("richtig-langes-pw"))
+	tt.Oeffnen(context.Background(), []byte(pw), nil)
 	tt.bereit(t)
-	<-tt.lauf
 	if _, err := os.Stat(rest); !os.IsNotExist(err) {
 		t.Fatalf("a leftover plaintext export survived the reopening: %v", err)
 	}
@@ -166,13 +145,15 @@ func TestOpeningDeletesPlaintextLeftByACrash(t *testing.T) {
 func TestMsgvaultThatDoesNotStartIsSaidAndTheVaultCanStillClose(t *testing.T) {
 	tt := neuerTresor(t)
 	tt.dienst.startErr = errors.New("kaputt")
-	tt.Anlegen(context.Background(), []byte("richtig-langes-pw"))
+	tt.Anlegen(context.Background(), []byte(pw), alles("p"))
 	bis := time.Now().Add(2 * time.Second)
 	for tt.Stand().Fehler == "" && time.Now().Before(bis) {
 		time.Sleep(5 * time.Millisecond)
 	}
-	if st := tt.Stand(); st.Fehler == "" || st.Bereit || tt.APIKey() != "" {
-		t.Fatalf("a failed start: %+v", st)
+	st := tt.Stand()
+	z, _ := tt.Schluessel("p")
+	if k, err := z.MsgvaultSchluessel(Lesen, "/"); st.Fehler == "" || st.Bereit || k != "" || err == nil {
+		t.Fatalf("a failed start: %+v, key %q", st, k)
 	}
 	if err := tt.Abschliessen(context.Background(), "test"); err != nil || tt.Stand().Zustand != Verschlossen {
 		t.Fatalf("close after a failed start: %v %v", err, tt.Stand().Zustand)

@@ -22,10 +22,13 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // The relay between msgvault and the archive's contact store (relais =
@@ -105,14 +108,18 @@ func (r *Relais) Vorbereiten(innen Innen) error {
 	if len(buendel) > 0 && !bytes.HasSuffix(buendel, []byte("\n")) {
 		buendel = append(buendel, '\n')
 	}
-	if err := schreibenAtomar(innen.KontakteCA(), append(buendel, caPEM...), 0o644); err != nil {
-		return err
-	}
-	pw, err := relaisPasswort(innen.KontakteRelais())
+	home, err := innen.ordner(tresor.Nachrichten, ordnerMsgvault)
 	if err != nil {
 		return err
 	}
-	if err := vertrauenSetzen(innen.Home()+"/config.toml", r.origin(), addr.String()); err != nil {
+	if err := schreibenAtomar(filepath.Join(home, kontakteCAName), append(buendel, caPEM...), 0o644); err != nil {
+		return err
+	}
+	pw, err := relaisPasswort(innen)
+	if err != nil {
+		return err
+	}
+	if err := vertrauenSetzen(filepath.Join(home, "config.toml"), r.origin(), addr.String()); err != nil {
 		return fmt.Errorf("msgvault-Konfiguration: %w", err)
 	}
 	r.mu.Lock()
@@ -263,8 +270,8 @@ func relaisZertifikat(jetzt time.Time) (tls.Certificate, []byte, error) {
 }
 
 // relaisPasswort loads the relay's password from the vault, or makes it.
-func relaisPasswort(datei string) ([]byte, error) {
-	if b, err := os.ReadFile(datei); err == nil && len(trimNL(b)) >= 32 {
+func relaisPasswort(innen Innen) ([]byte, error) {
+	if b, err := innen.lesen(fachKontakteRelais); err == nil && len(trimNL(b)) >= 32 {
 		return trimNL(b), nil
 	}
 	roh := make([]byte, 32)
@@ -272,7 +279,7 @@ func relaisPasswort(datei string) ([]byte, error) {
 		return nil, err
 	}
 	pw := []byte(hex.EncodeToString(roh))
-	if err := schreibenAtomar(datei, pw, 0o600); err != nil {
+	if err := innen.schreiben(fachKontakteRelais, pw); err != nil {
 		return nil, err
 	}
 	return pw, nil
@@ -398,10 +405,10 @@ func (r *Relais) ablage() (*Kontaktablage, error) {
 	r.mu.Lock()
 	innen := r.innen
 	r.mu.Unlock()
-	if innen.Wurzel == "" {
+	if innen.p == nil {
 		return nil, errKeineKontakte
 	}
-	k, err := kontakteLaden(kontakteDatei(innen))
+	k, err := kontakteLaden(innen)
 	if err != nil {
 		return nil, errKeineKontakte
 	}

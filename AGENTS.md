@@ -21,6 +21,13 @@ Outside the Werkstatt, the same guide is `werkstatt/guide/` in github.com/mdopp/
 
 ## archiv
 
+- The vault is `apps/archiv/tresor/` (ADR 0001): a feature reaches it only through
+  its program's `Innen` (`programme.go`, `innen.go`), per area, every access in the
+  vault's protocol. A new file in the vault gets its area in `tresor/bereiche.go`
+  and a `Fach` in `innen.go`; a new feature gets a program, or the areas it needs
+  added to its program's `will`. Never hand a feature the mount point or another
+  program's `Innen`: `freigaben_test.go` and every test vault (`keineAblehnung`)
+  fail on it.
 - The template waits for laib#986 (per-person templates); `apps/archiv/README.md`
   lists what it must give. Do not write one before that design lands.
 - A secret (the Archiv-Passwort, a messenger key) never goes into argv, an

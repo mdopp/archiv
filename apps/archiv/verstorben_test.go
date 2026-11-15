@@ -29,14 +29,14 @@ func TestVerstorbenAufDerSeite(t *testing.T) {
 	}
 	ut.u.laden(innen) // kept in the vault
 	n := ut.u.Netz()
-	if len(n.Stille()) != 0 || len(markeLaden(innen.umfeldVerstorben())) != 1 {
+	if len(n.Stille()) != 0 || len(markeLaden(innen, fachVerstorben)) != 1 {
 		t.Fatalf("still named: %+v", n.Stille())
 	}
 	if start := wt.rufe("GET", "/tresor/umfeld", anna, nil).Body.String(); !strings.Contains(start, `href="/tresor/umfeld?mitte=p-tobias">Tobias Alt † <span class=k>`) {
 		t.Fatalf("not on the list, or not marked:\n%s", start)
 	}
 	_, page = wt.folgen(t, wt.rufe("POST", personPfad, anna, url.Values{"tu": {"lebt"}, "id": {"p-tobias"}}))
-	if strings.Contains(page, "Tobias Alt †") || !strings.Contains(page, "Markierung entfernt.") || len(ut.u.Netz().Stille()) != 1 || len(markeLaden(innen.umfeldVerstorben())) != 0 {
+	if strings.Contains(page, "Tobias Alt †") || !strings.Contains(page, "Markierung entfernt.") || len(ut.u.Netz().Stille()) != 1 || len(markeLaden(innen, fachVerstorben)) != 0 {
 		t.Fatalf("not undone:\n%s", page)
 	}
 }

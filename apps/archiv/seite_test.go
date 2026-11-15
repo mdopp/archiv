@@ -47,12 +47,11 @@ func neuesWeb(t *testing.T) *webTest {
 	data := t.TempDir()
 	prot := LadeProtokoll(filepath.Join(data, "archiv-stand.json"))
 	sch := Schluessel{Dir: filepath.Join(data, "schluessel")}
-	tt.Empfaenger = filepath.Join(data, "briefkasten.pub")
 	bk := &Briefkasten{Eingang: eingang, Letzte: filepath.Join(wt.inbox, "letzte"), Post: filepath.Join(data, "briefkasten"), Empfaenger: tt.Empfaenger,
 		Gesehen: &Gesehen{Dir: filepath.Join(data, "gesehen")}, Protokoll: prot}
 	pb := &Postbote{Post: bk.Post, Eingang: eingang, Letzte: bk.Letzte, Schluessel: sch, Protokoll: prot, Run: &fakeMsgvault{}}
 	wt.data = data
-	wt.w = &Web{Passkeys: &Passkeys{Datei: filepath.Join(data, "schluessel", "passkeys.json")}, Person: "anna", Secret: "s3cret", HomesSecret: "homes-geheim", Tresor: tt.Tresor, Briefkasten: bk, Postbote: pb, Eingang: eingang,
+	wt.w = &Web{Passkeys: &Passkeys{Datei: filepath.Join(data, "schluessel", "passkeys.json")}, Person: "anna", Secret: "s3cret", HomesSecret: "homes-geheim", Tresor: tt.Tresor, P: tt.P, Briefkasten: bk, Postbote: pb, Eingang: eingang,
 		Protokoll: prot, Schluessel: sch, Letzte: bk.Letzte, Archiv: archivProxy(port), Aufraeumer: &Aufraeumer{Schluessel: sch}}
 	return wt
 }
@@ -284,30 +283,46 @@ func TestTheBrowserGetsMsgvaultWithTheKey(t *testing.T) {
 	}
 }
 
-// An agent's bearer goes to msgvault as it came, only while open.
+// A bearer is a program's key from the vault (archiv ADR 0001): while
+// open, a live key with Nachrichten reaches msgvault, which gets msgvault's
+// own key from the vault and never the bearer; a key of a program without
+// Nachrichten is refused, and the lock voids every key.
 func TestAgentsBearer(t *testing.T) {
 	wt := neuesWeb(t)
-	agent := map[string]string{"Authorization": "Bearer der-schluessel"}
-	rec := wt.rufe("GET", "/api/v1/search?q=x", agent, nil)
+	wt.tt.ablehnungErwartet = true
+	traeger := func(token string) map[string]string { return map[string]string{"Authorization": "Bearer " + token} }
+	rec := wt.rufe("GET", "/api/v1/search?q=x", traeger("der-schluessel"), nil)
 	var f map[string]string
 	json.Unmarshal(rec.Body.Bytes(), &f)
 	if rec.Code != http.StatusLocked || f["fehler"] != saysAbgeschlossen {
 		t.Fatalf("closed: %d %s", rec.Code, rec.Body)
 	}
 	wt.oeffnen(t)
-	rec = wt.rufe("GET", "/api/v1/search?q=x", agent, nil)
+	if rec := wt.rufe("GET", "/api/v1/search?q=x", traeger("der-schluessel"), nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("a key the vault never gave: %d %s", rec.Code, rec.Body)
+	}
+	z, err := wt.tt.Schluessel(progNachrichten)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec = wt.rufe("GET", "/api/v1/search?q=x", traeger(z.Token()), nil)
 	if rec.Code != 200 {
 		t.Fatalf("open: %d %s", rec.Code, rec.Body)
 	}
 	r := wt.gesehn[len(wt.gesehn)-1]
-	if r.Header.Get("Authorization") != "Bearer der-schluessel" || r.Header.Get("X-Api-Key") != "" {
-		t.Fatalf("the agent's request was changed: auth %q key %q", r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))
+	if r.Header.Get("Authorization") != "" || r.Header.Get("X-Api-Key") != wt.tt.APIKey() {
+		t.Fatalf("msgvault got auth %q key %q", r.Header.Get("Authorization"), r.Header.Get("X-Api-Key"))
 	}
-	// a forged Remote-User on the agent's way gets no key either
-	agent["Remote-User"] = "anna"
-	wt.rufe("GET", "/api/v1/search?q=y", agent, nil)
-	if r := wt.gesehn[len(wt.gesehn)-1]; r.Header.Get("X-Api-Key") != "" {
-		t.Fatal("a forged Remote-User got msgvault's key")
+	pf, _ := wt.tt.Schluessel(progDatenpfleger) // granted no Nachrichten
+	if rec := wt.rufe("GET", "/api/v1/search?q=x", traeger(pf.Token()), nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("a key without Nachrichten: %d %s", rec.Code, rec.Body)
+	}
+	n := len(wt.gesehn)
+	wt.tt.Abschliessen(context.Background(), "test")
+	wt.tt.Oeffnen(context.Background(), []byte(geheim))
+	wt.tt.bereit(t)
+	if rec := wt.rufe("GET", "/api/v1/search?q=y", traeger(z.Token()), nil); rec.Code != http.StatusUnauthorized || len(wt.gesehn) != n {
+		t.Fatalf("the key of the session before: %d %s", rec.Code, rec.Body)
 	}
 }
 
@@ -623,7 +638,7 @@ func TestTheSignalPassphraseMovesIntoTheVaultOnOpening(t *testing.T) {
 	log.SetOutput(&buf)
 	defer log.SetOutput(os.Stderr)
 	wt := neuesWeb(t)
-	wt.tt.Einziehen = wt.w.Schluessel.SignalEinziehen
+	wt.tt.Einziehen = func() error { return wt.w.Schluessel.SignalEinziehen(wt.tt.P.Importe) }
 	wt.oeffnen(t)
 	wt.rufe("POST", "/tresor/signal", anna, url.Values{"telefon": {annaTel}})
 	wt.tt.Abschliessen(context.Background(), "test")
@@ -713,7 +728,7 @@ func TestTheSignalPassphraseMovesIntoTheVaultOnOpening(t *testing.T) {
 // page writes only inside): the outside one goes, the inside one stays.
 func TestAnOldOutsidePassphraseDoesNotReplaceTheOneInTheVault(t *testing.T) {
 	wt := neuesWeb(t)
-	wt.tt.Einziehen = wt.w.Schluessel.SignalEinziehen
+	wt.tt.Einziehen = func() error { return wt.w.Schluessel.SignalEinziehen(wt.tt.P.Importe) }
 	wt.oeffnen(t)
 	neu := "999999999999999999999999999999"
 	if rec := wt.rufe("POST", "/tresor/signal", anna, url.Values{"passphrase": {neu}}); rec.Code != http.StatusSeeOther {
@@ -779,6 +794,7 @@ func TestTheStartIsTheWorkplace(t *testing.T) {
 	if !wt.tt.Stand().Bereit {
 		t.Fatal("msgvault is not ready in the test")
 	}
+	agentKey, _ := wt.tt.Schluessel(progNachrichten)
 	zurTresor("open, navigate", wt.rufe("GET", "/", navigiert, nil))
 	zurTresor("open, an older browser without Sec-Fetch-*", wt.rufe("GET", "/", ohneFetchKopf, nil))
 	zurTresor("open, HEAD", wt.rufe("HEAD", "/", navigiert, nil))
@@ -797,7 +813,7 @@ func TestTheStartIsTheWorkplace(t *testing.T) {
 		{"an asset", "GET", "/assets/index-abc.js", mit(map[string]string{"Sec-Fetch-Mode": "no-cors"}), "msgvault /assets/index-abc.js"},
 		{"the API", "GET", "/api/v1/stats", mit(map[string]string{"Sec-Fetch-Mode": "cors", "Accept": "application/json"}), "msgvault /api/v1/stats"},
 		{"a POST to /", "POST", "/", mit(map[string]string{"Sec-Fetch-Mode": "navigate", "Origin": "http://example.com"}), "msgvault /"},
-		{"the agent's bearer on /", "GET", "/", map[string]string{"Authorization": "Bearer k", "Sec-Fetch-Mode": "navigate", "Accept": "text/html"}, "msgvault /"},
+		{"the agent's bearer on /", "GET", "/", map[string]string{"Authorization": "Bearer " + agentKey.Token(), "Sec-Fetch-Mode": "navigate", "Accept": "text/html"}, "msgvault /"},
 	} {
 		rec := wt.rufe(c.methode, c.pfad, c.hdr, nil)
 		if rec.Code != http.StatusOK || rec.Body.String() != c.msgvault {
