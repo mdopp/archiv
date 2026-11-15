@@ -4,7 +4,7 @@ Applies when you add a feature to the archive, when a program wants to
 read or write a person's private data, or when you touch unlocking,
 sessions or the vault's storage.
 
-- **Status:** Proposed, 2026-11-15 (for the owner's review)
+- **Status:** Accepted, 2026-11-15 (the owner: „finde deinen Vorschlag gut … setze es so um“)
 - **Deciders:** the owner (mdopp), 2026-11-15: „Das Archiv müssen wir
   ähnlich betrachten. Da passiert jetzt auch schon zu viel, das nichts
   miteinander zu tun hat. Es müsste eher eine DB sein, die wir entsperren,
