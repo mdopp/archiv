@@ -254,7 +254,10 @@ func (w *Web) archivOderTuer(rw http.ResponseWriter, r *http.Request) {
 	if pfad == msgvaultEingang {
 		pfad = "/"
 	}
-	key, err := w.P.Nachrichten.msgvaultSchluessel(msgvaultRecht(r.Method, pfad), pfad)
+	key, err := "", tresor.ErrAbgeschlossen
+	if st.Zustand == Offen && st.Bereit {
+		key, err = w.P.Nachrichten.msgvaultSchluessel(msgvaultRecht(r.Method, pfad), pfad)
+	}
 	if errors.Is(err, tresor.ErrNichtFreigegeben) {
 		seite(rw, http.StatusForbidden, "Nicht freigegeben", "<p>"+saysNichtFreigegeben+`</p><p><a href="/tresor">Zum Archiv</a></p>`, "")
 		return

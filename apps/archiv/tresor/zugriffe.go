@@ -13,8 +13,8 @@ import (
 // refused, is one line in zugriffe.jsonl inside the vault — what it names
 // is the area and the file, never what was read or written. Closed, the
 // protocol is as unreadable as the rest. A refusal while the vault is
-// closed has nowhere to go inside; the supervisor's log gets the program
-// and the area, nothing more.
+// closed has nowhere to go inside and is not kept (a closed vault refuses
+// everything; the pages ask it all the time).
 
 const (
 	protokollName  = "zugriffe.jsonl"
@@ -80,9 +80,6 @@ func (z *zugriffe) notieren(e Zugriff) {
 	z.mu.Lock()
 	defer z.mu.Unlock()
 	if z.datei == "" {
-		if e.Verweigert != "" {
-			log.Printf("archiv: Zugriff verweigert, der Tresor ist zu: %s, %s %s", e.Programm, e.Bereich, e.Recht)
-		}
 		return
 	}
 	if e.Bereich != "" {
