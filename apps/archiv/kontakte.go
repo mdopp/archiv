@@ -4,20 +4,19 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // The contact store (owner, 2026-11-02: „Warum sollte der Kontakt auch
@@ -61,21 +60,13 @@ type Kontaktablage struct {
 	Karten         map[string]*Karte `json:"karten"`
 }
 
-func kontakteDatei(innen Innen) string {
-	return filepath.Join(innen.Wurzel, "kontakte", adressbuchName+".json")
-}
+// fachKontakte is the store in the vault.
+var fachKontakte = Fach{tresor.Kontakte, ordnerKontakte + "/" + adressbuchName + ".json"}
 
-func kontakteLaden(datei string) (*Kontaktablage, error) {
-	b, err := os.ReadFile(datei)
-	if err != nil {
-		return nil, err
-	}
+func kontakteLaden(innen Innen) (*Kontaktablage, error) {
 	var k Kontaktablage
-	if err := json.Unmarshal(b, &k); err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Base(datei), err)
-	}
-	if k.Format != kontakteFormat || k.Version != kontakteVersion {
-		return nil, fmt.Errorf("%s: Format %q Version %d kennt dieses Archiv nicht", filepath.Base(datei), k.Format, k.Version)
+	if err := ablageLesen(innen, fachKontakte, &k, &k.Format, &k.Version, kontakteFormat, kontakteVersion); err != nil {
+		return nil, err
 	}
 	if k.Karten == nil {
 		k.Karten = map[string]*Karte{}
@@ -87,16 +78,7 @@ func neueKontaktablage() *Kontaktablage {
 	return &Kontaktablage{Format: kontakteFormat, Version: kontakteVersion, Karten: map[string]*Karte{}}
 }
 
-func (k *Kontaktablage) speichern(datei string) error {
-	b, err := json.Marshal(k)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(datei), 0o700); err != nil {
-		return err
-	}
-	return schreibenAtomar(datei, b, 0o600)
-}
+func (k *Kontaktablage) speichern(innen Innen) error { return innen.jsonSchreiben(fachKontakte, k) }
 
 // QuellKarte is a card as Radicale has it now.
 type QuellKarte struct {

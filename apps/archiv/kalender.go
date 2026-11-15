@@ -3,11 +3,6 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -64,24 +59,13 @@ type KalenderZahl struct {
 	QuelleWegSeit *time.Time `json:"quelle_weg_seit,omitempty"`
 }
 
-func kalenderDatei(innen Innen, name string) string {
-	return filepath.Join(innen.Kalender(), name+".json")
-}
+// kalenderDatei is the file of the calendar called name.
+func kalenderDatei(name string) Fach { return kalenderFach(name + ".json") }
 
-func kalenderLaden(datei string) (*Kalenderablage, error) {
-	b, err := os.ReadFile(datei)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, err
-	}
-	if err != nil {
-		return nil, err
-	}
+func kalenderLaden(innen Innen, d Fach) (*Kalenderablage, error) {
 	var k Kalenderablage
-	if err := json.Unmarshal(b, &k); err != nil {
-		return nil, fmt.Errorf("%s: %w", filepath.Base(datei), err)
-	}
-	if k.Format != kalenderFormat || k.Version != kalenderVersion {
-		return nil, fmt.Errorf("%s: Format %q Version %d kennt dieses Archiv nicht", filepath.Base(datei), k.Format, k.Version)
+	if err := ablageLesen(innen, d, &k, &k.Format, &k.Version, kalenderFormat, kalenderVersion); err != nil {
+		return nil, err
 	}
 	if k.Termine == nil {
 		k.Termine = map[string]*Termin{}
@@ -89,16 +73,7 @@ func kalenderLaden(datei string) (*Kalenderablage, error) {
 	return &k, nil
 }
 
-func (k *Kalenderablage) speichern(datei string) error {
-	b, err := json.Marshal(k)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(datei), 0o700); err != nil {
-		return err
-	}
-	return schreibenAtomar(datei, b, 0o600)
-}
+func (k *Kalenderablage) speichern(innen Innen, d Fach) error { return innen.jsonSchreiben(d, k) }
 
 // Zahl counts the calendar's events, and those gone at the source.
 func (k *Kalenderablage) Zahl() KalenderZahl {

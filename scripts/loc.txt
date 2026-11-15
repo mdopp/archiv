@@ -36,4 +36,10 @@
 # the age files as they came, intern.go /intern/letzte/): apps/ at 25,584, the minimum; the owner's
 # request (2026-11-14, „Build the sealed-archive path for the phone's WhatsApp and Signal backups“)
 # is the yes.
-25585 apps
+# 26895: raised 2026-11-15 with the vault as a building block (archiv#68, ADR 0001 step 1,
+# +1,309): tresor/ (the state machine moved out of tresor.go, plus areas, sessions, keys and
+# the protocol), innen.go (the programs' way in, one Fach per file), programme.go (the programs
+# and the person's grant), freigaben.go (the grant at the opening, /tresor/freigaben): apps/ at
+# 26,894, the minimum; the owner's acceptance of ADR 0001 (2026-11-15, „setze es so um“) and
+# the request for archiv#68 are the yes.
+26895 apps

@@ -40,7 +40,7 @@ func neueAPI(t *testing.T) (*fakeAPI, *MsgvaultAPI) {
 	t.Cleanup(f.Close)
 	u, _ := url.Parse(f.URL)
 	port, _ := strconv.Atoi(u.Port())
-	return f, &MsgvaultAPI{Port: port, Key: func() string { return "vault-key" }}
+	return f, &MsgvaultAPI{Port: port, Key: festerKey("vault-key")}
 }
 
 func jsonAus(w http.ResponseWriter, code int, v any) {
@@ -193,7 +193,7 @@ func neuerAbgleich(t *testing.T) *abgleichTest {
 	var api *MsgvaultAPI
 	at.api, api = neueAPI(t)
 	r := at.rad.radicale(t)
-	at.innen = Innen{Wurzel: t.TempDir()}
+	at.innen = testInnen(t)
 	os.MkdirAll(at.innen.Home(), 0o700)
 	os.WriteFile(at.innen.Home()+"/config.toml", []byte(msgvaultConfig(8090)), 0o600)
 	at.a = &Abgleich{Radicale: r, API: api, Run: at.run, Msgvault: "msgvault", Now: func() time.Time { return t0 },
@@ -226,7 +226,7 @@ func TestAbgleichFirstRound(t *testing.T) {
 	if len(st.Kalender) != 2 || st.Kalender[0].Name != "google-arbeit" || st.Kalender[0].Termine != 2 || st.Kalender[1].Termine != 1 {
 		t.Fatalf("calendars: %+v", st.Kalender)
 	}
-	if _, err := os.Stat(kalenderDatei(at.innen, "abo-ferien")); err == nil {
+	if _, err := os.Stat(kalenderPfad(at.innen, "abo-ferien")); err == nil {
 		t.Fatal("a calendar that is not google-*/privat-* came in")
 	}
 	args := at.run.args()
@@ -337,7 +337,7 @@ func TestAContactDeletedOnThePhoneStays(t *testing.T) {
 	at.a.Runde(t.Context(), at.innen)
 	at.rad.karte("ben.vcf", "")
 	at.a.Runde(t.Context(), at.innen)
-	k, err := kontakteLaden(kontakteDatei(at.innen))
+	k, err := kontakteLaden(at.innen)
 	if err != nil || len(k.Karten) != 2 {
 		t.Fatalf("%v %v", k, err)
 	}
@@ -355,7 +355,7 @@ func TestAContactDeletedOnThePhoneStays(t *testing.T) {
 	alterTag := ben.ETag()
 	at.rad.karte("ben-neu.vcf", vcard("u-ben", "Ben", "+4915199999999")) // back, under another file name
 	at.a.Runde(t.Context(), at.innen)
-	k, _ = kontakteLaden(kontakteDatei(at.innen))
+	k, _ = kontakteLaden(at.innen)
 	ben = k.Karten["uid:u-ben"]
 	if ben.GeloeschtAm != nil || strings.Contains(ben.Ausgabe(), "gelöscht") || ben.Href != "ben.vcf" || ben.ETag() == alterTag {
 		t.Fatalf("back on the phone: %+v", ben)

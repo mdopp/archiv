@@ -252,15 +252,15 @@ func (s Schluessel) SignalEinziehen(innen Innen) error {
 	defer nullen(roh)
 	wert := trimNL(roh)
 	innenDa := false
-	if b, err := os.ReadFile(innen.SignalPassphrase()); err == nil {
+	if b, err := innen.lesen(fachSignalPassphrase); err == nil {
 		innenDa = len(trimNL(b)) > 0
 		nullen(b)
 	}
 	if !innenDa && len(wert) > 0 {
-		if err := schreibenAtomar(innen.SignalPassphrase(), wert, 0o600); err != nil {
+		if err := innen.schreiben(fachSignalPassphrase, wert); err != nil {
 			return err
 		}
-		zurueck, err := os.ReadFile(innen.SignalPassphrase())
+		zurueck, err := innen.lesen(fachSignalPassphrase)
 		if err != nil {
 			return err
 		}

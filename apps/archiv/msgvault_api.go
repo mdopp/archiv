@@ -9,7 +9,10 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // MsgvaultAPI reads and decides through msgvault's own HTTP API on
@@ -28,7 +31,7 @@ import (
 //	GET  /api/v1/messages/{id}                                 one mail's body, for its end only: home town and employer (herkunft.go)
 type MsgvaultAPI struct {
 	Port   int
-	Key    func() string // Tresor.APIKey: "" while closed or starting
+	Key    func(r tresor.Recht, pfad string) (string, error) // the program's key: Innen.msgvaultSchluessel
 	Client *http.Client
 }
 
@@ -46,12 +49,12 @@ func (e *apiFehler) Error() string {
 var errNichtBereit = errors.New("msgvault ist nicht offen")
 
 func (m *MsgvaultAPI) rufe(ctx context.Context, method, pfad string, kopf http.Header, rein, raus any) error {
-	key := ""
-	if m.Key != nil {
-		key = m.Key()
-	}
-	if key == "" {
+	if m.Key == nil {
 		return errNichtBereit
+	}
+	key, err := m.Key(msgvaultRecht(method, strings.SplitN(pfad, "?", 2)[0]), strings.SplitN(pfad, "?", 2)[0])
+	if err != nil {
+		return fmt.Errorf("%w: %v", errNichtBereit, err)
 	}
 	var body io.Reader
 	if rein != nil {

@@ -76,7 +76,7 @@ func dieselbeAbschnitt(b *strings.Builder, n *Netz, nur, zurueck string) {
 
 // personPost is every form of the persons made by hand.
 func (w *Web) personPost(rw http.ResponseWriter, r *http.Request) {
-	innen, ok := w.Tresor.Innen()
+	innen, ok := w.P.Stammbaum.offen()
 	if !ok || w.Umfeld.Netz() == nil {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return

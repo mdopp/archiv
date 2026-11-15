@@ -403,7 +403,7 @@ func TestPostboteHandsAMailPacketToImportMaildir(t *testing.T) {
 	if len(Pakete(mt.h.Post)) != 1 {
 		t.Fatal("no packet")
 	}
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(mt.id.String()), 0o600)
 	mv := &fakeMaildirImport{}

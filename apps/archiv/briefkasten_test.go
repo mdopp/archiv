@@ -254,7 +254,7 @@ func TestPostboteBringsPacketsInOldestFirstAndDeletesThem(t *testing.T) {
 		t.Fatalf("%v", pakete)
 	}
 
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{}
@@ -285,7 +285,7 @@ func TestPostboteBringsPacketsInOldestFirstAndDeletesThem(t *testing.T) {
 func TestPostboteKeepsAPacketItCouldNotImport(t *testing.T) {
 	bt := neuerBriefkasten(t)
 	bt.paket(t, signalXML(mmsMitBild(1700000200000)), tag)
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{fehler: true}
@@ -303,11 +303,10 @@ func TestPostboteKeepsAPacketItCouldNotImport(t *testing.T) {
 
 func TestTheVaultMakesTheKeyPairOnce(t *testing.T) {
 	tt := neuerTresor(t)
-	tt.Empfaenger = filepath.Join(tt.dir, "briefkasten.pub")
 	tt.Anlegen(context.Background(), []byte("richtig-langes-pw"))
 	tt.bereit(t)
 	innen := <-tt.lauf
-	id, err := identitaetLesen(innen.Identitaet())
+	id, err := identitaetAus(innen)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -322,7 +321,7 @@ func TestTheVaultMakesTheKeyPairOnce(t *testing.T) {
 	tt.Oeffnen(context.Background(), []byte("richtig-langes-pw"))
 	tt.bereit(t)
 	innen = <-tt.lauf
-	if id2, _ := identitaetLesen(innen.Identitaet()); id2.String() != id.String() {
+	if id2, _ := identitaetAus(innen); id2.String() != id.String() {
 		t.Fatal("reopening made a new key pair: old packets would be unreadable")
 	}
 }
@@ -383,7 +382,7 @@ func TestAnAttachmentTooBigForMsgvaultIsKeptInTheVaultAndNamedInTheMessage(t *te
 		t.Fatalf("%v", pakete)
 	}
 
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{}
@@ -450,7 +449,7 @@ func TestThePhonesSMSAndCallsComeInEncryptedAndAreImportedWhenOpen(t *testing.T)
 
 	bt.b.Eingang.Ruhe = 0
 	bt.b.Eingang.Stabil("sms")
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{}
@@ -513,7 +512,7 @@ func TestWhatsAppIsReadOnlyWhileOpenWithTheKeyInsideTheVault(t *testing.T) {
 	os.WriteFile(db, []byte("verschluesselt"), 0o600)
 	e := &Eingang{Dir: inbox}
 	e.Stabil("whatsapp")
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	data := t.TempDir()
 	sch := Schluessel{Dir: filepath.Join(data, "schluessel")}
@@ -576,7 +575,7 @@ func TestWhatsAppIsReadOnlyWhileOpenWithTheKeyInsideTheVault(t *testing.T) {
 func TestAFailedPacketIsTriedAgainAndTurnsRedWhenItKeepsFailing(t *testing.T) {
 	bt := neuerBriefkasten(t)
 	bt.paket(t, signalXML(sms(1700000000000, 1, "+4917011111111", "eins")), tag)
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(bt.id.String()), 0o600)
 	mv := &fakeMsgvault{fehler: true}

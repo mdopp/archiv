@@ -21,6 +21,7 @@ import (
 	"unicode/utf8"
 
 	"filippo.io/age"
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // Social exports (owner 2026-11-11: „Runterladen würde ich ja, aber das ist
@@ -77,11 +78,9 @@ type sozialDatei struct {
 	Eintraege []sozialEintrag `json:"eintraege"`
 }
 
-func (i Innen) umfeldSozial() string { return filepath.Join(i.Umfeld(), "sozial.json") }
-
 func sozialLaden(innen Innen) []sozialEintrag {
 	var d sozialDatei
-	if b, err := os.ReadFile(innen.umfeldSozial()); err == nil {
+	if b, err := innen.lesen(fachSozial); err == nil {
 		if json.Unmarshal(b, &d) != nil || d.Format != sozialFormat || d.Version != sozialVersion {
 			return nil
 		}
@@ -358,7 +357,11 @@ func (p *Postbote) sozialZustellen(ctx context.Context, innen Innen, id age.Iden
 		}
 		return grund
 	}
-	klartext := filepath.Join(innen.Arbeit(), "sozial-"+zufall())
+	arbeit, err := innen.ordner(tresor.Nachrichten, ordnerArbeit)
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	klartext := filepath.Join(arbeit, "sozial-"+zufall())
 	defer os.Remove(klartext)
 	if err := ageAuspacken(d.Pfad, klartext, id); err != nil {
 		return fehler(fmt.Sprintf(saysSozialKaputt, d.Rel), err)
@@ -376,7 +379,7 @@ func (p *Postbote) sozialZustellen(ctx context.Context, innen Innen, id age.Iden
 		return nil // nothing to try again
 	}
 	alle := sozialMischen(sozialLaden(innen), es)
-	if err := jsonImTresor(innen.umfeldSozial(), sozialDatei{Format: sozialFormat, Version: sozialVersion, Eintraege: alle}); err != nil {
+	if err := innen.jsonSchreiben(fachSozial, sozialDatei{Format: sozialFormat, Version: sozialVersion, Eintraege: alle}); err != nil {
 		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
 	}
 	if err := os.Remove(d.Pfad); err != nil {
@@ -468,7 +471,7 @@ func (u *Umfeld) SozialNeu(innen Innen) {
 // sozialKarte is the sources' card for Facebook and LinkedIn: how the
 // exports come, that mail cannot bring them, and what the vault holds.
 func (w *Web) sozialKarte(b *strings.Builder, offen bool, qa quelleAuf) {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Importe.offen()
 	je := map[string]int{}
 	if offen && auf {
 		for _, e := range sozialLaden(innen) {

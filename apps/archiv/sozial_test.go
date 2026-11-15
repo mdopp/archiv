@@ -208,7 +208,7 @@ func TestASocialExportGoesFromTheInboxIntoTheVault(t *testing.T) {
 	}
 	e := &Eingang{Dir: inbox}
 	e.Stabil("sozial")
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	os.MkdirAll(innen.Arbeit(), 0o700)
 	os.WriteFile(innen.Identitaet(), []byte(id.String()), 0o600)
 	neu := 0

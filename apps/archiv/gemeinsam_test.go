@@ -171,7 +171,7 @@ func kanteViel(t *testing.T, ut *umfeldTest, innen Innen) {
 	for i := range 11 {
 		tab.Gespraeche = append(tab.Gespraeche, netzGespraech{ID: fmt.Sprint(200 + i), Art: gespraechMail, Groesse: 2, Nachrichten: 2 + i, Zuletzt: time.Date(2026, 1, 1+i, 8, 0, 0, 0, time.UTC), Wer: beide})
 	}
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)
@@ -271,7 +271,7 @@ func TestSpitzname(t *testing.T) {
 	for _, c := range alt["kontakte"].([]any) {
 		delete(c.(map[string]any), "sp")
 	}
-	if err := jsonImTresor(innen.umfeldTabelle(), alt); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, alt); err != nil {
 		t.Fatal(err)
 	}
 	ut.u.laden(innen)

@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log"
 	"maps"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -51,12 +49,9 @@ type paarVorschlag struct {
 	Zitat  string `json:"z"`
 }
 
-func (i Innen) umfeldPaare() string    { return filepath.Join(i.Umfeld(), "paare.json") }
-func (i Innen) umfeldPaareWeg() string { return filepath.Join(i.Umfeld(), "paare-weg.json") }
-
 func paareLaden(innen Innen) map[string]paarVorschlag {
 	out := map[string]paarVorschlag{}
-	if b, err := os.ReadFile(innen.umfeldPaare()); err == nil {
+	if b, err := innen.lesen(fachPaare); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -64,7 +59,7 @@ func paareLaden(innen Innen) map[string]paarVorschlag {
 
 func paareWegLaden(innen Innen) map[string]time.Time {
 	out := map[string]time.Time{}
-	if b, err := os.ReadFile(innen.umfeldPaareWeg()); err == nil {
+	if b, err := innen.lesen(fachPaareWeg); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -237,7 +232,7 @@ func (u *Umfeld) paareRunde(ctx context.Context, innen Innen, n *Netz, ks []buch
 		return
 	}
 	ps := n.paareFinden(roh, ks)
-	if err := jsonImTresor(innen.umfeldPaare(), ps); err != nil {
+	if err := innen.jsonSchreiben(fachPaare, ps); err != nil {
 		log.Printf("archiv: Umfeld: Paare speichern: %v", err)
 		return
 	}
@@ -289,5 +284,5 @@ func (u *Umfeld) PaarVerwerfen(innen Innen, x, y string) error {
 	n.paareWeg[key] = n.now()
 	alle := maps.Clone(n.paareWeg)
 	n.mu.Unlock()
-	return jsonImTresor(innen.umfeldPaareWeg(), alle)
+	return innen.jsonSchreiben(fachPaareWeg, alle)
 }

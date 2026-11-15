@@ -5,8 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -32,11 +30,9 @@ type handPerson struct {
 	Nicht []string  `json:"nicht,omitempty"`
 }
 
-func (i Innen) umfeldAngelegt() string { return filepath.Join(i.Umfeld(), "angelegt.json") }
-
 func angelegtLaden(innen Innen) map[string]handPerson {
 	out := map[string]handPerson{}
-	if b, err := os.ReadFile(innen.umfeldAngelegt()); err == nil {
+	if b, err := innen.lesen(fachAngelegt); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out

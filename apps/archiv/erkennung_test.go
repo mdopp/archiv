@@ -250,7 +250,7 @@ func TestPaareAusWirNachrichten(t *testing.T) {
 	b, _ := os.ReadFile(ut.innen.umfeldPaare())
 	os.WriteFile(innen.umfeldPaare(), b, 0o600)
 	tab, _ := tabelleLaden(ut.innen)
-	jsonImTresor(innen.umfeldTabelle(), tab)
+	innen.jsonSchreiben(fachNetz, tab)
 	ut2.u.laden(innen)
 	page := wt.rufe("GET", erkanntPfad, anna, nil).Body.String()
 	if !strings.Contains(page, esc("Vorschlag, weil Kim Berg 2 Nachrichten mit „Kim & Fritz“ unterschreibt.")) || !strings.Contains(page, ">Stimmt nicht<") {

@@ -100,8 +100,10 @@ sudo grep -q '^age1' "$D/data/briefkasten.pub" || fail "no public key outside th
 
 curl -fsS "${H[@]}" "$U/" | grep -qi msgvault || fail "/ while open is not msgvault's UI"
 curl -fsS "${H[@]}" "$U/api/v1/stats" | jq -e '.total_messages == 0' || fail "the person's request did not carry the key"
-[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer falsch' "$U/api/v1/stats")" = 401 ] || fail "a wrong bearer was not refused by msgvault"
-if sudo find "$D/data/tresor" -name 'msgvault*' -o -name 'api-key' -o -name 'config.toml' | grep -q .; then fail "plain names in the cipher dir"; fi
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Authorization: Bearer falsch' "$U/api/v1/stats")" = 401 ] || fail "a bearer the vault never gave was not refused"
+if sudo find "$D/data/tresor" -name 'msgvault*' -o -name 'api-key' -o -name 'config.toml' -o -name 'zugriffe*' | grep -q .; then fail "plain names in the cipher dir"; fi
+# archiv#68: the person's request went through the Nachrichten program's key, and the vault's protocol (inside it) says so
+docker exec archiv grep -q '"programm":"nachrichten","bereich":"nachrichten","recht":"lesen","was":"msgvault:/api/v1/stats"' /run/tresor/zugriffe.jsonl || fail "the access is not in the vault's protocol"
 
 echo "additive import with the real msgvault, in the vault"
 cat >"$D/a.xml" <<'EOF'

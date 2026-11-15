@@ -12,8 +12,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -182,11 +180,9 @@ type paarHinweis struct {
 	Sicher       float64
 }
 
-func (i Innen) umfeldHinweise() string { return filepath.Join(i.Umfeld(), "hinweise.json") }
-
 func hinweiseLaden(innen Innen) map[string]gelesen {
 	out := map[string]gelesen{}
-	if b, err := os.ReadFile(innen.umfeldHinweise()); err == nil {
+	if b, err := innen.lesen(fachHinweise); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -685,7 +681,7 @@ func (u *Umfeld) modellLesen(ctx context.Context, innen Innen, n *Netz, k kandid
 		return err.Error()
 	}
 	gs[k.id] = gelesen{Am: u.now(), Von: k.von, An: k.an, Zitat: k.treffer[0].Zitat, Hinweise: hinweisAntwort(antwort, buchstaben)}
-	if err := jsonImTresor(innen.umfeldHinweise(), gs); err != nil {
+	if err := innen.jsonSchreiben(fachHinweise, gs); err != nil {
 		delete(gs, k.id)
 		return "speichern: " + err.Error()
 	}

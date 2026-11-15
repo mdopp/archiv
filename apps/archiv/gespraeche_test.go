@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -56,7 +57,7 @@ func neueAbfrage(t *testing.T) (*fakeAbfrage, *MsgvaultAPI) {
 	t.Cleanup(f.Close)
 	u, _ := url.Parse(f.URL)
 	port, _ := strconv.Atoi(u.Port())
-	return f, &MsgvaultAPI{Port: port, Key: func() string { return "vault-key" }}
+	return f, &MsgvaultAPI{Port: port, Key: festerKey("vault-key")}
 }
 
 // abfrageZeile is one row: conversation, kind, title, size, messages, last, list, participant, phone, mail;
@@ -213,8 +214,8 @@ func TestGespraecheLesen(t *testing.T) {
 	if _, err := gespraecheLesen(abfrageAntwort{Columns: []string{"gespraech"}}); err == nil {
 		t.Error("a missing column was read")
 	}
-	zu := &MsgvaultAPI{Port: api.Port, Key: func() string { return "" }}
-	if _, err := zu.Gespraeche(t.Context()); err != errNichtBereit {
+	zu := &MsgvaultAPI{Port: api.Port, Key: festerKey("")}
+	if _, err := zu.Gespraeche(t.Context()); !errors.Is(err, errNichtBereit) {
 		t.Errorf("closed: %v", err)
 	}
 }

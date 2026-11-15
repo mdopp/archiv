@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"log"
 	"maps"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -65,14 +63,9 @@ type gebAntwort struct {
 	Am  time.Time `json:"am"`
 }
 
-func (i Innen) umfeldGebHinweise() string {
-	return filepath.Join(i.Umfeld(), "geburtstag-hinweise.json")
-}
-func (i Innen) umfeldGeburtstage() string { return filepath.Join(i.Umfeld(), "geburtstage.json") }
-
 func gebHinweiseLaden(innen Innen) map[string]gebHinweis {
 	out := map[string]gebHinweis{}
-	if b, err := os.ReadFile(innen.umfeldGebHinweise()); err == nil {
+	if b, err := innen.lesen(fachGebHinweise); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -80,7 +73,7 @@ func gebHinweiseLaden(innen Innen) map[string]gebHinweis {
 
 func geburtstageLaden(innen Innen) map[string]gebAntwort {
 	out := map[string]gebAntwort{}
-	if b, err := os.ReadFile(innen.umfeldGeburtstage()); err == nil {
+	if b, err := innen.lesen(fachGeburtstage); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -165,7 +158,7 @@ func (u *Umfeld) geburtstageRunde(ctx context.Context, innen Innen, n *Netz, ks 
 		return
 	}
 	h := n.geburtstagHinweise(roh, ks)
-	if err := jsonImTresor(innen.umfeldGebHinweise(), h); err != nil {
+	if err := innen.jsonSchreiben(fachGebHinweise, h); err != nil {
 		log.Printf("archiv: Umfeld: Geburtstage speichern: %v", err)
 		return
 	}
@@ -270,7 +263,7 @@ func (u *Umfeld) GeburtstagSagen(innen Innen, id, tag string, ja, vergessen bool
 	if err != nil {
 		return err
 	}
-	return jsonImTresor(innen.umfeldGeburtstage(), alle)
+	return innen.jsonSchreiben(fachGeburtstage, alle)
 }
 
 // tagText is „03-14“ as the page says it: „14. März“.

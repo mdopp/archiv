@@ -25,24 +25,24 @@ const (
 
 // pflegeZeile is the start's line, when there is something to tidy.
 func (w *Web) pflegeZeile(b *strings.Builder) {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Datenpfleger.offen()
 	if !auf {
 		return
 	}
-	if n := w.pflege.zaehlen(innen, w.Umfeld.Netz(), w.jetzt(), false); n > 0 {
+	if n := w.pflege.zaehlen(innen, w.Umfeld.NetzFuer(innen), w.jetzt(), false); n > 0 {
 		fmt.Fprintf(b, `<p class=weiter-in id=pflege-zeile><a href="%s">%s ›</a></p>`, pflegePfad, esc(anzahl(n, "Ding", "Dinge")+" zum Aufräumen"))
 	}
 }
 
 // pflegeGet is one finding (?n= its place, the first by default).
 func (w *Web) pflegeGet(rw http.ResponseWriter, r *http.Request) {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Datenpfleger.offen()
 	if !auf {
 		http.Redirect(rw, r, "/tresor", http.StatusSeeOther)
 		return
 	}
-	bs := Befunde(innen, w.Umfeld.Netz())
-	w.pflege.zaehlen(innen, w.Umfeld.Netz(), w.jetzt(), true)
+	bs := Befunde(innen, w.Umfeld.NetzFuer(innen))
+	w.pflege.zaehlen(innen, w.Umfeld.NetzFuer(innen), w.jetzt(), true)
 	var b strings.Builder
 	meldungenText(&b, meldungen[r.URL.Query().Get("m")], "")
 	if len(bs) == 0 {
@@ -107,13 +107,13 @@ func (w *Web) befundBilder(b *strings.Builder, ids []string) {
 // pflegePasst is „Passt so“: the finding is remembered in the vault and
 // the next one shown in its place.
 func (w *Web) pflegePasst(rw http.ResponseWriter, r *http.Request) {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Datenpfleger.offen()
 	if !auf {
 		w.antwort(rw, r, http.StatusLocked, "", saysPflegeZu)
 		return
 	}
 	id, n := r.PostFormValue("id"), r.PostFormValue("n")
-	bs := Befunde(innen, w.Umfeld.Netz())
+	bs := Befunde(innen, w.Umfeld.NetzFuer(innen))
 	m := "pflege-weg"
 	for _, f := range bs {
 		if f.ID != id {
@@ -126,7 +126,7 @@ func (w *Web) pflegePasst(rw http.ResponseWriter, r *http.Request) {
 		}
 		m = "pflege-passt"
 	}
-	w.pflege.zaehlen(innen, w.Umfeld.Netz(), w.jetzt(), true)
+	w.pflege.zaehlen(innen, w.Umfeld.NetzFuer(innen), w.jetzt(), true)
 	if w.Geaendert != nil {
 		w.Geaendert() // the count for Homes
 	}

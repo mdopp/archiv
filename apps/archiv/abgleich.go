@@ -6,13 +6,14 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // The Abgleich (owner, 2026-11-02: contacts and calendars go from the
@@ -208,7 +209,7 @@ func (a *Abgleich) kontakteZaehlen(k *Kontaktablage) {
 // (for the page's persons); ok false while it is there or unknown.
 func GeloeschtNachUID(innen Innen) map[string]time.Time {
 	out := map[string]time.Time{}
-	k, err := kontakteLaden(kontakteDatei(innen))
+	k, err := kontakteLaden(innen)
 	if err != nil {
 		return out
 	}
@@ -267,8 +268,8 @@ func (a *Abgleich) kalender(ctx context.Context, innen Innen, samml []Sammlung) 
 			}
 			continue
 		}
-		datei := kalenderDatei(innen, s.Name)
-		k, err := kalenderLaden(datei)
+		datei := kalenderDatei(s.Name)
+		k, err := kalenderLaden(innen, datei)
 		if errors.Is(err, os.ErrNotExist) {
 			k, err = &Kalenderablage{Format: kalenderFormat, Version: kalenderVersion, Name: s.Name, Termine: map[string]*Termin{}}, nil
 		}
@@ -281,7 +282,7 @@ func (a *Abgleich) kalender(ctx context.Context, innen Innen, samml []Sammlung) 
 			k.Anzeige = s.Anzeige
 		}
 		neu, geaendert, weg := k.Einmischen(ics, jetzt)
-		if err := k.speichern(datei); err != nil {
+		if err := k.speichern(innen, datei); err != nil {
 			log.Printf("archiv: Kalender %s speichern: %v", s.Name, err)
 			fehler = append(fehler, s.Name)
 			continue
@@ -292,20 +293,20 @@ func (a *Abgleich) kalender(ctx context.Context, innen Innen, samml []Sammlung) 
 	}
 	// a calendar gone from Radicale: its events stay, the calendar is marked
 	if ctx.Err() == nil {
-		eintraege, _ := os.ReadDir(innen.Kalender())
+		eintraege, _ := innen.namen(tresor.Kontakte, ordnerKalender)
 		for _, e := range eintraege {
-			name := strings.TrimSuffix(e.Name(), ".json")
-			if e.IsDir() || name == e.Name() || strings.HasPrefix(name, ".") || da[name] {
+			name := strings.TrimSuffix(e, ".json")
+			if name == e || da[name] {
 				continue
 			}
-			datei := filepath.Join(innen.Kalender(), e.Name())
-			k, err := kalenderLaden(datei)
+			datei := kalenderFach(e)
+			k, err := kalenderLaden(innen, datei)
 			if err != nil || k.QuelleWegSeit != nil {
 				continue
 			}
 			g := jetzt
 			k.QuelleWegSeit = &g
-			if err := k.speichern(datei); err == nil {
+			if err := k.speichern(innen, datei); err == nil {
 				log.Printf("archiv: Kalender %s ist in Radicale nicht mehr da; seine Termine bleiben im Archiv", name)
 			}
 		}
@@ -334,8 +335,7 @@ func (a *Abgleich) kontakte(ctx context.Context, innen Innen, samml []Sammlung) 
 		}
 	}
 	// first into the archive's own store: every card ever seen stays
-	datei := kontakteDatei(innen)
-	ablage, err := kontakteLaden(datei)
+	ablage, err := kontakteLaden(innen)
 	if errors.Is(err, os.ErrNotExist) {
 		ablage, err = nil, nil
 	}
@@ -358,7 +358,7 @@ func (a *Abgleich) kontakte(ctx context.Context, innen Innen, samml []Sammlung) 
 			ablage = neueKontaktablage()
 		}
 		neu, geaendert, weg := ablage.Einmischen(karten, a.now())
-		if err := ablage.speichern(datei); err != nil {
+		if err := ablage.speichern(innen); err != nil {
 			log.Printf("archiv: Kontakte speichern: %v", err)
 			a.setzen(func(s *AbgleichStand) { s.Kontakte.Fehler = saysKontakteAbgleich })
 			return
@@ -369,7 +369,7 @@ func (a *Abgleich) kontakte(ctx context.Context, innen Innen, samml []Sammlung) 
 	case ablage != nil && ablage.QuelleWegSeit == nil: // the book is gone: its cards stay as they were
 		g := a.now()
 		ablage.QuelleWegSeit = &g
-		ablage.speichern(datei)
+		ablage.speichern(innen)
 		log.Printf("archiv: das Adressbuch %s ist in Radicale nicht mehr da; die Kontakte bleiben im Archiv", adressbuchName)
 	}
 	if ablage == nil {
@@ -377,10 +377,43 @@ func (a *Abgleich) kontakte(ctx context.Context, innen Innen, samml []Sammlung) 
 		return
 	}
 	a.kontakteZaehlen(ablage)
-	if a.Relais == nil {
+	if a.Relais != nil {
+		a.msgvaultKontakte(ctx, innen)
+	}
+}
+
+// rollen sets the book's roles, every round: subscribed and lookup
+// source, never the write target. False when it failed (scheitern said why).
+func (a *Abgleich) rollen(ctx context.Context, home string, scheitern func(satz, was string, aus Ausgabe, err error)) bool {
+	if a.API == nil {
+		return true
+	}
+	buecher, err := a.API.Buecher(ctx)
+	if err != nil {
+		scheitern(saysKontakteAbgleich, "Adressbücher lesen", Ausgabe{}, err)
+		return false
+	}
+	for _, b := range buecher {
+		if !strings.HasSuffix(strings.TrimSuffix(b.URL, "/"), a.Radicale.Home()+adressbuchName) || !(b.WriteTarget || !b.Subscribed || !b.LookupSource) {
+			continue
+		}
+		if aus, err := a.Run.Run(ctx, msgvaultBuchRollen(a.Msgvault, home, b.ID)); err != nil || aus.Code != 0 {
+			scheitern(saysKontakteAbgleich, "Rollen setzen", aus, err)
+			return false
+		}
+	}
+	return true
+}
+
+// msgvaultKontakte connects msgvault to the relay once, keeps the book's
+// roles, and lets msgvault read the cards.
+func (a *Abgleich) msgvaultKontakte(ctx context.Context, innen Innen) {
+	home, err := innen.ordner(tresor.Nachrichten, ordnerMsgvault)
+	if err != nil {
+		log.Printf("archiv: Kontakte: msgvault: %v", err)
+		a.setzen(func(s *AbgleichStand) { s.Kontakte.Fehler = saysKontakteAbgleich })
 		return
 	}
-	home := innen.Home()
 	pw := a.Relais.Passwort()
 	defer nullen(pw)
 	if len(pw) == 0 {
@@ -394,38 +427,21 @@ func (a *Abgleich) kontakte(ctx context.Context, innen Innen, samml []Sammlung) 
 		log.Printf("archiv: Kontakte %s: %v Code %d: %s", was, err, aus.Code, schwaerzen(strings.TrimSpace(aus.Text), pw))
 		a.setzen(func(s *AbgleichStand) { s.Kontakte.Fehler = satz })
 	}
-	marke, _ := os.ReadFile(innen.KontakteVerbunden())
+	marke, _ := innen.lesen(fachKontakteVerbunden)
 	if string(trimNL(marke)) != a.Relais.BasisURL() {
 		aus, err := a.Run.Run(ctx, msgvaultAddCardDAV(a.Msgvault, home, a.Relais.BasisURL(), relaisBenutzer, pw))
 		if err != nil || aus.Code != 0 {
 			scheitern(saysKontakteVerbinden, "anbinden", aus, err)
 			return
 		}
-		if err := schreibenAtomar(innen.KontakteVerbunden(), []byte(a.Relais.BasisURL()+"\n"), 0o600); err != nil {
+		if err := innen.schreiben(fachKontakteVerbunden, []byte(a.Relais.BasisURL()+"\n")); err != nil {
 			log.Printf("archiv: Kontakte: %v", err)
 		}
 		log.Printf("archiv: Kontakte: msgvault ist mit dem Adressbuch verbunden (über das Relais, nur lesend)")
 	}
 	a.setzen(func(s *AbgleichStand) { s.Kontakte.Verbunden = true })
-	// the roles, every round: subscribed and lookup source, never the write target
-	if a.API != nil {
-		buecher, err := a.API.Buecher(ctx)
-		if err != nil {
-			scheitern(saysKontakteAbgleich, "Adressbücher lesen", Ausgabe{}, err)
-			return
-		}
-		for _, b := range buecher {
-			if !strings.HasSuffix(strings.TrimSuffix(b.URL, "/"), a.Radicale.Home()+adressbuchName) {
-				continue
-			}
-			if b.WriteTarget || !b.Subscribed || !b.LookupSource {
-				aus, err := a.Run.Run(ctx, msgvaultBuchRollen(a.Msgvault, home, b.ID))
-				if err != nil || aus.Code != 0 {
-					scheitern(saysKontakteAbgleich, "Rollen setzen", aus, err)
-					return
-				}
-			}
-		}
+	if !a.rollen(ctx, home, scheitern) {
+		return
 	}
 	aus, err := a.Run.Run(ctx, msgvaultSyncCardDAV(a.Msgvault, home))
 	if err != nil || aus.Code != 0 {

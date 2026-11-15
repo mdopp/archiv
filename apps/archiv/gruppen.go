@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -88,11 +86,9 @@ type GruppenFrage struct {
 
 func gruppeKey(id string) string { return "gruppe:" + id }
 
-func (i Innen) umfeldGruppen() string { return filepath.Join(i.Umfeld(), "gruppen.json") }
-
 func gruppenLaden(innen Innen) map[string]gruppenAntwort {
 	out := map[string]gruppenAntwort{}
-	if b, err := os.ReadFile(innen.umfeldGruppen()); err == nil {
+	if b, err := innen.lesen(fachGruppen); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out

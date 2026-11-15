@@ -42,7 +42,7 @@ func neuesLetzte(t *testing.T) (*fakeLetzte, *MsgvaultAPI) {
 	t.Cleanup(f.Close)
 	u, _ := url.Parse(f.URL)
 	port, _ := strconv.Atoi(u.Port())
-	return f, &MsgvaultAPI{Port: port, Key: func() string { return "mv-key" }}
+	return f, &MsgvaultAPI{Port: port, Key: festerKey("mv-key")}
 }
 
 // kanteBox is the open archive of eintragenBox with a group chat and a
@@ -60,12 +60,12 @@ func kanteBox(t *testing.T) (*webTest, *umfeldTest, *fakeHomes, Innen, *fakeLetz
 		{ID: "72", Art: gespraechMail, Groesse: 2, Nachrichten: 3, Zuletzt: time.Date(2026, 10, 2, 8, 0, 0, 0, time.UTC), Wer: []string{"haushalt/a", "haushalt/b"}},
 		{ID: "73", Art: gespraechChat, Titel: "Verein", Groesse: 5, Nachrichten: 9, Zuletzt: time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC), Wer: []string{"haushalt/a", "haushalt/c"}},
 	}
-	if err := jsonImTresor(innen.umfeldTabelle(), tab); err != nil {
+	if err := innen.jsonSchreiben(fachNetz, tab); err != nil {
 		t.Fatal(err)
 	}
 	gs := map[string]gelesen{"5001": {Am: time.Date(2026, 5, 3, 9, 0, 0, 0, time.UTC), Von: "p-ben", An: []string{"p-anna"}, Zitat: "Hallo Schatz",
 		Hinweise: []modellHinweis{{X: "p-ben", Y: "p-anna", Art: "partner", Sicher: 0.9}}}}
-	if err := jsonImTresor(innen.umfeldHinweise(), gs); err != nil {
+	if err := innen.jsonSchreiben(fachHinweise, gs); err != nil {
 		t.Fatal(err)
 	}
 	letzte, api := neuesLetzte(t)

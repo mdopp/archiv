@@ -98,12 +98,12 @@ func (w *Web) letzteDatei(rw http.ResponseWriter, r *http.Request, quelle, rel s
 		jsonFehler(rw, http.StatusNotFound, "Gibt es nicht.")
 		return
 	}
-	innen, offen := w.Tresor.Innen()
+	innen, offen := w.P.Importe.offen()
 	if !offen {
 		jsonFehler(rw, http.StatusLocked, "Das Archiv ist abgeschlossen. Öffne es, dann lässt sich die Sicherung zurückholen.")
 		return
 	}
-	id, err := identitaetLesen(innen.Identitaet())
+	id, err := identitaetAus(innen)
 	if err != nil {
 		log.Printf("archiv: letzte %s: %v", quelle, err)
 		jsonFehler(rw, http.StatusServiceUnavailable, saysStartet)

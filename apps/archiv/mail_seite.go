@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // The mail card on the sources' page: the person's mailboxes, each with
@@ -95,7 +97,7 @@ func (w *Web) imap(rw http.ResponseWriter, r *http.Request) {
 		if w.Mailholer != nil {
 			w.Mailholer.KontoGewechselt(z.ID)
 		}
-		if innen, auf := w.Tresor.Innen(); auf && w.Aufraeumer != nil {
+		if innen, auf := w.P.Importe.offen(); auf && w.Aufraeumer != nil {
 			w.Aufraeumer.Vergessen(innen, z.ID) // another mailbox: what the person allowed for the old one does not carry over
 		}
 	}
@@ -142,7 +144,7 @@ func (w *Web) imapWeg(rw http.ResponseWriter, r *http.Request) {
 	if w.Mailholer != nil {
 		w.Mailholer.KontoWeg(id)
 	}
-	if innen, auf := w.Tresor.Innen(); auf && w.Aufraeumer != nil {
+	if innen, auf := w.P.Importe.offen(); auf && w.Aufraeumer != nil {
 		w.Aufraeumer.Vergessen(innen, id)
 	}
 	if w.Geaendert != nil {
@@ -153,7 +155,7 @@ func (w *Web) imapWeg(rw http.ResponseWriter, r *http.Request) {
 
 // kontoDa: the open vault and the person's mailbox of this id.
 func (w *Web) kontoDa(rw http.ResponseWriter, r *http.Request) (Innen, string, bool) {
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Importe.offen()
 	if !auf || w.Aufraeumer == nil {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return Innen{}, "", false
@@ -232,7 +234,7 @@ func (w *Web) aufraeumenLos(rw http.ResponseWriter, r *http.Request) {
 // document that came by mail: that mail in msgvault's own page.
 func (w *Web) mailZeigen(rw http.ResponseWriter, r *http.Request) {
 	id := messageID(r.URL.Query().Get("id"))
-	if w.Tresor.APIKey() == "" || w.Personen == nil || w.Personen.API == nil {
+	if !w.Tresor.Stand().Bereit || !w.P.Nachrichten.darf(tresor.Nachrichten, tresor.Lesen) || w.Personen == nil || w.Personen.API == nil {
 		http.Redirect(rw, r, "/tresor?m=mail-zu", http.StatusSeeOther)
 		return
 	}
@@ -274,7 +276,7 @@ func (w *Web) mailKarte(b *strings.Builder, offen bool, qa quelleAuf) {
 	if len(konten) == 0 {
 		b.WriteString(`<p class=zugang><span class=fehlt>Kein Postfach eingetragen</span></p>`)
 	}
-	innen, auf := w.Tresor.Innen()
+	innen, auf := w.P.Importe.offen()
 	var einst map[string]Aufraeumen
 	if offen && auf && w.Aufraeumer != nil {
 		einst = w.Aufraeumer.Einstellungen(innen)

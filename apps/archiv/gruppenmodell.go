@@ -7,8 +7,6 @@ import (
 	"io"
 	"log"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -41,11 +39,9 @@ type gruppenLesung struct {
 	Am        time.Time `json:"am"`
 }
 
-func (i Innen) umfeldGruppenModell() string { return filepath.Join(i.Umfeld(), "gruppen-modell.json") }
-
 func gruppenModellLaden(innen Innen) map[string]gruppenLesung {
 	out := map[string]gruppenLesung{}
-	if b, err := os.ReadFile(innen.umfeldGruppenModell()); err == nil {
+	if b, err := innen.lesen(fachGruppenModell); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -249,7 +245,7 @@ func (u *Umfeld) gruppenRunde(ctx context.Context, innen Innen, n *Netz) {
 			l := gruppenAntwortLesen(antwort)
 			l.Am = u.now()
 			gm[g.ID] = l
-			if err := jsonImTresor(innen.umfeldGruppenModell(), gm); err != nil {
+			if err := innen.jsonSchreiben(fachGruppenModell, gm); err != nil {
 				delete(gm, g.ID)
 				grund = "speichern: " + err.Error()
 				break

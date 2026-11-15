@@ -102,7 +102,7 @@ type relaisTest struct {
 }
 
 func neuesRelais(t *testing.T) *relaisTest {
-	rt := &relaisTest{rad: neuesRadicale(t), innen: Innen{Wurzel: t.TempDir()}}
+	rt := &relaisTest{rad: neuesRadicale(t), innen: testInnen(t)}
 	os.MkdirAll(rt.innen.Home(), 0o700)
 	os.WriteFile(rt.innen.Home()+"/config.toml", []byte(msgvaultConfig(8090)), 0o600)
 	rt.r = &Relais{Person: "anna", Port: 18443, SystemCAs: "/nicht/da",
@@ -114,7 +114,7 @@ func neuesRelais(t *testing.T) *relaisTest {
 	k := neueKontaktablage()
 	k.Einmischen([]QuellKarte{{Href: "ben.vcf", Daten: vcard("u-ben", "Ben", "+4915199999999")}, {Href: "carla.vcf", Daten: vcard("u-carla", "Carla", "+4917011111111")}}, t0)
 	k.Einmischen([]QuellKarte{{Href: "carla.vcf", Daten: vcard("u-carla", "Carla", "+4917011111111")}}, t0.Add(time.Hour)) // Ben deleted on the phone
-	if err := k.speichern(kontakteDatei(rt.innen)); err != nil {
+	if err := k.speichern(rt.innen); err != nil {
 		t.Fatal(err)
 	}
 	return rt

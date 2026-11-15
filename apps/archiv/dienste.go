@@ -214,3 +214,22 @@ func (m *Msgvault) Stop(ctx context.Context) error {
 		return errors.New("msgvault endete erst nach SIGKILL")
 	}
 }
+
+// msgvaultConfig: loopback only, the vault's key from a file beside it,
+// no daemon of its own (the supervisor runs serve), telemetry off, and
+// the supervisor on 127.0.0.1 trusted for the forwarded scheme and host.
+// The vault writes it into msgvault's home on the first opening.
+func msgvaultConfig(port int) string {
+	return fmt.Sprintf(`# Written by archiv when the vault was first opened (laib ADR 0029).
+[server]
+bind_addr = "127.0.0.1"
+api_port = %d
+api_key_file = "api-key"
+daemon_auto_start = false
+daemon_auto_restart = "never"
+trusted_proxies = ["127.0.0.1"]
+
+[telemetry]
+enabled = false
+`, port)
+}

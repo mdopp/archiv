@@ -377,7 +377,7 @@ func mitAnfrage(pfad string, v url.Values) string {
 // umfeldAntwort takes a chip (x, y, art), an answer's Vergessen or
 // Eintragen (paar, tu), and goes back where it came from with the toast.
 func (w *Web) umfeldAntwort(rw http.ResponseWriter, r *http.Request) {
-	innen, ok := w.Tresor.Innen()
+	innen, ok := w.P.Stammbaum.offen()
 	if !ok {
 		w.antwort(rw, r, http.StatusLocked, "", saysZu)
 		return

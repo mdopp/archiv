@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"filippo.io/age"
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // The Postbote brings into msgvault, while the vault is open, what waits:
@@ -172,7 +173,7 @@ func (p *Postbote) Runde(ctx context.Context, innen Innen) {
 	if len(pakete) == 0 && len(sms) == 0 && len(sozial) == 0 {
 		return
 	}
-	id, err := identitaetLesen(innen.Identitaet())
+	id, err := identitaetAus(innen)
 	if err != nil {
 		log.Printf("archiv: der private Schlüssel fehlt im Tresor: %v", err)
 		return
@@ -234,14 +235,14 @@ func waMarke(d Datei) string {
 
 // whatsappWartet: a key is there and a database not yet imported.
 func (p *Postbote) whatsappWartet(innen Innen) bool {
-	if _, err := os.Stat(innen.WhatsAppSchluessel()); err != nil {
+	if _, ok := innen.seit(fachWhatsAppSchluessel); !ok {
 		return false
 	}
 	d, ok := p.whatsappNeueste()
 	if !ok {
 		return false
 	}
-	alt, _ := os.ReadFile(innen.WhatsAppStand())
+	alt, _ := innen.lesen(fachWhatsAppStand)
 	return strings.TrimSpace(string(alt)) != waMarke(d)
 }
 
@@ -290,7 +291,11 @@ func (p *Postbote) whatsappZustellen(ctx context.Context, innen Innen, d Datei, 
 		}
 		return grund
 	}
-	roh, err := os.ReadFile(innen.WhatsAppSchluessel())
+	o, err := innen.importOrdner()
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	roh, err := innen.lesen(fachWhatsAppSchluessel)
 	if err != nil {
 		return fehler(saysWAOhneSchluessel, err)
 	}
@@ -301,7 +306,7 @@ func (p *Postbote) whatsappZustellen(ctx context.Context, innen Innen, d Datei, 
 	if err != nil {
 		return fehler(fmt.Sprintf(saysAgeUnlesbar, "WhatsApp-Sicherung", d.Rel), err)
 	}
-	db := filepath.Join(innen.Arbeit(), "whatsapp-"+zufall()+".db")
+	db := filepath.Join(o.arbeit, "whatsapp-"+zufall()+".db")
 	defer os.Remove(db)
 	a, err := p.Run.Run(ctx, wadecrypt(key, crypt15, db))
 	if ctx.Err() != nil {
@@ -313,7 +318,7 @@ func (p *Postbote) whatsappZustellen(ctx context.Context, innen Innen, d Datei, 
 	if err != nil {
 		return fehler(saysWASchluesselFalsch, err)
 	}
-	imp := msgvaultImportWhatsApp(p.Msgvault, innen.Home(), db, telefon)
+	imp := msgvaultImportWhatsApp(p.Msgvault, o.home, db, telefon)
 	imp.Unterwegs = func(zeile string) {
 		if m := waUnterwegs.FindStringSubmatch(zeile); m != nil {
 			fertig, _ := strconv.Atoi(m[1])
@@ -335,7 +340,7 @@ func (p *Postbote) whatsappZustellen(ctx context.Context, innen Innen, d Datei, 
 	if m := waImportiert.FindStringSubmatch(a.Text); m != nil {
 		z.WhatsApp, _ = strconv.Atoi(m[2])
 	}
-	if err := os.WriteFile(innen.WhatsAppStand(), []byte(waMarke(d)+"\n"), 0o600); err != nil {
+	if err := innen.schreiben(fachWhatsAppStand, []byte(waMarke(d)+"\n")); err != nil {
 		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
 	}
 	log.Printf("archiv: WhatsApp %s eingelesen: %d neue Nachrichten", d.Rel, z.WhatsApp)
@@ -357,7 +362,7 @@ func (p *Postbote) signal(ctx context.Context, innen Innen, backups []Datei, tel
 	if falsch {
 		return
 	}
-	pass, err := os.ReadFile(innen.SignalPassphrase())
+	pass, err := innen.lesen(fachSignalPassphrase)
 	if err != nil {
 		return
 	}
@@ -416,13 +421,17 @@ func (p *Postbote) SignalZustellen(ctx context.Context, innen Innen, d Datei, pa
 		}
 		return grund
 	}
+	o, err := innen.importOrdner()
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
 
 	backup, weg, err := ausAge(innen, d, "signal-backup")
 	defer weg()
 	if err != nil {
 		return fehler(fmt.Sprintf(saysAgeUnlesbar, "Signal-Sicherung", d.Rel), err)
 	}
-	dir := filepath.Join(innen.Arbeit(), "signal-"+zufall())
+	dir := filepath.Join(o.arbeit, "signal-"+zufall())
 	defer os.RemoveAll(dir)
 	if err := os.Mkdir(dir, 0o700); err != nil { // existing and empty: see signalEntpacken
 		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
@@ -451,7 +460,7 @@ func (p *Postbote) SignalZustellen(ctx context.Context, innen Innen, d Datei, pa
 		return fehler(fmt.Sprintf(saysSignalUnlesbar, d.Rel), err)
 	}
 
-	imp := msgvaultImportSignal(p.Msgvault, innen.Home(), dir, telefon)
+	imp := msgvaultImportSignal(p.Msgvault, o.home, dir, telefon)
 	imp.Unterwegs = func(zeile string) {
 		if m := waUnterwegs.FindStringSubmatch(zeile); m != nil {
 			fertig, _ := strconv.Atoi(m[1])
@@ -476,7 +485,7 @@ func (p *Postbote) SignalZustellen(ctx context.Context, innen Innen, d Datei, pa
 	if m := waImportiert.FindStringSubmatch(a.Text); m != nil { // import-signal ends with the same summary as import-whatsapp
 		z.Signal, _ = strconv.Atoi(m[2])
 	}
-	grosseBehalten(dir, innen.GrosseAnhaenge())
+	grosseBehalten(dir, o.gross)
 	if err := letzteBehalten(p.Letzte, "signal", d, filepath.Base(d.Rel)); err != nil {
 		return fehler(saysLetzteFehler, err)
 	}
@@ -590,12 +599,16 @@ func (p *Postbote) SMSZustellen(ctx context.Context, innen Innen, id age.Identit
 		}
 		return grund
 	}
-	xml := filepath.Join(innen.Arbeit(), "sms-"+zufall()+".xml")
+	o, err := innen.importOrdner()
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, d.Rel), err)
+	}
+	xml := filepath.Join(o.arbeit, "sms-"+zufall()+".xml")
 	defer os.Remove(xml)
 	if err := ageAuspacken(d.Pfad, xml, id); err != nil {
 		return fehler(fmt.Sprintf(saysSMSKaputt, d.Rel), err)
 	}
-	a, err := p.Run.Run(ctx, msgvaultImportSMS(p.Msgvault, innen.Home(), xml, telefon))
+	a, err := p.Run.Run(ctx, msgvaultImportSMS(p.Msgvault, o.home, xml, telefon))
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -620,6 +633,37 @@ func (p *Postbote) SMSZustellen(ctx context.Context, innen Innen, id age.Identit
 	return nil
 }
 
+// importOrdner are the folders the import's processes work in: msgvault's
+// home, the work folder and the large attachments, handed out by the vault
+// for writing messages.
+type importOrdner struct{ home, arbeit, gross string }
+
+func (i Innen) importOrdner() (o importOrdner, err error) {
+	if o.home, err = i.ordner(tresor.Nachrichten, ordnerMsgvault); err != nil {
+		return o, err
+	}
+	if o.arbeit, err = i.ordner(tresor.Nachrichten, ordnerArbeit); err != nil {
+		return o, err
+	}
+	o.gross, err = i.ordner(tresor.Nachrichten, ordnerGross)
+	return o, err
+}
+
+// importNeu is a new folder in the work folder, with the folders unter
+// inside it, and the import's folders; on an error nothing is left.
+func (i Innen) importNeu(name string, unter ...string) (importOrdner, string, error) {
+	o, err := i.importOrdner()
+	if err != nil {
+		return o, "", err
+	}
+	d := filepath.Join(o.arbeit, name+"-"+zufall())
+	if err := os.MkdirAll(filepath.Join(append([]string{d}, unter...)...), 0o700); err != nil {
+		os.RemoveAll(d)
+		return o, "", err
+	}
+	return o, d, nil
+}
+
 // ausAge is the messenger's own file of d: d itself when Homes took it as
 // the phone wrote it (before archiv#64), else — it came age-encrypted from
 // the phone to this archive's key — its decryption into a new file in the
@@ -630,11 +674,15 @@ func ausAge(innen Innen, d Datei, name string) (pfad string, weg func(), err err
 	if !d.alsAge() {
 		return d.Pfad, func() {}, nil
 	}
-	id, err := identitaetLesen(innen.Identitaet())
+	o, err := innen.importOrdner()
 	if err != nil {
 		return "", func() {}, err
 	}
-	nach := filepath.Join(innen.Arbeit(), name+"-"+zufall())
+	id, err := identitaetAus(innen)
+	if err != nil {
+		return "", func() {}, err
+	}
+	nach := filepath.Join(o.arbeit, name+"-"+zufall())
 	if err := ageAuspacken(d.Pfad, nach, id); err != nil {
 		os.Remove(nach)
 		return "", func() {}, err
@@ -690,14 +738,13 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 		}
 		return grund
 	}
-
-	arbeit := filepath.Join(innen.Arbeit(), "paket-"+zufall())
+	o, arbeit, err := innen.importNeu("paket", "anhaenge")
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, name), err)
+	}
 	defer os.RemoveAll(arbeit)
 	xml := arbeit + ".xml"
 	defer os.Remove(xml)
-	if err := os.MkdirAll(filepath.Join(arbeit, "anhaenge"), 0o700); err != nil {
-		return fehler(fmt.Sprintf(saysUebernahme, name), err)
-	}
 
 	f, err := os.Open(filepath.Join(p.Post, name))
 	if err != nil {
@@ -755,7 +802,7 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 	for i := 0; err == nil && i < len(nachrichten); i++ {
 		err = x.Nachricht(nachrichten[i], func(a Anhang) (io.ReadCloser, string, error) {
 			pfad := filepath.Join(arbeit, "anhaenge", filepath.Base(a.Datei))
-			return anhangOderHinweis(pfad, a, innen.GrosseAnhaenge(), strings.TrimSuffix(name, ".age"))
+			return anhangOderHinweis(pfad, a, o.gross, strings.TrimSuffix(name, ".age"))
 		})
 	}
 	if err == nil {
@@ -768,7 +815,7 @@ func (p *Postbote) Zustellen(ctx context.Context, innen Innen, id age.Identity, 
 		return fehler(fmt.Sprintf(saysUebernahme, name), err)
 	}
 
-	a, err := p.Run.Run(ctx, msgvaultImportSMS(p.Msgvault, innen.Home(), xml, telefon))
+	a, err := p.Run.Run(ctx, msgvaultImportSMS(p.Msgvault, o.home, xml, telefon))
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -855,7 +902,11 @@ func (p *Postbote) mailZustellen(ctx context.Context, innen Innen, name string, 
 	if _, err := os.Stat(maildir); err != nil {
 		return fehler(fmt.Sprintf(saysPaketKaputt, name), errors.New("ein Mail-Paket ohne Mails"))
 	}
-	a, err := p.Run.Run(ctx, msgvaultImportMaildir(p.Msgvault, innen.Home(), maildir, m.Konto))
+	o, err := innen.importOrdner()
+	if err != nil {
+		return fehler(fmt.Sprintf(saysUebernahme, name), err)
+	}
+	a, err := p.Run.Run(ctx, msgvaultImportMaildir(p.Msgvault, o.home, maildir, m.Konto))
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

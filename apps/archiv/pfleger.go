@@ -6,13 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
+
+	"github.com/mdopp/archiv/apps/archiv/tresor"
 )
 
 // The Datenpfleger (archiv#58, owner 2026-11-12): while the vault is
@@ -126,19 +126,16 @@ func kontaktBefunde(k *Kontaktablage) (out []Befund) {
 
 // kalenderAlle are the vault's calendars, by name.
 func kalenderAlle(innen Innen) (out []*Kalenderablage, err error) {
-	eintraege, err := os.ReadDir(innen.Kalender())
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
+	eintraege, err := innen.namen(tresor.Kontakte, ordnerKalender)
 	if err != nil {
 		return nil, err
 	}
 	var fehler []string
 	for _, e := range eintraege {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") || strings.HasPrefix(e.Name(), ".") {
+		if !strings.HasSuffix(e, ".json") {
 			continue
 		}
-		k, err := kalenderLaden(filepath.Join(innen.Kalender(), e.Name()))
+		k, err := kalenderLaden(innen, kalenderFach(e))
 		if err != nil {
 			fehler = append(fehler, err.Error())
 			continue
@@ -259,11 +256,9 @@ func (n *Netz) GeburtstageOhneBuch() (out []GebBestaetigt) {
 
 // --- „Passt so“, and all findings together
 
-func (i Innen) pflegePasst() string { return filepath.Join(i.Wurzel, "pflege-passt.json") }
-
 func passtLaden(innen Innen) map[string]time.Time {
 	m := map[string]time.Time{}
-	if b, err := os.ReadFile(innen.pflegePasst()); err == nil {
+	if b, err := innen.lesen(fachPflegePasst); err == nil {
 		json.Unmarshal(b, &m)
 	}
 	return m
@@ -283,7 +278,7 @@ func PasstSo(innen Innen, b Befund, jetzt time.Time) error {
 		m[passtTeil(b.ID, t)] = jetzt
 	}
 	roh, _ := json.Marshal(m)
-	return schreibenAtomar(innen.pflegePasst(), roh, 0o600)
+	return innen.schreiben(fachPflegePasst, roh)
 }
 
 // ohnePasst drops what the person left as it is; an aggregate keeps only
@@ -320,7 +315,7 @@ func ohnePasst(bs []Befund, passt map[string]time.Time) (out []Befund) {
 // goes through them: Kontakte, Kalender, Fotos.
 func Befunde(innen Innen, n *Netz) []Befund {
 	var bs []Befund
-	if k, err := kontakteLaden(kontakteDatei(innen)); err == nil {
+	if k, err := kontakteLaden(innen); err == nil {
 		bs = append(bs, kontaktBefunde(k)...)
 	}
 	bs = append(bs, gebBefunde(n)...)

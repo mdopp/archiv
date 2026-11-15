@@ -206,14 +206,14 @@ func netzBox(t *testing.T) *umfeldTest {
 		"c.vcf": karteMit("c", "Carla Wolf", "ORG:Werk AG;Einkauf\r\n"),
 		"f.vcf": karteMit("f", "Werk AG", "ORG:Werk AG\r\nCATEGORIES:Firma\r\n"),
 	}
-	innen := Innen{t.TempDir()}
+	innen := testInnen(t)
 	store := neueKontaktablage()
 	jetzt := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
 	store.Einmischen([]QuellKarte{
 		{Href: "k1.vcf", Daten: karteMit("k1", "Anna Berg", "X-ANDROID-CUSTOM:vnd.android.cursor.item/relation;Fritz Kurz;6;;;;;;;;;;;;;\r\nRELATED;TYPE=sibling:urn:uuid:k2\r\n")},
 		{Href: "k2.vcf", Daten: karteMit("urn:uuid:k2", "Fritz Kurz", "")},
 	}, jetzt)
-	if err := store.speichern(kontakteDatei(innen)); err != nil {
+	if err := store.speichern(innen); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(innen.ImmichSchluessel(), []byte(im.key), 0o600); err != nil {
@@ -544,7 +544,7 @@ func TestUmfeldSeite(t *testing.T) {
 	wt.oeffnen(t)
 	innen, _ := wt.tt.Innen()
 	for _, d := range []string{"umfeld", "kontakte"} {
-		os.MkdirAll(filepath.Join(innen.Wurzel, d), 0o700)
+		os.MkdirAll(filepath.Join(innen.wurzel(), d), 0o700)
 	}
 	for _, p := range [][2]string{{ut.innen.umfeldTabelle(), innen.umfeldTabelle()}, {kontakteDatei(ut.innen), kontakteDatei(innen)}, {ut.innen.ImmichSchluessel(), innen.ImmichSchluessel()}} {
 		b, _ := os.ReadFile(p[0])

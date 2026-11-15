@@ -131,7 +131,7 @@ func neuerAufraeumer(t *testing.T, ordner []PostOrdner, mails map[string][]Mail)
 	sch := Schluessel{Dir: filepath.Join(t.TempDir(), "schluessel")}
 	z := imapZugang{ID: "k1", Host: "imap.example.org", Benutzer: "anna@example.org", Passwort: "pw"}
 	imapKontenSpeichern(sch, []imapZugang{z})
-	at := &aufrTest{innen: Innen{Wurzel: t.TempDir()}, pf: &fakeLoesch{fakePostfach: &fakePostfach{ordner: ordner, mails: mails}}, beleg: &fakeBeleg{hat: map[string][]string{}}, z: z}
+	at := &aufrTest{innen: testInnen(t), pf: &fakeLoesch{fakePostfach: &fakePostfach{ordner: ordner, mails: mails}}, beleg: &fakeBeleg{hat: map[string][]string{}}, z: z}
 	at.a = &Aufraeumer{Schluessel: sch, Beleg: at.beleg, Now: func() time.Time { return heute }, Buendel: 2,
 		Verbinden: func(context.Context, imapZugang) (Postfach, error) { return at.pf, nil }}
 	// what msgvault holds: every mail with a Message-ID, but „nicht-importiert“
@@ -288,7 +288,7 @@ func TestNothingIsDeletedWhenTheArchiveCannotProveIt(t *testing.T) {
 		t.Fatalf("%+v", l)
 	}
 	// the vault closed: the real msgvault client has no key and answers errNichtBereit
-	at.a.Beleg = &MsgvaultAPI{Key: func() string { return "" }}
+	at.a.Beleg = &MsgvaultAPI{Key: festerKey("")}
 	at.a.Runde(context.Background(), at.innen)
 	if len(at.pf.geloescht) != 0 {
 		t.Fatal("deleted with the vault closed")
@@ -304,7 +304,7 @@ func TestNothingIsDeletedWhenTheArchiveCannotProveIt(t *testing.T) {
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
 	port, _ := strconv.Atoi(u.Port())
-	at.a.Beleg = &MsgvaultAPI{Port: port, Key: func() string { return "k" }}
+	at.a.Beleg = &MsgvaultAPI{Port: port, Key: festerKey("k")}
 	at.a.Runde(context.Background(), at.innen)
 	if len(at.pf.geloescht) != 0 {
 		t.Fatal("deleted while msgvault builds")
@@ -334,7 +334,7 @@ func TestMsgvaultIsAskedByMessageIDForUndeletedMessages(t *testing.T) {
 	defer srv.Close()
 	u, _ := url.Parse(srv.URL)
 	port, _ := strconv.Atoi(u.Port())
-	m := &MsgvaultAPI{Port: port, Key: func() string { return "k" }}
+	m := &MsgvaultAPI{Port: port, Key: festerKey("k")}
 	got, err := m.MailsImArchiv(context.Background(), []string{"a@x", "b@x"})
 	if err != nil || len(got["a@x"]) != 2 || got["b@x"][0] != "maildir-3" {
 		t.Fatalf("%v %v", got, err)
@@ -368,7 +368,7 @@ func TestDeletingOverIMAPTakesExactlyTheProvenMessages(t *testing.T) {
 		"stern@example.org": {inhaltID(mailText("stern", "Stern"))},
 		"neu@example.org":   {inhaltID(mailText("neu", "Neu"))},
 	}}
-	innen := Innen{Wurzel: t.TempDir()}
+	innen := testInnen(t)
 	a := &Aufraeumer{Schluessel: sch, Beleg: beleg, Now: func() time.Time { return heute }}
 	a.Einstellen(innen, "k1", true, 24)
 	a.Runde(context.Background(), innen)

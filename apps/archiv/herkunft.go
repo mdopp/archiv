@@ -11,8 +11,6 @@ import (
 	"log"
 	"maps"
 	"net/http"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -69,14 +67,9 @@ type herkunftAntwort struct {
 	Am   time.Time `json:"am"`
 }
 
-func (i Innen) umfeldHerkunft() string { return filepath.Join(i.Umfeld(), "herkunft.json") }
-func (i Innen) umfeldHerkunftAntworten() string {
-	return filepath.Join(i.Umfeld(), "herkunft-antworten.json")
-}
-
 func herkunftLaden(innen Innen) map[string]herkunftLesung {
 	out := map[string]herkunftLesung{}
-	if b, err := os.ReadFile(innen.umfeldHerkunft()); err == nil {
+	if b, err := innen.lesen(fachHerkunft); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -84,7 +77,7 @@ func herkunftLaden(innen Innen) map[string]herkunftLesung {
 
 func herkunftAntwortenLaden(innen Innen) map[string]herkunftAntwort {
 	out := map[string]herkunftAntwort{}
-	if b, err := os.ReadFile(innen.umfeldHerkunftAntworten()); err == nil {
+	if b, err := innen.lesen(fachHerkunftAntworten); err == nil {
 		json.Unmarshal(b, &out)
 	}
 	return out
@@ -363,7 +356,7 @@ func (u *Umfeld) herkunftLesen(ctx context.Context, innen Innen, n *Netz, k herk
 	}
 	l.Am, l.Wer, l.Gesendet = u.now(), k.wer, k.Am
 	ls[k.ID] = l
-	if err := jsonImTresor(innen.umfeldHerkunft(), ls); err != nil {
+	if err := innen.jsonSchreiben(fachHerkunft, ls); err != nil {
 		delete(ls, k.ID)
 		return "speichern: " + err.Error()
 	}
@@ -522,7 +515,7 @@ func (u *Umfeld) HerkunftSagen(innen Innen, wer, feld, wert string, ja, vergesse
 	if err != nil {
 		return err
 	}
-	return jsonImTresor(innen.umfeldHerkunftAntworten(), alle)
+	return innen.jsonSchreiben(fachHerkunftAntworten, alle)
 }
 
 // herkunftWerkzeug is `archiv umfeld-hinweise -herkunft`: with sql the
