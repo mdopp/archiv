@@ -331,13 +331,25 @@ type pflegeZahl struct {
 	mu   sync.Mutex
 	am   time.Time
 	zahl int
+	erst string // the first finding's title, for Homes' „Als Nächstes“
 }
 
 func (p *pflegeZahl) zaehlen(innen Innen, n *Netz, jetzt time.Time, frisch bool) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if frisch || p.am.IsZero() || jetzt.Sub(p.am) >= pflegeFrisch || jetzt.Before(p.am) {
-		p.zahl, p.am = len(Befunde(innen, n)), jetzt
+		bs := Befunde(innen, n)
+		p.zahl, p.am, p.erst = len(bs), jetzt, ""
+		if len(bs) > 0 {
+			p.erst = bs[0].Titel
+		}
 	}
 	return p.zahl
+}
+
+// erster is the first finding's title of the last count.
+func (p *pflegeZahl) erster() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.erst
 }

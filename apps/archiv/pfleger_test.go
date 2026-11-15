@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -196,7 +195,7 @@ func TestPasstSoKommtNichtWieder(t *testing.T) {
 // the door.
 func TestAufraeumenSeite(t *testing.T) {
 	wt, ut, _, innen := eintragenBox(t)
-	wt.w.Aufgaben = &Aufgaben{Datei: filepath.Join(wt.data, "aufgaben.json")}
+	wt.w.PublicURL = "https://archiv.box.test"
 	k, _ := kontakteLaden(innen)
 	k.Einmischen([]QuellKarte{{Href: "leer.vcf", Daten: karteMit("leer", "", "TEL:0171 1111111\r\n")}}, *ut.jetzt)
 	k.speichern(innen)
@@ -218,9 +217,8 @@ func TestAufraeumenSeite(t *testing.T) {
 	if !strings.HasPrefix(ziel, pflegePfad) || !strings.Contains(seite, esc(saysPflegePasst)) || strings.Contains(seite, "0171 1111111") || !strings.Contains(seite, "1 von "+fmt.Sprint(len(alle)-1)) {
 		t.Fatalf("after Passt so (%s):\n%s", ziel, seite)
 	}
-	wt.w.aufgabenZaehlen(wt.tt.Stand())
-	if s := aufgabenHolen(t, wt); s.Aufraeumen != len(alle)-1 {
-		t.Fatalf("Homes' count: %+v, want %d", s, len(alle)-1)
+	if a := homesHolen(t, wt); homesZeile(a, "aufraeumen").Titel != anzahl(len(alle)-1, "Ding", "Dinge")+" zum Aufräumen im Archiv" {
+		t.Fatalf("Homes' row: %+v, want %d", a.Aufgaben, len(alle)-1)
 	}
 	// a finding gone meanwhile: said, and the next one shown
 	if _, seite := wt.folgen(t, wt.rufe("POST", pflegePfad+"/passt", anna, url.Values{"id": {"ohne-name:leer.vcf"}, "n": {"0"}})); !strings.Contains(seite, esc(saysPflegeWeg)) {

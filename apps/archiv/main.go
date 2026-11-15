@@ -115,8 +115,8 @@ func main() {
 	}
 	web := &Web{Puls: &Puls{}, Passkeys: &Passkeys{Datei: filepath.Join(schluessel.Dir, "passkeys.json")}, Person: person, Secret: os.Getenv("PROXY_SECRET"), PublicURL: os.Getenv("PUBLIC_URL"), HomesSecret: homesSecret(os.Getenv), HomesIntern: homesIntern(os.Getenv),
 		Tresor: vault, P: prog, Freigaben: &Freigabenwahl{Datei: filepath.Join(data, "freigaben.json")}, Briefkasten: bk, Mailholer: mh, Postbote: pb, Eingang: eingang, Protokoll: prot, Schluessel: schluessel,
-		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: apiNachrichten}, Umfeld: um, Aufraeumer: aufr,
-		Aufgaben: &Aufgaben{Datei: filepath.Join(data, "aufgaben.json")}}
+		Letzte: bk.Letzte, Archiv: archivProxy(port), Abgleich: ab, Personen: &Personenkarte{API: apiNachrichten}, Umfeld: um, Aufraeumer: aufr}
+	os.Remove(filepath.Join(data, "aufgaben.json")) // the counts kept outside the vault before homes#375: Homes keeps the tasks now
 
 	status := func() {
 		st := vault.Stand()
@@ -126,7 +126,6 @@ func main() {
 			}
 		}
 		statusSchreiben(statusDatei, statusBauen(web.lage(st)))
-		web.aufgabenZaehlen(st)
 		web.Puls.Senden()
 	}
 	vault.Geaendert, bk.Geaendert, mh.Geaendert, pb.Geaendert, web.Geaendert, ab.Geaendert, um.Geaendert = status, status, status, status, status, status, status

@@ -42,4 +42,10 @@
 # and the person's grant), freigaben.go (the grant at the opening, /tresor/freigaben): apps/ at
 # 26,894, the minimum; the owner's acceptance of ADR 0001 (2026-11-15, „setze es so um“) and
 # the request for archiv#68 are the yes.
-26895 apps
+# 26940: raised 2026-11-15 with the archive as Homes' first plugin (homes#375, homes ADR 0003, ADR 0001
+# point 4, +44 net): homes.go (contract 1 at /homes/v1, the tasks with the next question's text,
+# worked out by the program „Aufgaben für Homes“ with only its read areas), the program and a
+# program added later offered once (programme.go), the first finding's title (pfleger.go); the
+# counts kept outside the vault went (aufgaben.go, /intern/aufgaben): apps/ at 26,939, the
+# minimum; the owner's request (homes#375, ADR 0003 accepted 2026-11-15) is the yes, to be OK'd in the PR.
+26940 apps
