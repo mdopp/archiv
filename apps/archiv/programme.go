@@ -22,6 +22,7 @@ const (
 	progNachrichten  = "nachrichten"
 	progStammbaum    = "stammbaum"
 	progDatenpfleger = "datenpfleger"
+	progAufgaben     = "aufgaben"
 )
 
 const (
@@ -44,7 +45,15 @@ var programme = []programm{
 		tresor.Rechte{tresor.Beziehungen: ls, tresor.Kontakte: l, tresor.Nachrichten: l, tresor.Fotos: ls}},
 	{progDatenpfleger, "Datenpfleger", "findet, was in Kontakten, Kalendern und Fotos aufzuräumen ist, und merkt sich dein „Passt so“",
 		tresor.Rechte{tresor.Notizen: ls, tresor.Kontakte: l, tresor.Beziehungen: l}},
+	// archiv ADR 0001 §4, homes ADR 0003: reads only, writes nothing in the vault; what it hands over leaves it
+	{progAufgaben, "Aufgaben für Homes", "zeigt deine offenen Fragen und was aufzuräumen ist in Homes unter „Deine Aufgaben“, mit dem Text der nächsten Frage; dieser Text liegt dann bei Homes, außerhalb des Tresors",
+		tresor.Rechte{tresor.Beziehungen: l, tresor.Kontakte: l, tresor.Notizen: l}},
 }
+
+// nachgereicht are the programs that came after a person's choice was
+// first kept: one her kept choice does not name yet is offered with all
+// it asks for, as at a first opening; once she chose, her choice holds.
+var nachgereicht = []string{progAufgaben}
 
 // bereichNamen are the areas as the page says them.
 var bereichNamen = map[tresor.Bereich]string{
@@ -54,7 +63,7 @@ var bereichNamen = map[tresor.Bereich]string{
 
 // Programme are the programs' ways into the vault.
 type Programme struct {
-	Importe, Nachrichten, Stammbaum, Datenpfleger Innen
+	Importe, Nachrichten, Stammbaum, Datenpfleger, Aufgaben Innen
 }
 
 func neueProgramme(t *Tresor) Programme {
@@ -63,6 +72,7 @@ func neueProgramme(t *Tresor) Programme {
 		Nachrichten:  Innen{t.Programm(progNachrichten)},
 		Stammbaum:    Innen{t.Programm(progStammbaum)},
 		Datenpfleger: Innen{t.Programm(progDatenpfleger)},
+		Aufgaben:     Innen{t.Programm(progAufgaben)},
 	}
 }
 
@@ -122,6 +132,11 @@ func (fw *Freigabenwahl) Letzte() tresor.Freigaben {
 		log.Printf("archiv: %s: %v (alle Programme wie gewünscht)", fw.Datei, err)
 		return alleWuensche()
 	}
+	for _, id := range nachgereicht {
+		if _, gewaehlt := f[id]; !gewaehlt {
+			f[id] = alleWuensche()[id]
+		}
+	}
 	return beschnitten(f)
 }
 
@@ -161,9 +176,8 @@ func (fw *Freigabenwahl) ausFormular(r *http.Request) tresor.Freigaben {
 		}
 		f[p.id] = rr
 	}
-	f = beschnitten(f)
-	fw.merken(f)
-	return f
+	fw.merken(f) // a program granted nothing stays named: her „nein“ holds (nachgereicht)
+	return beschnitten(f)
 }
 
 // lauf is a program's background work while the vault is open.

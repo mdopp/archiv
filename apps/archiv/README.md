@@ -1407,23 +1407,33 @@ archive has no Paperless access; adding one is a new key and flow, the
 owner's card first), duplicate cards (Google's job, owner 2026-11-11),
 unnamed faces (Homes' „Wer ist das?“), subscribed calendars that stopped
 (Radicale does not say which calendar is a subscription). Nothing of a
-finding leaves the vault; Homes gets their number (`aufraeumen`, below).
+finding leaves the vault but what Homes gets: their number and the
+first one's title (below).
 
-## Counts for Homes
+## The archive in Homes: a plugin (homes ADR 0003, homes#375)
 
-What waits for the person reaches Homes as counts only (owner
-2026-11-12, homes#362), for „Deine Aufgaben“ and Start, shown to the
-archive's owner alone: `GET /intern/aufgaben` with `X-Archiv-Homes`
-answers `{offen, am, fragen, aufraeumen, schluessel_fehlt}` (`aufgaben.go`).
-`fragen` are the open questions and suggestions of the workplace
-(„Wie steht … zu …?“, „Kennen sich …?“, a group's name, what was
-recognised), `aufraeumen` what the Datenpfleger found (below),
-`schluessel_fehlt` a key the archive waits for (Signal, WhatsApp, Immich;
-the page is `/tresor/quellen`). They are counted only while the vault is
-open; the last count stays outside it in `/data/aufgaben.json` with its
-time `am`, and `offen: false` says it is not of now. No name, no kind,
-nothing of a question; not in `laib-status.json` (the admin's). laib
-`docs/DATA.md` describes the flow.
+The archive is Homes' first plugin (ADR 0001 point 4). Laib registers it
+with Homes (laib templates/homes, `instances:` → `HOMES_PLUGIN_ARCHIV`);
+Homes knows no archive. Homes reads contract 1 (homes
+`internal/plugin`, `testdata/vertrag-v1.json`) from each person's own
+instance: `GET /homes/v1?person=<person>` with `ARCHIV_HOMES_SECRET` in
+`X-Homes-Plugin-Key`, for this archive's person only (`homes.go`). The
+answer always has `name` „Dein Archiv“, `icon`, `link` (`/tresor`) and
+`zeile`; while the vault is open also `aufgaben`, worked out by the
+program „Aufgaben für Homes“ with its own key and only the areas it reads
+(Beziehungen, Kontakte, Notizen, read only; the person grants it at the
+opening like every program, and a choice kept from before it existed
+offers it once): a key the archive waits for (Signal, WhatsApp, Immich →
+`/tresor/quellen`), *Im Archiv: N Fragen offen* (the workplace's
+questions and suggestions → `/tresor`) and *N Dinge zum Aufräumen im
+Archiv* (the Datenpfleger → `/tresor/pflege`), each with the next one's
+text („Als Nächstes: Wie steht … zu …?“, the first finding's title). That
+text names people and leaves the vault for Homes' store: the owner chose
+this on 2026-11-15 (ADR 0001 point 4); laib `docs/DATA.md` records it.
+Closed, the answer has no `aufgaben`, Homes keeps the ones it got last,
+and the archive keeps nothing of them outside the vault (the counts file
+`/data/aufgaben.json` of before is removed at start). Not in
+`laib-status.json` (the admin's).
 
 
 ### When something fails

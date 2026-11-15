@@ -21,7 +21,6 @@ import (
 //	                                       (quelle signal or whatsapp), age-decrypted — only while
 //	                                       the vault is open (the private key is inside); with
 //	                                       Range, so a phone resumes a large backup or video
-//	GET /intern/aufgaben                   how many things wait for the person, counts only (aufgaben.go)
 //
 // Every backup comes from the phone age-encrypted to this archive (archiv#64),
 // and letzte/ keeps it so, so only the open archive can give it back for a
@@ -81,8 +80,6 @@ func (w *Web) intern(rw http.ResponseWriter, r *http.Request) {
 		}
 		rw.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		rw.Write(b)
-	case r.URL.Path == "/intern/aufgaben":
-		w.aufgaben(rw)
 	case strings.HasPrefix(r.URL.Path, "/intern/letzte/signal/"):
 		w.letzteDatei(rw, r, "signal", strings.TrimPrefix(r.URL.Path, "/intern/letzte/signal/"))
 	case strings.HasPrefix(r.URL.Path, "/intern/letzte/whatsapp/"):

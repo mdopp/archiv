@@ -124,7 +124,6 @@ type Web struct {
 	Abgleich    *Abgleich      // contacts and calendars from Radicale (nil: not set up)
 	Personen    *Personenkarte // „Ist das dieselbe Person?“
 	Umfeld      *Umfeld        // who stands close to whom (nil: not set up)
-	Aufgaben    *Aufgaben      // the counts Homes may know (aufgaben.go)
 	pflege      pflegeZahl     // the Datenpfleger's count (pfleger.go)
 	Now         func() time.Time
 }
@@ -175,6 +174,10 @@ func (w *Web) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	}
 	if strings.HasPrefix(r.URL.Path, "/intern/") {
 		w.intern(rw, r)
+		return
+	}
+	if r.URL.Path == homesVertragPfad { // Homes' plugin contract, with Homes' key (homes.go)
+		w.homesVertrag(rw, r)
 		return
 	}
 	switch w.sitzung(r) {
